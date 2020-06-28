@@ -39,10 +39,10 @@ class Tracer {
   }
   move() {
     let z = 1;
-    let xDistance = random((100 / lines.length)/2) 
-    let yDistance = random((100 / lines.length)/2)
-    // let xDistance = random(25);
-    // let yDistance = random(35);
+    // let xDistance = random((100 / lines.length)/2) 
+    // let yDistance = random((100 / lines.length)/2)
+    let xDistance = random(10);
+    let yDistance = random(20);
     const roll = floor(random(1,6));
     if (roll === 1) { // ++ Right-Down
       this.x = this.x + xDistance * 2
