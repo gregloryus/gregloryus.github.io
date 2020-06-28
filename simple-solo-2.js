@@ -63,9 +63,6 @@ class Tracer {
     }
     if (roll === 11) {
       const reroll = random(100)
-      if (reroll > 99) { // delete these lines if snafu
-         lines.pop(this)
-      }
       if (reroll < 1) {
         const newTracer = new Tracer(this.y - random(-4, 4), this.x + random(-4,4);
         lines.push(newTracer)
