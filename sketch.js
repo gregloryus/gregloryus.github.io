@@ -5,7 +5,7 @@ let y;
 let lines = [];
 
 function setup() {
-  createCanvas(1800, 950);
+  createCanvas(500, 500);
   background(0);
   let line1 = new Tracer();
   lines.push(line1);
@@ -19,7 +19,7 @@ function draw() {
   let brightness = 100;
   let c = color(hue, saturation, brightness);
   const r = floor(random(4));
-  let strokeW = (600 / lines.length)
+  let strokeW = (300 / lines.length)
   stroke(c);
   strokeWeight(strokeW);
 
@@ -39,8 +39,8 @@ class Tracer {
   }
   move() {
     let z = 1;
-    let xDistance = random((600 / lines.length)/2) 
-    let yDistance = random((600 / lines.length)/2)
+    let xDistance = random((300 / lines.length)/2) 
+    let yDistance = random((300 / lines.length)/2)
     // let xDistance = random(25);
     // let yDistance = random(35);
     const roll = floor(random(1,6));
@@ -65,10 +65,10 @@ class Tracer {
       if (reroll < 1) {
         const newTracer = new Tracer(this.y - random(25), this.x);
         lines.push(newTracer)
-        let strokeW = (600 / lines.length)
+        let strokeW = (300 / lines.length)
         console.log("lines: " + lines.length)
         console.log("stroke: " + strokeW)
-        if (lines.length > 750) {
+        if (lines.length > 500) {
           lines = [];
           lines.push(newTracer)
         }
