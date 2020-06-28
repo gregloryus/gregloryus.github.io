@@ -44,24 +44,24 @@ class Tracer {
     // let yDistance = random((100 / lines.length)/2)
     let xDistance = 1
     let yDistance = 1
-    const roll = floor(random(1,6));
-    if (roll === 1) { // ++ Right-Down
-      this.x = this.x + xDistance * 2
+    const roll = floor(random(1,12));
+    if (roll === 1 || roll === 2) { // ++ Right-Down
+      this.x = this.x + xDistance
       this.y = this.y + yDistance
     }
-    if (roll === 2) { // -- Left-Down
-      this.x = this.x - xDistance * 2
-      this.y = this.y - yDistance * 2
+    if (roll === 3 || roll === 4 || roll == 5) { // -- Left-Up
+      this.x = this.x - xDistance 
+      this.y = this.y - yDistance
     }
-    if (roll === 3) { // +- Right-Down
-      this.x = this.x + xDistance * 2
-      this.y = this.y - yDistance * 2
+    if (roll === 6 || roll === 7 || roll === 8) { // +- Right-Up
+      this.x = this.x + xDistance 
+      this.y = this.y - yDistance
     }
-    if (roll === 4) { // -+ Left-Down
-      this.x = this.x - xDistance * 2
+    if (roll === 9 || roll === 10) { // -+ Left-Down
+      this.x = this.x - xDistance 
       this.y = this.y + yDistance
     }
-    if (roll === 5) {
+    if (roll === 11) {
       const reroll = random(100)
       if (reroll < 1) {
         const newTracer = new Tracer(this.y, this.x);
