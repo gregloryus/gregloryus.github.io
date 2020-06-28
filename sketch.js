@@ -16,11 +16,11 @@ function setup() {
 function draw() {
   colorMode(HSB, 100);
   let hue = ((frameCount) % 100);
-  let saturation = 5 + lines.length
+  let saturation = lines.length
   let brightness = 100;
   let c = color(hue, saturation, brightness);
   const r = floor(random(4));
-  let strokeW = ((vw/3)/ lines.length)
+  let strokeW = ((vw/2)/ lines.length)
   stroke(c);
   strokeWeight(strokeW);
 
@@ -66,7 +66,7 @@ class Tracer {
       if (reroll < 1) {
         const newTracer = new Tracer(this.y - random(25), this.x);
         lines.push(newTracer)
-        let strokeW = ((vw/3)/ lines.length)
+        let strokeW = ((vw/2)/ lines.length)
         console.log("lines: " + lines.length)
         console.log("stroke: " + strokeW)
         if (lines.length > 500) {
