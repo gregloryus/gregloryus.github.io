@@ -22,7 +22,7 @@ function draw() {
   const r = floor(random(4));
   let strokeW = 1
   stroke(c);
-  strokeWeight(random(8));
+  strokeWeight(1);
 
   frameRate()
 
@@ -64,7 +64,7 @@ class Tracer {
     if (roll === 11) {
       const reroll = random(100)
       if (reroll < 1) {
-        const newTracer = new Tracer(this.y - random(-4, 4), this.x + random(-4,4);
+        const newTracer = new Tracer(this.y + random(3), this.x + random(3));
         lines.push(newTracer)
         let strokeW = 1
         console.log("lines: " + lines.length)
