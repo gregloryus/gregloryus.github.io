@@ -34,7 +34,7 @@ function draw() {
 }
 
 class Tracer {
-  constructor(y = 0, x = width/2) {
+  constructor(y = height, x = width/2) {
     this.x = x
     this.y = y
   }
@@ -71,6 +71,7 @@ class Tracer {
         console.log("stroke: " + strokeW)
         if (lines.length > 1000) {
           lines = [];
+          background(0);
           lines.push(newTracer)
         }
       }
