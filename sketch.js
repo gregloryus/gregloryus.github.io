@@ -1,11 +1,13 @@
 let x;
 let y;
 
+const vw = Math.max(document.documentElement.clientWidth || 0, window.innerWidth || 0);
+const vh = Math.max(document.documentElement.clientHeight || 0, window.innerHeight || 0);
 
 let lines = [];
 
 function setup() {
-  createCanvas(300, 500);
+  createCanvas(vw, vh);
   background(0);
   let line1 = new Tracer();
   lines.push(line1);
@@ -41,8 +43,8 @@ class Tracer {
     let z = 1;
     // let xDistance = random((100 / lines.length)/2) 
     // let yDistance = random((100 / lines.length)/2)
-    let xDistance = random(10);
-    let yDistance = random(20);
+    let xDistance = 3
+    let yDistance = 5
     const roll = floor(random(1,6));
     if (roll === 1) { // ++ Right-Down
       this.x = this.x + xDistance * 2
