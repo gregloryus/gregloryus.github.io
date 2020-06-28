@@ -39,7 +39,7 @@ class Tracer {
     this.y = y
   }
   move() {
-    let z = 3;
+    let z = 5;
     // let xDistance = random((100 / lines.length)/2) 
     // let yDistance = random((100 / lines.length)/2)
     let xDistance = z
@@ -64,7 +64,7 @@ class Tracer {
     if (roll === 11) {
       const reroll = random(100)
       if (reroll < 1) {
-        const newTracer = new Tracer(this.y, this.x);
+        const newTracer = new Tracer(this.y + 1, this.x + 1);
         lines.push(newTracer)
         let strokeW = 1
         console.log("lines: " + lines.length)
