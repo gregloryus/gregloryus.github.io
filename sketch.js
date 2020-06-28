@@ -11,7 +11,6 @@ function setup() {
   background(0);
   let line1 = new Tracer();
   lines.push(line1);
-
 }
 
 function draw() {
@@ -21,7 +20,7 @@ function draw() {
   let brightness = 100;
   let c = color(hue, saturation, brightness);
   const r = floor(random(4));
-  let strokeW = (100 / lines.length)
+  let strokeW = ((vw/3)/ lines.length)
   stroke(c);
   strokeWeight(strokeW);
 
@@ -43,8 +42,8 @@ class Tracer {
     let z = 1;
     // let xDistance = random((100 / lines.length)/2) 
     // let yDistance = random((100 / lines.length)/2)
-    let xDistance = 3
-    let yDistance = 5
+    let xDistance = 1
+    let yDistance = 1
     const roll = floor(random(1,6));
     if (roll === 1) { // ++ Right-Down
       this.x = this.x + xDistance * 2
@@ -67,7 +66,7 @@ class Tracer {
       if (reroll < 1) {
         const newTracer = new Tracer(this.y - random(25), this.x);
         lines.push(newTracer)
-        let strokeW = (100 / lines.length)
+        let strokeW = ((vw/3)/ lines.length)
         console.log("lines: " + lines.length)
         console.log("stroke: " + strokeW)
         if (lines.length > 500) {
