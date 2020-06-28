@@ -39,7 +39,7 @@ class Tracer {
     this.y = y
   }
   move() {
-    let z = 2;
+    let z = 3;
     // let xDistance = random((100 / lines.length)/2) 
     // let yDistance = random((100 / lines.length)/2)
     let xDistance = z
