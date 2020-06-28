@@ -5,7 +5,7 @@ let y;
 let lines = [];
 
 function setup() {
-  createCanvas(200, 200);
+  createCanvas(300, 500);
   background(0);
   let line1 = new Tracer();
   lines.push(line1);
