@@ -34,7 +34,7 @@ function draw() {
 }
 
 class Tracer {
-  constructor(y = height, x = width/2) {
+  constructor(y = 0, x = width/2) {
     this.x = x
     this.y = y
   }
