@@ -16,7 +16,7 @@ function setup() {
 function draw() {
   colorMode(HSB, 100);
   let hue = ((frameCount/2) % 100);
-  let saturation = 100
+  let saturation = lines.length
   let brightness = 100
   let c = color(hue, saturation, brightness);
   const r = floor(random(4));
@@ -39,11 +39,11 @@ class Tracer {
     this.y = y
   }
   move() {
-    let z = 1;
+    let z = 2;
     // let xDistance = random((100 / lines.length)/2) 
     // let yDistance = random((100 / lines.length)/2)
-    let xDistance = 1
-    let yDistance = 1
+    let xDistance = z
+    let yDistance = z
     const roll = floor(random(1,12));
     if (roll === 1 || roll === 2) { // ++ Right-Down
       this.x = this.x + xDistance
