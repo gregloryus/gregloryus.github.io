@@ -20,7 +20,7 @@ function draw() {
   let brightness = 100
   let c = color(hue, saturation, brightness);
   const r = floor(random(4));
-  let strokeW = (vw / lines.length)
+  let strokeW = 1
   stroke(c);
   strokeWeight(strokeW);
 
@@ -66,7 +66,7 @@ class Tracer {
       if (reroll < 1) {
         const newTracer = new Tracer(this.y, this.x);
         lines.push(newTracer)
-        let strokeW = (vw/ lines.length)
+        let strokeW = 1
         console.log("lines: " + lines.length)
         console.log("stroke: " + strokeW)
         if (lines.length > 1000) {
