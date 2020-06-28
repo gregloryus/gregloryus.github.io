@@ -22,7 +22,7 @@ function draw() {
   const r = floor(random(4));
   let strokeW = 1
   stroke(c);
-  strokeWeight(1);
+  strokeWeight(vw/lines.length);
 
   frameRate()
 
