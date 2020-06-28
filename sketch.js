@@ -17,7 +17,7 @@ function draw() {
   colorMode(HSB, 100);
   let hue = ((frameCount/2) % 100);
   let saturation = lines.length
-  let brightness = 10 + lines.length;
+  let brightness = 50 + lines.length;
   let c = color(hue, saturation, brightness);
   const r = floor(random(4));
   let strokeW = (vw/ lines.length)
@@ -34,7 +34,7 @@ function draw() {
 }
 
 class Tracer {
-  constructor(y = height/4, x = width/2) {
+  constructor(y = height, x = width/2) {
     this.x = x
     this.y = y
   }
