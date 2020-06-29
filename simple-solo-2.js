@@ -23,8 +23,7 @@ function draw() {
   const r = floor(random(4));
   let strokeW = 1
   stroke(c);
-  strokeWeight(1);
-
+  strokeWeight(random(10,50)/lines.length);
   frameRate()
 
   for (line of lines) {
