@@ -77,16 +77,16 @@ class Tracer {
       }
     }
     if (this.y > height) {
-      this.y = 0;
+      this.y = 1;
     }
     if (this.y < 0) {
-      this.y = height;
+      this.y = height - 1;
     }
     if (this.x > width) {
-      this.x = 0
+      this.x = 1
     }
     if (this.x < 0) {
-      this.x = width;
+      this.x = width - 1;
   }
 
   }
