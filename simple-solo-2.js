@@ -14,6 +14,7 @@ function setup() {
 }
 
 function draw() {
+  console.log("lines: " + lines.length)
   colorMode(HSB, 100);
   let hue = ((frameCount/2) % 100);
   let saturation = 5 + lines.length;
