@@ -3,5 +3,5 @@ body {
     margin: 0;
     background: black;
     text-align: center;
-    color: linear-gradient(-90deg, red, yellow);
+    color: rgba(240, 248, 255, 100)
   }
