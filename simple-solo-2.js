@@ -63,7 +63,7 @@ class Tracer {
     }
     if (roll === 11) {
       const reroll = random(100)
-      if (reroll < 99) {
+      if (reroll < 99 && lines.length > 3 ) {
         lines.pop()
       }
       if (reroll < 1) {
