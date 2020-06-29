@@ -16,7 +16,7 @@ function setup() {
 function draw() {
   colorMode(HSB, 100);
   let hue = ((frameCount/2) % 100);
-  let saturation = lines.length*5;
+  let saturation = 5 + lines.length;
   let brightness = 100;
   let c = color(hue, saturation, brightness);
   const r = floor(random(4));
@@ -63,8 +63,8 @@ class Tracer {
     }
     if (roll === 11) {
       const reroll = random(100)
-      if (reroll < 99 && lines.length > 1 ) {
-        lines.pop()
+      if (reroll > 99 && lines.length > 1 ) {
+        lines.pop(this)
       }
       if (reroll < 1) {
         const newTracer = new Tracer(this.y + random(3), this.x + random(3));
