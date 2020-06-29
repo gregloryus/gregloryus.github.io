@@ -15,7 +15,7 @@ function setup() {
 
 function draw() {
   colorMode(HSB, 100);
-  let hue = ((frameCount/2) % 100);
+  let hue = ((frameCount/10) % 100);
   let saturation = lines.length*5;
   let brightness = 100;
   let c = color(hue, saturation, brightness);
