@@ -42,7 +42,7 @@ class Tracer {
     let z = 3;
     // let xDistance = random((100 / lines.length)/2) 
     // let yDistance = random((100 / lines.length)/2)
-    let xDistance = z
+    let xDistance = z*2
     let yDistance = z
     const roll = floor(random(1,12));
     if (roll === 1 || roll === 2) { // ++ Right-Down
