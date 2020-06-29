@@ -62,9 +62,13 @@ class Tracer {
       this.y = this.y + yDistance
     }
     if (roll === 11) {
-      const reroll = random(100)
+      const reroll = random(101)
       if (reroll > 99 && lines.length > 1 ) {
+        console.log("pop attempt imminent")
+        console.log(lines)
         lines.pop(this)
+        console.log("pop attempted")
+        console.log(lines)
       }
       if (reroll < 1) {
         const newTracer = new Tracer(this.y + random(3), this.x + random(3));
