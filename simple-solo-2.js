@@ -14,6 +14,7 @@ function setup() {
 }
 
 function draw() {
+  console.log("lines: " + lines.length)
   colorMode(HSB, 100);
   let hue = ((frameCount/10) % 100);
   let saturation = lines.length*5;
@@ -22,8 +23,7 @@ function draw() {
   const r = floor(random(4));
   let strokeW = 1
   stroke(c);
-  strokeWeight(vw/lines.length);
-
+  strokeWeight(random(2,100)/lines.length);
   frameRate()
 
   for (line of lines) {
@@ -42,7 +42,7 @@ class Tracer {
     let z = 3;
     // let xDistance = random((100 / lines.length)/2) 
     // let yDistance = random((100 / lines.length)/2)
-    let xDistance = z
+    let xDistance = z*2
     let yDistance = z
     const roll = floor(random(1,12));
     if (roll === 1 || roll === 2) { // ++ Right-Down
@@ -62,8 +62,15 @@ class Tracer {
       this.y = this.y + yDistance
     }
     if (roll === 11) {
-      const reroll = random(100)
-      if (reroll < 1) {
+      const reroll = random(200)
+      if (reroll > 199 && lines.length > 1 ) {
+        console.log("pop attempt imminent")
+        console.log(lines)
+        lines.pop(this)
+        console.log("pop attempted")
+        console.log(lines)
+      }
+      if (reroll < 2) {
         const newTracer = new Tracer(this.y + random(3), this.x + random(3));
         lines.push(newTracer)
         let strokeW = 1
