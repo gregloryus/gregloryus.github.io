@@ -17,13 +17,13 @@ function draw() {
   console.log("lines: " + lines.length)
   colorMode(HSB, 100);
   let hue = ((frameCount/2) % 100);
-  let saturation = 25 + lines.length*20;
+  let saturation = 2 + lines.length*5;
   let brightness = 100;
   let c = color(hue, saturation, brightness);
   const r = floor(random(4));
   let strokeW = 1
   stroke(c);
-  strokeWeight(random(10,50)/lines.length);
+  strokeWeight(random(2,100)/lines.length);
   frameRate()
 
   for (line of lines) {
