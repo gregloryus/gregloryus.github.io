@@ -92,7 +92,7 @@ class Tracer {
   }
   display() {
     point(this.x, this.y)
-    new Text("lines: " + lines.length, vw - vw/10, vh - vh/10)
+    new Text("lines: " + lines.length, vw/2, vh/2)
     console.log("testing")
   }
 }
