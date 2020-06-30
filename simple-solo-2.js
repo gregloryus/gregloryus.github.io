@@ -2,7 +2,6 @@ window.onload = ()=> {
   var status = document.getElementById("status");
 }
 
-status.innerHTML = `lines: ${lines.length}`;
 let x;
 let y;
 
