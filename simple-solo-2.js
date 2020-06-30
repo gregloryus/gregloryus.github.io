@@ -11,6 +11,7 @@ function setup() {
   background(0);
   let line1 = new Tracer();
   lines.push(line1);
+  new Text("testing", 10, 10)
 }
 
 function draw() {
@@ -92,6 +93,5 @@ class Tracer {
   }
   display() {
     point(this.x, this.y)
-    new Text("testing", 10, 10)
   }
 }
