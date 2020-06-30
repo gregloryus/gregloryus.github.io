@@ -92,6 +92,6 @@ class Tracer {
   }
   display() {
     point(this.x, this.y)
-    Text("testing", width/2, height/2)
+    new Text("testing", 10, 10)
   }
 }
