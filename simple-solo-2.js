@@ -1,7 +1,3 @@
-window.onload = ()=> {
-  var status = document.getElementById("status");
-}
-
 let x;
 let y;
 
@@ -96,6 +92,6 @@ class Tracer {
   }
   display() {
     point(this.x, this.y)
-    new Text("lines: " + lines.length)
+    new Text("lines: " + lines.length, vw - vw/10, vh - vh/10)
   }
 }
