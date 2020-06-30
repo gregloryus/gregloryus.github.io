@@ -30,7 +30,7 @@ function draw() {
     lines: ${lines.length}
     hue: ${hue}
     saturation: ${saturation}
-    `, width - width/3, height/5)
+    `, width - width/3, height/7)
 
   frameRate()
 
