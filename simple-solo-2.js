@@ -10,13 +10,12 @@ function setup() {
   createCanvas(vw, vh);
   background(0);
   let line1 = new Tracer();
-  lines.push(line1);
-  new Text("testing", 10, 10)
+  lines.push(line1)
 }
 
 function draw() {
   colorMode(HSB, 100);
-  let hue = ((lines.length*5  % 100))
+  let hue = ((frameRate % 100))
   let saturation = 5 + lines.length*3;
   let brightness = 100;
   let c = color(hue, saturation, brightness);
