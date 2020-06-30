@@ -1,6 +1,8 @@
 window.onload = ()=> {
   var status = document.getElementById("status");
 }
+
+status.innerHTML = `lines: ${lines.length}`;
 let x;
 let y;
 
@@ -95,7 +97,5 @@ class Tracer {
   }
   display() {
     point(this.x, this.y)
-    status.innerHTML = 
-    `lines: ${lines.length}`;
   }
 }
