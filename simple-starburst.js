@@ -18,6 +18,9 @@ function draw() {
   colorMode(HSB, 100);
   let hue = floor(100*(frameCount/10 % 100))/100;
   let saturation = 10 + lines.length*2;
+  if (saturation > 100) {
+    saturation = 100
+  }
   let brightness = 100;
   let c = color(hue, saturation, brightness);
   const r = floor(random(4));
