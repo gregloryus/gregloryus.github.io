@@ -79,7 +79,7 @@ class Tracer {
     }
 
     const reroll = random(1000);
-    if (reroll < 5) {
+    if (reroll < 2) {
       const newTracer = new Tracer(this.y, this.x);
         lines.push(newTracer)
         if (lines.length > 1000) {
@@ -88,7 +88,7 @@ class Tracer {
           lines.push(newTracer)
         }
     }
-    if (reroll > 997 && lines.length > 1) {
+    if (reroll > 999 && lines.length > 1) {
               colorMode(RGB, 100, 100, 100, 1)
         stroke(color(100, 100, 100, .01))
         star(this.x, this.y, 1, random(8, 8 + lines.length)/2, random(lines.length)%100)
