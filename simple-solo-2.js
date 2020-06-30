@@ -35,6 +35,8 @@ function draw() {
     line.display()
   }
 
+  new Text("lines: " + lines.length)
+
 }
 
 class Tracer {
@@ -96,6 +98,5 @@ class Tracer {
   }
   display() {
     point(this.x, this.y)
-    Text("lines: " + lines.length)
   }
 }
