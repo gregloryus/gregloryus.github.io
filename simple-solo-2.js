@@ -10,19 +10,27 @@ function setup() {
   createCanvas(vw, vh);
   background(0);
   let line1 = new Tracer();
-  lines.push(line1)
+  lines.push(line1);
+  frameRate()
 }
 
 function draw() {
   colorMode(HSB, 100);
-  let hue = ((frameRate % 100))
-  let saturation = 50 + lines.length*3;
+  let hue = floor(100*(frameCount/10 % 100))/100;
+  let saturation = 10 + lines.length*3
   let brightness = 100;
   let c = color(hue, saturation, brightness);
   const r = floor(random(4));
   let strokeW = 1
   stroke(c);
   strokeWeight(1);
+  textSize(16)
+  text(
+    `
+    lines: ${lines.length}
+    hue: ${hue}
+    saturation: ${saturation}
+    `, width - width/4, height/4)
 
   frameRate()
 
@@ -63,18 +71,24 @@ class Tracer {
     }
     if (roll === 11) {
       const reroll = random(100)
-      if (reroll < 1) {
+      if (reroll < 4) {
         const newTracer = new Tracer(this.y, this.x);
         lines.push(newTracer)
         let strokeW = 1
         console.log("lines: " + lines.length)
         console.log("stroke: " + strokeW)
-        if (lines.length > 1000) {
+        if (lines.length > 10000) {
           lines = [];
           background(0);
           lines.push(newTracer)
         }
       }
+      if (reroll > 98 && lines.length > 1) {
+        colorMode(RGB, 100, 100, 100, 1)
+        stroke(color(100, 100, 100, .01))
+        star(this.x, this.y, 1, 9, 11)
+        lines.pop(this)
+        console.log("pop")
     }
     if (this.y > height) {
       this.y = 0;
@@ -87,10 +101,25 @@ class Tracer {
     }
     if (this.x < 0) {
       this.x = width;
+    }
   }
-
   }
   display() {
     point(this.x, this.y)
   }
+}
+
+function star(x, y, radius1, radius2, npoints) {
+  let angle = TWO_PI / npoints;
+  let halfAngle = angle / 2.0;
+  beginShape();
+  for (let a = 0; a < TWO_PI; a += angle) {
+    let sx = x + cos(a) * radius2;
+    let sy = y + sin(a) * radius2;
+    vertex(sx, sy);
+    sx = x + cos(a + halfAngle) * radius1;
+    sy = y + sin(a + halfAngle) * radius1;
+    vertex(sx, sy);
+  }
+  endShape(CLOSE);
 }
