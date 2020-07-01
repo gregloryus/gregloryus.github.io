@@ -10,7 +10,7 @@ body {
   }
 
 h1 {
-  animation: color-change 1s infinite;
+  animation: color-change 10s infinite;
 }
 
 @keyframes color-change {
