@@ -8,3 +8,16 @@ body {
     font-size: 5vw;
     color: rgba(240, 248, 255, 100)
   }
+
+p {
+  animation: color-change is infinite;
+}
+
+@keyframes color-change {
+  0% { color:	#ff71ce }
+  20% { color: #01cdfe }
+  40% { color: #05ffa1}
+  60% { color: #b967ff}
+  80% { color: #fffb96}
+  100% { color: white }
+}
