@@ -12,7 +12,7 @@ function setup() {
   background(0);
   let line1 = new Tracer();
   lines.push(line1);
-  frameRate(120)
+  frameRate()
 }
 
 function draw() {
