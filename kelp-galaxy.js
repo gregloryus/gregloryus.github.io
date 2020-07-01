@@ -90,7 +90,7 @@ class Tracer {
       if (reroll > 97) {
         colorMode(RGB, 100, 100, 100, 1)
         stroke(color(100, 100, 100, .01))
-        star(this.x, this.y, 1, 9+runningCount, 11+runningCount%100)
+        star(this.x, this.y, 1, 9+runningCount*4, 11+runningCount%100)
         lines.pop(this)
         console.log("pop")
         if (lines.length === 0) {
