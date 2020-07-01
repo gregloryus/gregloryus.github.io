@@ -13,6 +13,10 @@ h1 {
   animation: color-change 10s infinite;
 }
 
+a {
+  animation: color-change 200ms
+}
+
 @keyframes color-change {
   0% { color:	#ff71ce }
   20% { color: #01cdfe }
