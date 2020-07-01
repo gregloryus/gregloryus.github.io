@@ -10,7 +10,7 @@ body {
   }
 
 p {
-  animation: color-change is infinite;
+  animation: color-change 1s infinite;
 }
 
 @keyframes color-change {
