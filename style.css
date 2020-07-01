@@ -9,7 +9,7 @@ body {
     color: rgba(240, 248, 255, 100)
   }
 
-p {
+h1 {
   animation: color-change 1s infinite;
 }
 
