@@ -10,12 +10,12 @@ body {
   }
 
 h1 {
-  animation: color-change 10s infinite;
+  animation: color-change 5s infinite;
   animation-direction: alternate;
 }
 
 a {
-  animation: color-change 5s infinite;
+  animation: color-change 500ms infinite;
   animation-direction: alternate-reverse;
 }
 
