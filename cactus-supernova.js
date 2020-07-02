@@ -80,7 +80,7 @@ class Tracer {
     }
 
     const reroll = random(1000);
-    if (reroll < 2) {
+    if (reroll < 4) {
       const newTracer = new Tracer(this.y, this.x);
         lines.push(newTracer)
         if (lines.length > 1000) {
