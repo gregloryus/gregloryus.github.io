@@ -14,7 +14,7 @@ function setup() {
   lines.push(line1);
   frameRate()
   noLoop();
-  setInterval(redraw, 10); // where 10 is the minimum time between frames in ms
+  setInterval(redraw, 0); // where 10 is the minimum time between frames in ms
 }
 
 function draw() {
