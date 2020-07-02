@@ -83,7 +83,7 @@ class Tracer {
     if (reroll < 4) {
       const newTracer = new Tracer(this.y, this.x);
         lines.push(newTracer)
-        if (lines.length > 3000 * 1000/vw) {
+        if (lines.length > 5000 * 800/vw) {
           lines = [];
           background(0);
           lines.push(newTracer)
