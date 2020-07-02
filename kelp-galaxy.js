@@ -13,6 +13,8 @@ function setup() {
   let line1 = new Tracer();
   lines.push(line1);
   frameRate()
+  noLoop();
+  setInterval(redraw, 10); // where 10 is the minimum time between frames in ms
 }
 
 function draw() {
