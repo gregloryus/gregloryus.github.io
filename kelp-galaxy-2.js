@@ -36,7 +36,8 @@ function draw() {
     # of stems: ${runningCount}
     hue: ${hue}
     saturation: ${saturation}
-    `, width - width/3, height/10
+    `, 
+    width - width/3, height/10)
 
   for (line of lines) {
     line.move();
