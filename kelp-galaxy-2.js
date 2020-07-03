@@ -32,13 +32,11 @@ function draw() {
   textSize(16)
   text(
     `
-    lines: ${lines.length}
+    # of lines: ${lines.length}
+    # of stems: ${runningCount}
     hue: ${hue}
     saturation: ${saturation}
-    count: ${runningCount}
-    `, width - width/3, height/10)
-
-  frameRate()
+    `, width - width/3, height/10
 
   for (line of lines) {
     line.move();
