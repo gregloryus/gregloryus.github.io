@@ -72,7 +72,7 @@ class Tracer {
         console.log("pop attempted")
         console.log(lines)
         if (lines.length < 1) {
-        lines.push(new Tracer(random(width), 0)
+        lines.push(new Tracer(random(width), 0))
         }
       }
       if (reroll < 2) {
