@@ -11,6 +11,8 @@ function setup() {
   background(0);
   let line1 = new Tracer();
   lines.push(line1);
+  noLoop();
+  setInterval(redraw, 0); // where 10 is the minimum time 
 }
 
 function draw() {
@@ -23,8 +25,6 @@ function draw() {
   let strokeW = 1
   stroke(c);
   strokeWeight(1);
-
-  frameRate()
 
   for (line of lines) {
     line.move();
