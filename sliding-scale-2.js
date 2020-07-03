@@ -1,0 +1,105 @@
+let x;
+let y;
+
+const vw = Math.max(document.documentElement.clientWidth || 0, window.innerWidth || 0);
+const vh = Math.max(document.documentElement.clientHeight || 0, window.innerHeight || 0);
+
+let lines = [];
+
+function setup() {
+  createCanvas(vw, vh);
+  background(0);
+  let line1 = new Tracer();
+  lines.push(line1);
+  noLoop();
+  setInterval(redraw, 0); // where 10 is the minimum time between frames in ms
+}
+
+function draw() {
+  console.log("lines: " + lines.length)
+  colorMode(HSB, 100);
+  let hue = ((frameCount/10) % 100);
+  let saturation = lines.length*5;
+  let brightness = 100;
+  let c = color(hue, saturation, brightness);
+  const r = floor(random(4));
+  let strokeW = 1
+  stroke(c);
+  strokeWeight(random(2,100)/lines.length);
+  frameRate()
+
+  for (line of lines) {
+    line.move();
+    line.display()
+  }
+
+}
+
+class Tracer {
+  constructor(y = height, x = width/2) {
+    this.x = x
+    this.y = y
+  }
+  move() {
+    let z = 3;
+    // let xDistance = random((100 / lines.length)/2) 
+    // let yDistance = random((100 / lines.length)/2)
+    let xDistance = z*2
+    let yDistance = z
+    const roll = floor(random(1,12));
+    if (roll === 1 || roll === 2) { // ++ Right-Down
+      this.x = this.x + xDistance
+      this.y = this.y + yDistance
+    }
+    if (roll === 3 || roll === 4 || roll == 5) { // -- Left-Up
+      this.x = this.x - xDistance 
+      this.y = this.y - yDistance
+    }
+    if (roll === 6 || roll === 7 || roll === 8) { // +- Right-Up
+      this.x = this.x + xDistance 
+      this.y = this.y - yDistance
+    }
+    if (roll === 9 || roll === 10) { // -+ Left-Down
+      this.x = this.x - xDistance 
+      this.y = this.y + yDistance
+    }
+    if (roll === 11) {
+      const reroll = random(200)
+      if (reroll > 199 && lines.length > 1 ) {
+        console.log("pop attempt imminent")
+        console.log(lines)
+        lines.pop(this)
+        console.log("pop attempted")
+        console.log(lines)
+      }
+      if (reroll < 2) {
+        const newTracer = new Tracer(this.y + random(3), this.x + random(3));
+        lines.push(newTracer)
+        let strokeW = 1
+        console.log("lines: " + lines.length)
+        console.log("stroke: " + strokeW)
+        if (lines.length > 1000) {
+          lines = [];
+          background(0);
+          lines.push(newTracer)
+        }
+      }
+    }
+    if (this.y > height) {
+      this.y = 0;
+    }
+    if (this.y < 0) {
+      this.y = height;
+    }
+    if (this.x > width) {
+      this.x = 0
+    }
+    if (this.x < 0) {
+      this.x = width;
+  }
+
+  }
+  display() {
+    point(this.x, this.y)
+  }
+}
