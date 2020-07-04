@@ -20,7 +20,7 @@ function draw() {
   let hue = ((frameCount/2) % 100);
   let saturation = lines.length*5;
   let brightness = 100;
-  let opacity = 100;
+  let opacity = 1
   let c = color(hue, saturation, brightness, opacity);
   const r = floor(random(4));
   let strokeW = 1
