@@ -72,45 +72,15 @@ class Tracer {
       this.y = this.y + yDistance;
     }
     if (roll === 11) {
-      if (roll === 11) {
-        const reroll = random(100);
-        if (reroll < 1 + runningCount / 5) {
-          const firstTracer = new Tracer(this.y, this.x);
-          lines.push(firstTracer);
-          background(0, 0, 0, 0.01);
-          let strokeW = 1;
-          console.log("lines: " + lines.length);
-          console.log("stroke: " + strokeW);
-          if (lines.length > 10000) {
-            lines = [];
-            background(0);
-          }
-        }
-        if (reroll > 97) {
-          colorMode(RGB, 100, 100, 100, 1);
-          stroke(color(100, 100, 100, 0.01));
-          star(
-            this.x,
-            this.y,
-            1,
-            9 + runningCount * 2,
-            11 + (runningCount % 100)
-          );
-          lines.pop(this);
-          console.log("pop");
-          if (lines.length === 0) {
-            const nextTracer = new Tracer(height, random(width));
-            lines.push(nextTracer);
-            runningCount++;
-          }
-        }
-      }
+      const newTracer = new Tracer(this.y, this.x);
       const reroll = random(100);
       if (reroll > 98) {
         lines.pop;
+        if (lines.length < 1) {
+          lines.push(newTracer(this.x, height));
+        }
       }
       if (reroll < 1) {
-        const newTracer = new Tracer(this.y, this.x);
         lines.push(newTracer);
         let strokeW = 1;
         console.log("lines: " + lines.length);
