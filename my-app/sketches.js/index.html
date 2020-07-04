@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>flower farming</title>
+    <link rel="stylesheet" href="./ff-style.css" />
+    <script src="flower-farming.js"></script>
+  </head>
+  <body>
+    <article>
+      <h1>flower farming</h1>
+      <button onClick="window.location.reload();">Start a new farm</button
+      ><br /><br />
+      <button id="button">Start a new day</button><br /><br />
+      <!-- <button id="pruneButton" >✂️</button> -->
+      <!-- <button id="rollpButton" onclick="startRolling()">Roll on</button> -->
+      <button id="startButton" onclick="startRolling()">Start</button>
+      <button id="stopButton" onclick="clearInterval(autoClick)">Stop</button>
+
+      <!-- <p id="starsID" class="stars">✨　✨</p> -->
+      <p class="celestial" id="moon">🌝</p>
+    </article>
+    <!-- partial:index.partial.html -->
+    <div class="center">
+      <figure>
+        <figcaption id="text">Day 0.<br />You have no flowers.</figcaption>
+        <ul class="tree" id="chart">
+          <li>
+            <span
+              class="celestial"
+              style="background-color: rgba(135, 206, 250);"
+              >🌞</span
+            >
+            <ul id="tree"></ul>
+          </li>
+        </ul>
+      </figure>
+    </div>
+  </body>
+</html>
