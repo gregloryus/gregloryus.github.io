@@ -36,7 +36,8 @@ function draw() {
     # of stems: ${runningCount}
     hue: ${hue}
     saturation: ${saturation}
-    `, width - width/3, height/10
+    `, 
+    width - width/3, height/10)
 
   for (line of lines) {
     line.move();
@@ -75,7 +76,7 @@ class Tracer {
     }
     if (roll === 11) {
       const reroll = random(100)
-      if (reroll < 1 + runn) {
+      if (reroll < 1) {
         const firstTracer = new Tracer(this.y, this.x);
         lines.push(firstTracer)
         let strokeW = 1
