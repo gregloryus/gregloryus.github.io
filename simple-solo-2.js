@@ -16,11 +16,12 @@ function setup() {
 }
 
 function draw() {
-  colorMode(HSB, 100);
+  colorMode(HSB, 100, 100, 100, 1);
   let hue = ((frameCount/2) % 100);
   let saturation = lines.length*5;
   let brightness = 100;
-  let c = color(hue, saturation, brightness);
+  let opacity = 100;
+  let c = color(hue, saturation, brightness, opacity);
   const r = floor(random(4));
   let strokeW = 1
   stroke(c);
@@ -44,6 +45,7 @@ class Tracer {
     // let yDistance = random((100 / lines.length)/2)
     let xDistance = z
     let yDistance = z
+    opacity = 1 - (this.y / vh);
     const roll = floor(random(1,12));
     if (roll === 1 || roll === 2) { // ++ Right-Down
       this.x = this.x + xDistance
@@ -62,7 +64,36 @@ class Tracer {
       this.y = this.y + yDistance
     }
     if (roll === 11) {
+      if (roll === 11) {
       const reroll = random(100)
+      if (reroll < 1 + runningCount/5) {
+        const firstTracer = new Tracer(this.y, this.x);
+        lines.push(firstTracer)
+        let strokeW = 1
+        console.log("lines: " + lines.length)
+        console.log("stroke: " + strokeW)
+        if (lines.length > 10000) {
+          lines = [];
+          background(0);
+        }
+      }
+      if (reroll > 97) {
+        colorMode(RGB, 100, 100, 100, 1)
+        stroke(color(100, 100, 100, .01))
+        star(this.x, this.y, 1, 9 + runningCount*2, 11+runningCount%100)
+        lines.pop(this)
+        console.log("pop")
+        if (lines.length === 0) {
+          const nextTracer = new Tracer(height, random(width))
+          lines.push(nextTracer)
+          runningCount++
+        }
+      }
+    }
+      const reroll = random(100)
+      if (reroll > 98) {
+        lines.pop
+      }
       if (reroll < 1) {
         const newTracer = new Tracer(this.y, this.x);
         lines.push(newTracer)
