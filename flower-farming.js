@@ -12,7 +12,57 @@ window.onload = () => {
 
 // IDEAS: 1. Make the flowers die after a certain amount of day. 2. Limit flowers to a pre-ordained (rolled) number of children -- this will stop the chart from being so horizontal... or make chances 2x worse to give birth after each birth
 
-// WHERE I LEFT OFF: trying to delete old flowers by setting flower to {} in the startNewDay process. Somehow, they're still being rendered, and I can't figure out where it's pulling the dead flower emoji from.
+let starsBlank = `　　　
+`;
+let starsStar = `　✨　
+`;
+let starsLeft1 = `✨　　
+`;
+let starsRight1 = `　　✨
+`;
+let starsLeft2 = `✨✨　
+`;
+let starsRight2 = `　✨✨
+`;
+let starsStars = `✨　✨
+`;
+let starsComet = `　　💫
+`;
+const starsArray = [
+  starsBlank,
+  starsBlank,
+  starsBlank,
+  starsBlank,
+  starsBlank,
+  starsBlank,
+  starsBlank,
+  starsBlank,
+  starsBlank,
+  starsBlank,
+  starsBlank,
+  starsBlank,
+  starsBlank,
+  starsBlank,
+  starsBlank,
+  starsBlank,
+  starsBlank,
+  starsBlank,
+  starsBlank,
+  starsBlank,
+  starsLeft1,
+  starsLeft2,
+  starsRight1,
+  starsRight2,
+  starsStar,
+  starsStars,
+  starsComet,
+];
+
+function starsPhase() {
+  return starsArray[Math.floor(Math.random() * starsArray.length)];
+}
+stars = starsPhase();
+stars.innerHTML = `${starsPhase()}`;
 
 let day = 0;
 
@@ -65,7 +115,6 @@ function assignWeedSpecies() {
 
 const flowerGender = [
   // used to randomly assign a gender; could create a function to automatically create an array reflecting the desired probability, e.g., 80% fertile would be an array with 4 "fertile" elements and 1 "infertile" element. Could call it genderOdds()
-  "fertile",
   "fertile",
   "fertile",
   "infertile",
@@ -127,15 +176,13 @@ function startNewDay() {
         flower.age++;
         flower.children[flower.children.length] = flowers[flowers.length - 1];
         flower.gender = assignGender();
-      } else if (flower.gender === "infertile" && flower.infertileAge > 5) {
-        console.log("removal started");
-        if (
-          flower.children.some((child) => child.gender === "fertile") === false
-        ) {
-          console.log("removal step 2");
-          console.log(flower);
-          console.log("removal step 3");
-        }
+        // } else if (flower.gender === "infertile" && flower.infertileAge > 5) {
+        //     console.log("removal started")
+        //     if (flower.children.some(child => child.gender === "fertile") === false) {
+        //         console.log("removal step 2");
+        //         flowers.splice(flower.indexNum, 1)
+        //         console.log("removal step 3");
+        //     }
       } else if (flower.gender === "infertile") {
         flower.chance = 0;
         flower.age++;
@@ -174,14 +221,6 @@ function startNewDay() {
       }
     }
   }
-
-  // for (flower of flowers) {
-  //     if (flower.gender === "infertile" && flower.infertileAge > 3) {
-  //         cutFlower(flower)
-  //         console.log(flowers);
-  //         console.log("pruning attempted 🚨")
-  //     }
-  // }
   day++;
   let moons = moonPhase();
   moon.innerHTML = moonPhase();
@@ -196,7 +235,6 @@ function startNewDay() {
   var flowerHTML = buildTree(flowers);
 
   tree.innerHTML = flowerHTML.join(" ");
-  console.log(tree.innerHTML);
   console.log(flowers);
 
   console.log(day);
@@ -259,34 +297,29 @@ function setColor(flower) {
 function setColorSimple(flower) {
   if (flower.gender === "weed") {
     return `style="background-color: rgba(255, 0, 0, ${
-      Math.floor(flower.chance / flower.chanceDivider) * 1.5
+      (flower.chance / flower.chanceDivider) * 1.5
     })"`;
   } else if (flower.gender === "infertile") {
     // if (flower.children.some(child => child.gender === "fertile") === false) {
     //     return `style="background-color: rgba(0, 0, 0, ${((flower.infertileAge + 5)/10)})"`
     // } else {
-    return `style="background-color: rgba(255, 239, 213, ${Math.floor(
+    return `style="background-color: rgba(255, 239, 213, ${
       flower.infertileAge / 5
-    )})"`;
+    })"`;
     // }
   } else {
-    return `style="background-color: rgba(0, 255, 0, ${Math.floor(
+    return `style="background-color: rgba(0, 255, 0, ${
       (flower.chance / flower.chanceDivider) * 1.5
-    )})"`;
+    })"`;
   }
 }
 
 function flowerBioLong(flower) {
-  if (
-    flower.gender === "infertile" &&
-    flower.infertileAge > 5 &&
-    flower.children.some((child) => child.gender === "fertile") === false
-  ) {
-    console.log(flower.species + flower.id + " pruned!");
-    flower = {};
-  } else {
-    return `<li><span ${setColorSimple(flower)}>${flowerBio(flower)}</span>`;
-  }
+  // if (flower.gender === "infertile" && flower.infertileAge > 5 && flower.children.some(child => child.gender === "fertile") === false) {
+  //     console.log(flower.species + flower.id + " pruned!")
+  // } else {
+  return `<li><span ${setColorSimple(flower)}>${flowerBio(flower)}</span>`;
+  // }
 }
 
 function flowerBio(flower) {
@@ -308,35 +341,12 @@ function flowerBio(flower) {
 
 var autoClick = setInterval(function () {
   document.getElementById("button").click();
-}, 200);
+}, 100);
 
 function startRolling() {
   var autoClick = setInterval(function () {
     document.getElementById("button").click();
   }, 100);
-}
-
-function cutFlower(flower) {
-  flower = {
-    children: "",
-    species: "",
-    generation: "",
-    parent: "",
-    id: "",
-    indexNum: "",
-    chance: "",
-    chanceDivider: "",
-    age: "",
-    daySinceReset: "",
-    gender: "",
-    parentSpecies: "",
-    geneology: "",
-    treePrefix: "",
-    treeSuffix: "",
-    treeLeaf: "",
-    birthday: "",
-    infertileAge: "",
-  };
 }
 
 // // Simulate a click every second
@@ -427,62 +437,3 @@ function cutFlower(flower) {
 //         console.log(startingFlower)
 //     }
 // }}
-
-// let starsBlank =
-// `
-// `
-// let starsStar =
-// `　✨
-// `
-// let starsLeft1 =
-// `✨
-// `
-// let starsRight1 =
-// `　　✨
-// `
-// let starsLeft2 =
-// `✨✨
-// `
-// let starsRight2 =
-// `　✨✨
-// `
-// let starsStars =
-// `✨　✨
-// `
-// let starsComet =
-// `　　💫
-// `
-// const starsArray = [
-//     starsBlank,
-//     starsBlank,
-//     starsBlank,
-//     starsBlank,
-//     starsBlank,
-//     starsBlank,
-//     starsBlank,
-//     starsBlank,
-//     starsBlank,
-//     starsBlank,
-//     starsBlank,
-//     starsBlank,
-//     starsBlank,
-//     starsBlank,
-//     starsBlank,
-//     starsBlank,
-//     starsBlank,
-//     starsBlank,
-//     starsBlank,
-//     starsBlank,
-//     starsLeft1,
-//     starsLeft2,
-//     starsRight1,
-//     starsRight2,
-//     starsStar,
-//     starsStars,
-//     starsComet]
-
-// function starsPhase() {
-//     return starsArray[Math.floor(Math.random() * starsArray.length)]
-// }
-// stars = starsPhase()
-// stars.innerHTML = `${starsPhase()}`
