@@ -118,8 +118,6 @@ const flowerGender = [
   // used to randomly assign a gender; could create a function to automatically create an array reflecting the desired probability, e.g., 80% fertile would be an array with 4 "fertile" elements and 1 "infertile" element. Could call it genderOdds()
   "fertile",
   "fertile",
-  "fertile",
-  "weed",
   "infertile",
 ];
 
