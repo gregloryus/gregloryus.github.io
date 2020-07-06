@@ -1,5 +1,6 @@
 window.onload = () => {
   var text = document.getElementById("text");
+  var newFarm = document.getElementById("newFarm");
   var tree = document.getElementById("tree");
   var moon = document.getElementById("moon");
   // var starsID = document.getElementById("starsID");
@@ -12,57 +13,57 @@ window.onload = () => {
 
 // IDEAS: 1. Make the flowers die after a certain amount of day. 2. Limit flowers to a pre-ordained (rolled) number of children -- this will stop the chart from being so horizontal... or make chances 2x worse to give birth after each birth
 
-let starsBlank = `　　　
-`;
-let starsStar = `　✨　
-`;
-let starsLeft1 = `✨　　
-`;
-let starsRight1 = `　　✨
-`;
-let starsLeft2 = `✨✨　
-`;
-let starsRight2 = `　✨✨
-`;
-let starsStars = `✨　✨
-`;
-let starsComet = `　　💫
-`;
-const starsArray = [
-  starsBlank,
-  starsBlank,
-  starsBlank,
-  starsBlank,
-  starsBlank,
-  starsBlank,
-  starsBlank,
-  starsBlank,
-  starsBlank,
-  starsBlank,
-  starsBlank,
-  starsBlank,
-  starsBlank,
-  starsBlank,
-  starsBlank,
-  starsBlank,
-  starsBlank,
-  starsBlank,
-  starsBlank,
-  starsBlank,
-  starsLeft1,
-  starsLeft2,
-  starsRight1,
-  starsRight2,
-  starsStar,
-  starsStars,
-  starsComet,
-];
+// let starsBlank = `
+// `;
+// let starsStar = `　✨
+// `;
+// let starsLeft1 = `✨
+// `;
+// let starsRight1 = `　　✨
+// `;
+// let starsLeft2 = `✨✨
+// `;
+// let starsRight2 = `　✨✨
+// `;
+// let starsStars = `✨　✨
+// `;
+// let starsComet = `　　💫
+// `;
+// const starsArray = [
+//   starsBlank,
+//   starsBlank,
+//   starsBlank,
+//   starsBlank,
+//   starsBlank,
+//   starsBlank,
+//   starsBlank,
+//   starsBlank,
+//   starsBlank,
+//   starsBlank,
+//   starsBlank,
+//   starsBlank,
+//   starsBlank,
+//   starsBlank,
+//   starsBlank,
+//   starsBlank,
+//   starsBlank,
+//   starsBlank,
+//   starsBlank,
+//   starsBlank,
+//   starsLeft1,
+//   starsLeft2,
+//   starsRight1,
+//   starsRight2,
+//   starsStar,
+//   starsStars,
+//   starsComet,
+// ];
 
-function starsPhase() {
-  return starsArray[Math.floor(Math.random() * starsArray.length)];
-}
-stars = starsPhase();
-stars.innerHTML = `${starsPhase()}`;
+// function starsPhase() {
+//   return starsArray[Math.floor(Math.random() * starsArray.length)];
+// }
+// stars = starsPhase();
+// stars.innerHTML = `${starsPhase()}`;
 
 let day = 0;
 
@@ -117,6 +118,8 @@ const flowerGender = [
   // used to randomly assign a gender; could create a function to automatically create an array reflecting the desired probability, e.g., 80% fertile would be an array with 4 "fertile" elements and 1 "infertile" element. Could call it genderOdds()
   "fertile",
   "fertile",
+  "fertile",
+  "weed",
   "infertile",
 ];
 
@@ -245,10 +248,10 @@ function startNewDay() {
   }
 
   // THIS MAKES THE BACKGROUND CHANGE COLORS WHEN NO LIVING FLOWERS LEFT
-  // if (flowers.some(child => child.gender === "fertile") === false) {
-  //     document.body.style.backgroundColor = "black";
-  //     document.body.style.color = "white";
-  // }
+  if (flowers.some((child) => child.gender === "fertile") === false) {
+    document.getElementById("newFarm").style.backgroundColor = "green";
+    document.getElementById("newFarm").style.color = "white";
+  }
 }
 
 var flowersFirst = [flowers[0]];
