@@ -117,7 +117,6 @@ function assignWeedSpecies() {
 const flowerGender = [
   // used to randomly assign a gender; could create a function to automatically create an array reflecting the desired probability, e.g., 80% fertile would be an array with 4 "fertile" elements and 1 "infertile" element. Could call it genderOdds()
   "fertile",
-  "fertile",
   "infertile",
 ];
 
@@ -243,6 +242,8 @@ function startNewDay() {
 
   if (day < numberOfFlowers) {
     clearInterval(autoClick);
+    document.getElementById("button").style.backgroundColor = "green";
+    document.getElementById("button").style.color = "white";
   }
 
   // THIS MAKES THE BACKGROUND CHANGE COLORS WHEN NO LIVING FLOWERS LEFT
