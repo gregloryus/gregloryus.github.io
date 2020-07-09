@@ -9,6 +9,7 @@ let lines = [];
 
 // Parameters for sliders/adjustments
 let newSize = 1; // stroke size
+let newOpacity = 100; // opacity of lines
 let newBranch = 4; // chance of branching
 let newTerm = 5; // chance of terminiating
 let newDense = 2; // multiplying velocity magnitude
@@ -124,7 +125,7 @@ class Walker {
       saturation = 100;
     }
     let brightness = 100;
-    let opacity = 100;
+    let opacity = newOpacity;
     let c = color(hue, saturation, brightness, opacity);
     stroke(c);
     strokeWeight(newSize);
