@@ -35,7 +35,7 @@ function setup() {
   lines.push(walker);
   background(0);
   noLoop();
-  setInterval(redraw, 10); // where 10 is the minimum time between frames in ms
+  setInterval(redraw, 5); // where 10 is the minimum time between frames in ms
 }
 
 // p5 draw, loops infinitely
@@ -66,7 +66,7 @@ class Walker {
     center = createVector(vw / 2, vh / 2);
     // try to create vector pointing from center to current position
     this.outgrowth = center.sub(this.pos);
-    this.outgrowth.mult(-0.0006 * (1 + lines.length / 200));
+    this.outgrowth.mult(-0.0006 * (1 + lines.length / 70));
 
     const roll = random(100);
     if (roll > 5) {
