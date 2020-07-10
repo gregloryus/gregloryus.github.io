@@ -40,9 +40,9 @@ function setup() {
 
 // p5 draw, loops infinitely
 function draw() {
-  // // This part makes it go super fast, comment out to go back to normal
-  noLoop();
-  setInterval(redraw, 0);
+  // // // This part makes it go super fast, comment out to go back to normal
+  // noLoop();
+  // setInterval(redraw, 0);
 
   for (walker of lines) {
     walker.update();
