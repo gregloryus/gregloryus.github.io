@@ -34,15 +34,15 @@ function setup() {
   walker = new Walker(vw / 2, vh / 2);
   lines.push(walker);
   background(0);
-  // noLoop();
-  // setInterval(redraw, 1); // where 10 is the minimum time between frames in ms
+  noLoop();
+  setInterval(redraw, 0); // where 10 is the minimum time between frames in ms
 }
 
 // p5 draw, loops infinitely
 function draw() {
   // // // This part makes it go super fast, comment out to go back to normal
   noLoop();
-  setInterval(redraw, 1);
+  setInterval(redraw, 50);
 
   for (walker of lines) {
     walker.update();
