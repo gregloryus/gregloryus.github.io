@@ -112,6 +112,7 @@ class Walker {
         if (lines.length === 0) {
           colorMode(HSB);
           background(1, 100, 100, 10);
+          background(0, 0, 0, 10);
           const nextWalker = new Walker(vw / 2, vh / 2);
           lines.push(nextWalker);
         }
@@ -126,6 +127,7 @@ class Walker {
       lines = [];
       colorMode(HSB);
       background(33, 60, 100, 10);
+      background(0, 0, 0, 10);
       const nextWalker = new Walker(vw / 2, vh / 2);
       lines.push(nextWalker);
     }
