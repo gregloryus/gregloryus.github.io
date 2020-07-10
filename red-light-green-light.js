@@ -35,7 +35,7 @@ function setup() {
   lines.push(walker);
   background(0);
   noLoop();
-  setInterval(redraw, 0); // where 10 is the minimum time between frames in ms
+  setInterval(redraw, 10); // where 10 is the minimum time between frames in ms
 }
 
 // p5 draw, loops infinitely
