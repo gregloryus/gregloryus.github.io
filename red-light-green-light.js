@@ -66,7 +66,7 @@ class Walker {
     center = createVector(vw / 2, vh / 2);
     // try to create vector pointing from center to current position
     this.outgrowth = center.sub(this.pos);
-    this.outgrowth.mult(-0.0006 * (1 + lines.length / 70));
+    this.outgrowth.mult(-0.0006 * (1 + lines.length / 10));
 
     const roll = random(100);
     if (roll > 5) {
