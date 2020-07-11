@@ -28,6 +28,13 @@ const vh = Math.max(
   window.innerHeight || 0
 );
 
+function superFast() {
+  if (vw > vh) {
+    noLoop();
+    setInterval(redraw, 0);
+  }
+}
+
 // p5 setup, runs once when page is loaded
 function setup() {
   createCanvas(vw, vh);
@@ -41,8 +48,9 @@ function setup() {
 // p5 draw, loops infinitely
 function draw() {
   // // // This part makes it go super fast, comment out to go back to normal
+  superFast();
   // noLoop();
-  // setInterval(redraw, 50);
+  // setInterval(redraw, 0);
 
   for (walker of lines) {
     walker.update();
