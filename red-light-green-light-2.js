@@ -40,7 +40,7 @@ function setup() {
   createCanvas(vw, vh);
   walker = new Walker(vw / 2, vh / 2);
   lines.push(walker);
-  colorMode(HSB)
+  colorMode(HSB, 100, 100, 100, 100)
   background(random(100), 100, 100, 100);
   noLoop();
   setInterval(redraw, 5); // where 10 is the minimum time between frames in ms
