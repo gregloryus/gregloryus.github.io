@@ -18,9 +18,9 @@ let newSat = 5; // how quickly saturation rises
 let newStarSize = 25; // starburst size
 let newStarPts = 11; // starburst points
 
-let bgHue = Math.random(100);
-let bgHueEdge = (bgHue + (100/3)) % 100
-let bgHueInt = (bgHue + (200/3)) % 100
+let bgHue = random(100);
+let bgHueEdge = (bgHue + 100 / 3) % 100;
+let bgHueInt = (bgHue + 200 / 3) % 100;
 
 // Creates variables for the viewport w/h
 const vw = Math.max(
@@ -41,10 +41,10 @@ function superFast() {
 
 // p5 setup, runs once when page is loaded
 function setup() {
-  createCanvas(vw, vh); // would be fun to limit the size to 256, but blow it up to the max size of the device, so it takes up the full width but retains its 256 square 
+  createCanvas(vw, vh); // would be fun to limit the size to 256, but blow it up to the max size of the device, so it takes up the full width but retains its 256 square
   walker = new Walker(vw / 2, vh / 2);
   lines.push(walker);
-  colorMode(HSB, 100, 100, 100, 100)
+  colorMode(HSB, 100, 100, 100, 100);
   background(bgHue, 100, 100, 100);
   noLoop();
   setInterval(redraw, 5); // where 10 is the minimum time between frames in ms
