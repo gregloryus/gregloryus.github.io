@@ -18,6 +18,10 @@ let newSat = 5; // how quickly saturation rises
 let newStarSize = 25; // starburst size
 let newStarPts = 11; // starburst points
 
+let bgHue = Math.random(100);
+let bgHueEdge = (bgHue + (100/3)) % 100
+let bgHueInt = (bgHue + (200/3)) % 100
+
 // Creates variables for the viewport w/h
 const vw = Math.max(
   document.documentElement.clientWidth || 0,
@@ -41,7 +45,7 @@ function setup() {
   walker = new Walker(vw / 2, vh / 2);
   lines.push(walker);
   colorMode(HSB, 100, 100, 100, 100)
-  background(random(100), random(100), random(100), random(100));
+  background(bgHue, 100, 100, 100);
   noLoop();
   setInterval(redraw, 5); // where 10 is the minimum time between frames in ms
 }
@@ -107,7 +111,7 @@ class Walker {
         );
         if (lines.length === 1) {
           colorMode(HSB);
-          color(1, 100, 100, 1);
+          color(bgHueInt, 100, 100, 1);
           star(
             this.pos.x, // x location
             this.pos.y, // y location
@@ -120,7 +124,7 @@ class Walker {
         console.log("pop");
         if (lines.length === 0) {
           colorMode(HSB);
-          background(1, 100, 100, 10);
+          background(bgHueInt, 100, 100, 10);
           background(0, 0, 0, 10);
           const nextWalker = new Walker(vw / 2, vh / 2);
           lines.push(nextWalker);
@@ -135,7 +139,7 @@ class Walker {
     ) {
       lines = [];
       colorMode(HSB);
-      background(33, 60, 100, 10);
+      background(bgHueEdge, 100, 100, 10);
       background(0, 0, 0, 10);
       const nextWalker = new Walker(vw / 2, vh / 2);
       lines.push(nextWalker);
