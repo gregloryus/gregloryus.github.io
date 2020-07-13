@@ -37,7 +37,7 @@ function superFast() {
 
 // p5 setup, runs once when page is loaded
 function setup() {
-  createCanvas(vw, vh);
+  createCanvas(512, 512);
   walker = new Walker(vw / 2, vh / 2);
   lines.push(walker);
   colorMode(HSB, 100, 100, 100, 100)
