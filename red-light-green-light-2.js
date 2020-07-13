@@ -37,7 +37,7 @@ function superFast() {
 
 // p5 setup, runs once when page is loaded
 function setup() {
-  createCanvas(512, 512);
+  createCanvas(256, 256); // would be fun to limit the size to 256, but blow it up to the max size of the device, so it takes up the full width but retains its 256 square 
   walker = new Walker(vw / 2, vh / 2);
   lines.push(walker);
   colorMode(HSB, 100, 100, 100, 100)
