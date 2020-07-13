@@ -18,7 +18,7 @@ let newSat = 5; // how quickly saturation rises
 let newStarSize = 25; // starburst size
 let newStarPts = 11; // starburst points
 
-let bgHue = random(100);
+let bgHue = Math.random() * 100;
 let bgHueEdge = (bgHue + 100 / 3) % 100;
 let bgHueInt = (bgHue + 200 / 3) % 100;
 
