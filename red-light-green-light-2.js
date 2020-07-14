@@ -128,7 +128,7 @@ class Walker {
           currentHue = (currentHue + 100 / 3) % 100;
           background(currentHue, 100, 100, 10);
           const nextWalker = new Walker(vw / 2, vh / 2);
-          lines.push(nextWalker);
+          lines.push(nextWalker); // whatever
         }
       }
     }
