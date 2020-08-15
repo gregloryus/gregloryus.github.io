@@ -2,7 +2,7 @@ window.onload = () => {
   var tree = document.getElementById("tree");
   // var addNewDayButton = document.getElementById("button");
   // addNewDayButton.addEventListener("click", startNewDay);
-  startNewDay;
+  startNewDay();
 };
 
 let changingSize = 1;
