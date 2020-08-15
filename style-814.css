@@ -1,6 +1,7 @@
 body {
   font-family: "Comic Sans MS", cursive, sans-serif;
   text-align: center;
+  background: black;
   /* backgrounds can be more than colors. they can be images, or even gradients using this complicated-ass syntax. and these gradients can be heavily abused to make wacky patterns */
   /* background: linear-gradient(180deg, rgba(0,191,255,1),white, rgba(255,255,255,1)); */
   margin: 64px;
