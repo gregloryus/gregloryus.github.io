@@ -270,9 +270,6 @@ function flowerDblClick(id) {
 // GOAL: Make the flower clicked produce a new offspring; complete all the functinos startNewDay does
 function flowerClick(id) {
   let flower = flowers[id - 1];
-  if (flower.children.length() > 2) {
-  return
-  }
   flowers.push({
     ...startingFlower,
     id: flowers[flowers.length - 1].id + 1,
