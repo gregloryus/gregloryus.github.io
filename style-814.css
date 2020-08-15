@@ -1,0 +1,132 @@
+body {
+  font-family: "Comic Sans MS", cursive, sans-serif;
+  text-align: center;
+  /* backgrounds can be more than colors. they can be images, or even gradients using this complicated-ass syntax. and these gradients can be heavily abused to make wacky patterns */
+  /* background: linear-gradient(180deg, rgba(0,191,255,1),white, rgba(255,255,255,1)); */
+  margin: 64px;
+}
+
+article {
+  position: relative;
+}
+
+.name {
+  font-size: x-large;
+}
+
+.celestial {
+  font-size: xx-large;
+}
+
+p {
+  margin-block-start: 0.25em;
+  margin-block-end: 0.25em;
+}
+
+.stars {
+  font-size: 6vw;
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 10%;
+  margin-left: auto;
+  margin-right: auto;
+  width: 100px;
+}
+
+button {
+  font-family: "Comic Sans MS", cursive, sans-serif;
+}
+
+.center {
+  margin: auto;
+}
+
+#chart {
+  margin: auto;
+}
+
+/* It's supposed to look like a tree diagram */
+.tree,
+.tree ul,
+.tree li {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  position: relative;
+}
+
+.tree {
+  margin: 0 0 1em;
+  text-align: center;
+}
+.tree,
+.tree ul {
+  display: table;
+}
+.tree ul {
+  width: 100%;
+}
+.tree li {
+  display: table-cell;
+  padding: 0.5em 0;
+  vertical-align: top;
+}
+/* _________ */
+.tree li:before {
+  outline: solid 1px #666;
+  content: "";
+  left: 0;
+  position: absolute;
+  right: 0;
+  top: 0;
+}
+.tree li:first-child:before {
+  left: 50%;
+}
+.tree li:last-child:before {
+  right: 50%;
+}
+
+.tree code,
+.tree span {
+  border: solid 0.1em #666;
+  border-radius: 0.2em;
+  display: inline-block;
+  margin: 0 0.2em 0.5em;
+  padding: 0.2em 0.5em;
+  position: relative;
+}
+/* If the tree represents DOM structure */
+.tree code {
+  font-family: monaco, Consolas, "Lucida Console", monospace;
+}
+
+/* | */
+.tree ul:before,
+.tree code:before,
+.tree span:before {
+  outline: solid 1px #666;
+  content: "";
+  height: 0.5em;
+  left: 50%;
+  position: absolute;
+}
+.tree ul:before {
+  top: -0.5em;
+}
+.tree code:before,
+.tree span:before {
+  top: -0.55em;
+}
+
+/* The root node doesn't connect upwards */
+.tree > li {
+  margin-top: 0;
+}
+.tree > li:before,
+.tree > li:after,
+.tree > li > code:before,
+.tree > li > span:before {
+  outline: none;
+}
