@@ -1,10 +1,51 @@
 body {
-  font-family: "Comic Sans MS", cursive, sans-serif;
+  font-family: 'Codystar', cursive;   
+  /* font-family: "Comic Sans MS", cursive, sans-serif; */
   text-align: center;
   background: black;
+  background: black;
+  color: #c2e6ff;
+  font-size: 4vw;
+  color: rgba(240, 248, 255, 100)
+
   /* backgrounds can be more than colors. they can be images, or even gradients using this complicated-ass syntax. and these gradients can be heavily abused to make wacky patterns */
   /* background: linear-gradient(180deg, rgba(0,191,255,1),white, rgba(255,255,255,1)); */
   margin: 64px;
+}
+
+body {
+  padding: 0;
+  margin: 0;
+  background: black;
+  color: #c2e6ff;
+  text-align: center;
+  font-family: 'Codystar', cursive;    
+  font-size: 4vw;
+  color: rgba(240, 248, 255, 100)
+}
+
+h1 {
+animation: color-change 8s infinite;
+animation-direction: alternate;
+}
+
+a {
+animation: color-change 4s infinite;
+animation-direction: alternate-reverse;
+}
+
+p {
+animation: color-change 10s infinite;
+animation-direction: alternate;
+}
+
+@keyframes color-change {
+0% { color:	#ff71ce }
+20% { color: #01cdfe }
+40% { color: #05ffa1}
+60% { color: #b967ff}
+80% { color: #fffb96}
+100% { color: white }
 }
 
 article {
@@ -75,7 +116,7 @@ button {
 }
 /* _________ */
 .tree li:before {
-  outline: solid 1px #666;
+  outline: solid 1px #fff;
   content: "";
   left: 0;
   position: absolute;
@@ -91,12 +132,13 @@ button {
 
 .tree code,
 .tree span {
-  border: solid 0.1em #666;
+  border: solid 0.1em #fff;
   border-radius: 0.2em;
   display: inline-block;
   margin: 0 0.2em 0.5em;
-  padding: 0.2em 0.5em;
+  padding: 0;
   position: relative;
+  height: 100px;
 }
 /* If the tree represents DOM structure */
 .tree code {
@@ -107,7 +149,7 @@ button {
 .tree ul:before,
 .tree code:before,
 .tree span:before {
-  outline: solid 1px #666;
+  outline: solid 1px #fff;
   content: "";
   height: 0.5em;
   left: 50%;
