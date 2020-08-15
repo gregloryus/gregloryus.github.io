@@ -3,7 +3,6 @@ body {
   /* font-family: "Comic Sans MS", cursive, sans-serif; */
   text-align: center;
   background: black;
-  background: black;
   color: #c2e6ff;
   font-size: 4vw;
   color: rgba(240, 248, 255, 100);
@@ -13,7 +12,7 @@ body {
   /* background: linear-gradient(180deg, rgba(0,191,255,1),white, rgba(255,255,255,1)); */
 }
 
-body {
+/* body {
   padding: 0;
   margin: 0;
   background: black;
@@ -22,22 +21,7 @@ body {
   font-family: "Codystar", cursive;
   font-size: 4vw;
   color: rgba(240, 248, 255, 100);
-}
-
-h1 {
-  animation: color-change 8s infinite;
-  animation-direction: alternate;
-}
-
-a {
-  animation: color-change 4s infinite;
-  animation-direction: alternate-reverse;
-}
-
-p {
-  animation: color-change 10s infinite;
-  animation-direction: alternate;
-}
+} */
 
 @keyframes color-change {
   0% {
@@ -75,6 +59,8 @@ article {
 p {
   margin-block-start: 0.25em;
   margin-block-end: 0.25em;
+  animation: color-change 10s infinite;
+  animation-direction: alternate;
 }
 
 .stars {
