@@ -1,47 +1,17 @@
 body {
-  font-family: "Codystar", cursive;
-  /* font-family: "Comic Sans MS", cursive, sans-serif; */
+  font-family: "Comic Sans MS", cursive, sans-serif;
   text-align: center;
   background: black;
-  color: #c2e6ff;
-  font-size: 4vw;
-  color: rgba(240, 248, 255, 100);
-  margin: 64px;
+  color: white;
 
   /* backgrounds can be more than colors. they can be images, or even gradients using this complicated-ass syntax. and these gradients can be heavily abused to make wacky patterns */
   /* background: linear-gradient(180deg, rgba(0,191,255,1),white, rgba(255,255,255,1)); */
+  margin: 64px;
 }
 
-/* body {
-  padding: 0;
-  margin: 0;
-  background: black;
-  color: #c2e6ff;
-  text-align: center;
-  font-family: "Codystar", cursive;
-  font-size: 4vw;
-  color: rgba(240, 248, 255, 100);
-} */
-
-@keyframes color-change {
-  0% {
-    color: #ff71ce;
-  }
-  20% {
-    color: #01cdfe;
-  }
-  40% {
-    color: #05ffa1;
-  }
-  60% {
-    color: #b967ff;
-  }
-  80% {
-    color: #fffb96;
-  }
-  100% {
-    color: white;
-  }
+div {
+  animation: color-change 10s infinite;
+  animation-direction: alternate;
 }
 
 article {
@@ -59,8 +29,6 @@ article {
 p {
   margin-block-start: 0.25em;
   margin-block-end: 0.25em;
-  animation: color-change 10s infinite;
-  animation-direction: alternate;
 }
 
 .stars {
@@ -170,4 +138,25 @@ button {
 .tree > li > code:before,
 .tree > li > span:before {
   outline: none;
+}
+
+@keyframes color-change {
+  0% {
+    color: #ff71ce;
+  }
+  20% {
+    color: #01cdfe;
+  }
+  40% {
+    color: #05ffa1;
+  }
+  60% {
+    color: #b967ff;
+  }
+  80% {
+    color: #fffb96;
+  }
+  100% {
+    color: white;
+  }
 }
