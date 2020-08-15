@@ -1,13 +1,13 @@
 body {
-    padding: 0;
-    margin: 0;
-    background: black;
-    color: #c2e6ff;
-    text-align: center;
-    font-family: 'Codystar', cursive;    
-    font-size: 4vw;
-    color: rgba(240, 248, 255, 100)
-  }
+  padding: 0;
+  margin: 0;
+  background: black;
+  color: #c2e6ff;
+  text-align: center;
+  font-family: "Codystar", cursive;
+  font-size: 4vw;
+  color: rgba(240, 248, 255, 100);
+}
 
 h1 {
   animation: color-change 8s infinite;
@@ -19,11 +19,28 @@ a {
   animation-direction: alternate-reverse;
 }
 
+p {
+  animation: color-change 10s infinite;
+  animation-direction: alternate;
+}
+
 @keyframes color-change {
-  0% { color:	#ff71ce }
-  20% { color: #01cdfe }
-  40% { color: #05ffa1}
-  60% { color: #b967ff}
-  80% { color: #fffb96}
-  100% { color: white }
+  0% {
+    color: #ff71ce;
+  }
+  20% {
+    color: #01cdfe;
+  }
+  40% {
+    color: #05ffa1;
+  }
+  60% {
+    color: #b967ff;
+  }
+  80% {
+    color: #fffb96;
+  }
+  100% {
+    color: white;
+  }
 }
