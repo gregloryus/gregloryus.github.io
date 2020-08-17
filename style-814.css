@@ -37,6 +37,11 @@ p {
   width: 100px;
 }
 
+div {
+  animation: color-change 10s infinite;
+  animation-direction: alternate;
+}
+
 button {
   font-family: "Codystar", "Comic Sans MS", sans-serif;
 }
@@ -133,4 +138,25 @@ button {
 .tree > li > code:before,
 .tree > li > span:before {
   outline: none;
+}
+
+@keyframes color-change {
+  0% {
+    color: #ff71ce;
+  }
+  20% {
+    color: #01cdfe;
+  }
+  40% {
+    color: #05ffa1;
+  }
+  60% {
+    color: #b967ff;
+  }
+  80% {
+    color: #fffb96;
+  }
+  100% {
+    color: white;
+  }
 }
