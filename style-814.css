@@ -1,6 +1,5 @@
 body {
-  font-family: "Codystar", "MS Comic Sans", cursive, sans-serif;
-  font-size: 4vw;
+  font-family: "Codystar", "Comic Sans MS", cursive, sans-serif;
   text-align: center;
   background: black;
   color: white;
@@ -8,11 +7,6 @@ body {
   /* backgrounds can be more than colors. they can be images, or even gradients using this complicated-ass syntax. and these gradients can be heavily abused to make wacky patterns */
   /* background: linear-gradient(180deg, rgba(0,191,255,1),white, rgba(255,255,255,1)); */
   margin: 64px;
-}
-
-div {
-  animation: color-change 10s infinite;
-  animation-direction: alternate;
 }
 
 article {
@@ -44,7 +38,7 @@ p {
 }
 
 button {
-  font-family: "Comic Sans MS", sans-serif;
+  font-family: "Codystar", "Comic Sans MS", sans-serif;
 }
 
 .center {
@@ -139,25 +133,4 @@ button {
 .tree > li > code:before,
 .tree > li > span:before {
   outline: none;
-}
-
-@keyframes color-change {
-  0% {
-    color: #ff71ce;
-  }
-  20% {
-    color: #01cdfe;
-  }
-  40% {
-    color: #05ffa1;
-  }
-  60% {
-    color: #b967ff;
-  }
-  80% {
-    color: #fffb96;
-  }
-  100% {
-    color: white;
-  }
 }
