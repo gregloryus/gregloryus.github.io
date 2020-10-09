@@ -92,7 +92,7 @@ class Walker {
         const newWalker = new Walker(this.pos.x, this.pos.y);
         lines.push(newWalker);
         console.log("new walker attempted");
-        if (lines.length > 10000) {
+        if (lines.length > 1000) {
           lines = [];
           background(0);
           resetCounter++;
