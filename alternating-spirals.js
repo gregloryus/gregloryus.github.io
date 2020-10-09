@@ -9,7 +9,7 @@ let resetCounter = 1;
 let lines = [];
 
 // Parameters for sliders/adjustments
-let newSize = 1; // stroke size
+let newSize = 5; // stroke size
 let newOpacity = 100; // opacity of lines
 let newBranch = 7; // chance of branching
 let newTerm = 3; // chance of terminiating
