@@ -46,7 +46,7 @@ function draw() {
   //   setInterval(redraw, 0);
 
   if (frameCount % 3 === 1 && lines.length < 999) {
-    walker = new Walker(vw / 2, 0);
+    walker = new Walker(random(width), 0);
     lines.push(walker);
   }
 
