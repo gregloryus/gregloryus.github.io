@@ -79,8 +79,8 @@ class Walker {
       p5.Vector.fromAngle(TWO_PI * 0.5, random(5)),
     ];
 
-    let noisyLeft = p5.Vector.fromAngle(TWO_PI * 1.0, 0 + waterCurrent);
-    let noisyRight = p5.Vector.fromAngle(TWO_PI * 0.5, 1 - waterCurrent);
+    let noisyLeft = p5.Vector.fromAngle(TWO_PI * 1.0, 1 + waterCurrent);
+    let noisyRight = p5.Vector.fromAngle(TWO_PI * 0.5, 2 - waterCurrent);
 
     let noisyUp = p5.Vector.fromAngle(TWO_PI * 0.75, 0 + gravCurrent);
     let noisyDown = p5.Vector.fromAngle(TWO_PI * 0.25, 1 + 1 - gravCurrent);
