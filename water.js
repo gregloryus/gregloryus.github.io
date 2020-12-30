@@ -10,7 +10,7 @@ let lines = [];
 
 // Parameters for sliders/adjustments
 let newSize = 1; // stroke size
-let newOpacity = 100; // opacity of lines
+let newOpacity = 10; // opacity of lines
 let newBranch = 0; // chance of branching
 let newTerm = 5; // chance of terminiating
 let newDense = 1; // multiplying velocity magnitude
