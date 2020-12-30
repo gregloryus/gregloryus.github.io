@@ -75,7 +75,7 @@ class Walker {
     let waterCurrent = noise(frameCount / 500 + this.pos.y / 100);
     let gravCurrent = noise(12345 + frameCount / 500 + this.pos.x / 100);
 
-    // this.hue = 110 - waterCurrent * 50 - gravCurrent * 50;
+    this.hue = 110 - waterCurrent * 50 - gravCurrent * 50;
 
     let leftRight = [
       p5.Vector.fromAngle(TWO_PI * 1.0, random(5)),
