@@ -42,7 +42,7 @@ const vh = Math.max(
 function setup() {
   createCanvas(vw, vh);
 
-  sun = new Walker(width / 2, height/2);
+  sun = new Walker(width / 2, (height / 4) * 3);
   sun.water = false;
   sun.fire = true;
   sun.r = width / 20;
@@ -84,7 +84,7 @@ function draw() {
   // }
 
   if (frameCount % releaseSpeed === 1 && lines.length < numOfLines) {
-    walker = new Walker(width / 2, height/2);
+    walker = new Walker(width / 2, height / 2);
     lines.push(walker);
   }
 
@@ -95,7 +95,7 @@ function draw() {
 
   for (walker of tree) {
     walker.show();
-    if (walker.pos.y < height / 2 - lines[0].r) {
+    if (walker.pos.y < (height / 4) * 3 + lines[0].r) {
       frozen = true;
       stroke(51, 100, 100, 100);
       strokeWeight(4);
@@ -108,15 +108,12 @@ function draw() {
 
   for (var i = 0; i < lines.length; i++) {
     for (var j = 0; j < tree.length; j++) {
-      if (
-        checkDist(lines[i].pos, tree[j].pos) &&
-        lines[i].pos.y > height / 2
-      ) {
+      if (checkDist(lines[i].pos, tree[j].pos) && lines[i].pos.y > height / 2) {
         lines[i].stuck = true;
         lines[i].rand = random(100);
         tree.push(lines[i]);
         lines.splice(i, 1);
-        lines.push(new Walker(random(width), 0));
+        lines.push(new Walker(width / 2, height / 2));
       }
     }
   }
@@ -168,7 +165,7 @@ class Walker {
         if (this.sunDist < lines[0].r * 2) {
           this.temp = this.temp + (width / 4 - this.sunDist) / 200;
           if (this.sunDist < lines[0].r + 1) {
-            this.temp = this.temp + (width / 4 - this.sunDist) / 100
+            this.temp = this.temp + (width / 4 - this.sunDist) / 100;
           }
         }
       }
@@ -289,12 +286,13 @@ class Walker {
     //   lines.push(nextWalker);
     // }
     if (this.pos.y > height) {
-      if (this.pos.x > (width / 10) * 4.5 && this.pos.x < (width / 10) * 5.5) {
-        this.stuck = true;
-        tree.push(this);
-        lines.push(new Walker(width / 2, height / 2));
-        return;
-      }
+      // if (this.pos.x > (width / 10) * 4.5 && this.pos.x < (width / 10) * 5.5) {
+      //   this.stuck = true;
+      //   tree.push(this);
+      //   lines.push(new Walker(width / 2, height / 2));
+      //   return;
+      // }
+      this.pos.y = height;
     }
     if (this.pos.y < 0) {
       this.pos.y = 0;
