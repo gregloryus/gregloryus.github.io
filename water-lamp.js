@@ -240,10 +240,10 @@ class Walker {
       this.pos.y = 0;
     }
     if (this.pos.x > width) {
-      this.pos.x = width;
+      this.pos.x = 0;
     }
     if (this.pos.x < 0) {
-      this.pos.x = 0;
+      this.pos.x = width;
     }
   }
 
