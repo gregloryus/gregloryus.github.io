@@ -42,7 +42,7 @@ const vh = Math.max(
 function setup() {
   createCanvas(vw, vh);
 
-  sun = new Walker(width / 2, (height / 4) * 3);
+  sun = new Walker(width / 2, height/2);
   sun.water = false;
   sun.fire = true;
   sun.r = width / 20;
@@ -164,7 +164,7 @@ class Walker {
     if (this.water) {
       this.sunDist = this.pos.dist(lines[0].pos);
       if (this.sunDist < lines[0].r * 3) {
-        this.temp = this.temp + (width / 4 - this.sunDist) / 1000;
+        this.temp = this.temp + (width / 4 - this.sunDist) / 500;
         if (this.sunDist < lines[0].r * 2) {
           this.temp = this.temp + (width / 4 - this.sunDist) / 200;
           if (this.sunDist < lines[0].r + 1) {
