@@ -5,7 +5,7 @@ let walker;
 let center;
 let resetCounter = 1;
 let sun;
-let releaseSpeed = 3;
+let releaseSpeed = 5;
 
 // Creating array that will hold lines
 let lines = [];
@@ -66,7 +66,7 @@ function draw() {
   // }
 
   if (frameCount % releaseSpeed === 1 && lines.length < numOfLines) {
-    walker = new Walker((width / 7) * 3 + random(width / 7), 0);
+    walker = new Walker((width / 7) * 3 + random(width / 7), height);
     lines.push(walker);
   }
 
