@@ -37,7 +37,7 @@ const vh = Math.max(
 function setup() {
   createCanvas(vw, vh);
 
-  sun = new Walker(width / 2, (height / 10) * 9);
+  sun = new Walker(width / 2, (height / 4) * 3);
   sun.water = false;
   sun.fire = true;
   sun.temp = 200;
@@ -66,7 +66,7 @@ function draw() {
   // }
 
   if (frameCount % releaseSpeed === 1 && lines.length < numOfLines) {
-    walker = new Walker(width / 2, (height / 3) * 2);
+    walker = new Walker(random(width), 0);
     lines.push(walker);
   }
 
@@ -100,7 +100,7 @@ class Walker {
   update() {
     //if you're in the upper 3/4 of the canvas, you lose heat faster as your height rises
     if (this.pos.y < (height / 4) * 3) {
-      this.temp = this.temp - (height - this.pos.y) / height / 3;
+      this.temp = this.temp - (height - this.pos.y) / height / 4;
     }
 
     //if you're in the bottom 4thth of the canvas, you gain heat as you approach the bottom
@@ -111,8 +111,8 @@ class Walker {
 
     // if you're near the sun, you get hotter
     if (this.water) {
-      if (this.pos.dist(lines[0].pos) < width / 5) {
-        this.temp = this.temp + (width / 5 - this.pos.dist(lines[0].pos)) / 100;
+      if (this.pos.dist(lines[0].pos) < width / 4) {
+        this.temp = this.temp + (width / 4 - this.pos.dist(lines[0].pos)) / 60;
         if (this.pos.dist(lines[0].pos) < width / 20) {
           this.temp =
             this.temp + (width / 5 - this.pos.dist(lines[0].pos)) / 200;
