@@ -66,7 +66,7 @@ function draw() {
   // }
 
   if (frameCount % releaseSpeed === 1 && lines.length < numOfLines) {
-    walker = new Walker(random(width), 0);
+    walker = new Walker((width / 7) * 3 + random(width / 7), 0);
     lines.push(walker);
   }
 
