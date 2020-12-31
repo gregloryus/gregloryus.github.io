@@ -95,7 +95,7 @@ function draw() {
 
   for (walker of tree) {
     walker.show();
-    if (walker.pos.y < height / 4) {
+    if (walker.pos.y < height / 2 - lines[0].r) {
       frozen = true;
       stroke(51, 100, 100, 100);
       strokeWeight(4);
@@ -110,7 +110,7 @@ function draw() {
     for (var j = 0; j < tree.length; j++) {
       if (
         checkDist(lines[i].pos, tree[j].pos) &&
-        lines[i].pos.y > height / 4 - 2
+        lines[i].pos.y > height / 2
       ) {
         lines[i].stuck = true;
         lines[i].rand = random(100);
@@ -168,7 +168,7 @@ class Walker {
         if (this.sunDist < lines[0].r * 2) {
           this.temp = this.temp + (width / 4 - this.sunDist) / 200;
           if (this.sunDist < lines[0].r + 1) {
-            this.temp = this.temp + (width / 4 - this.sunDist) / 150;
+            this.temp = this.temp + (width / 4 - this.sunDist) / 100
           }
         }
       }
