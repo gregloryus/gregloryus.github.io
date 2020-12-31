@@ -100,7 +100,7 @@ class Walker {
   update() {
     //if you're in the upper 3/4 of the canvas, you lose heat faster as your height rises
     if (this.pos.y < (height / 4) * 3) {
-      this.temp = this.temp - (height - this.pos.y) / height / 3;
+      this.temp = this.temp - (height - this.pos.y) / height / 2;
     }
 
     //if you're in the bottom 4thth of the canvas, you gain heat as you approach the bottom
