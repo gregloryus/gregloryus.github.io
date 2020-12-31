@@ -84,7 +84,7 @@ function draw() {
   // }
 
   if (frameCount % releaseSpeed === 1 && lines.length < numOfLines) {
-    walker = new Walker(width / 2, 0);
+    walker = new Walker(width / 2, height/2);
     lines.push(walker);
   }
 
@@ -116,13 +116,13 @@ function draw() {
         lines[i].rand = random(100);
         tree.push(lines[i]);
         lines.splice(i, 1);
-        lines.push(new Walker(width / 3 + random(width / 3), 0));
+        lines.push(new Walker(random(width), 0));
       }
     }
   }
   colorMode(RGB, 100, 100, 100, 100);
   stroke(color(100, 100, 100, 100));
-  if (frameCount % 50 === 1) {
+  if (frameCount % 20 === 1) {
     background(0, 0, 0, 5);
     // stroke(100, 0, 0, 100);
     // line(0, height, width, height);
