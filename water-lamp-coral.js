@@ -1,6 +1,6 @@
 // Initializing various things
 let coralStrokeSize = 1
-let coralDist = 1.5
+let coralDist = 1.75
 
 let pos;
 let prev;
@@ -54,6 +54,7 @@ function setup() {
     coral.fire = false;
     coral.stuck = true;
     coral.rand = random(100);
+    this.sat = 0
     tree.push(coral);
   }
 
@@ -140,6 +141,7 @@ class Walker {
     this.acc = 0;
     this.stuck = false;
     this.rand = Math.random();
+    this.sat = 100
   }
 
   update() {
@@ -321,7 +323,7 @@ class Walker {
     } else {
       // let hue = 50 + Math.abs(15 - (frameCount/50 % 30))
       let hue = this.hue;
-      let saturation = 100;
+      let saturation = this.sat;
       // let saturation = 100 - this.vel.magSq() * 25;
       let brightness = 100;
       let opacity = newOpacity;
