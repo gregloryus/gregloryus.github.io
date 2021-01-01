@@ -1,5 +1,5 @@
 // Initializing various things
-let coralStrokeSize = 2
+let coralStrokeSize = 1
 let coralDist = 2.5
 
 let pos;
@@ -114,9 +114,11 @@ function draw() {
       if (checkDist(lines[i].pos, tree[j].pos) && lines[i].pos.y > height / 2 && lines[i].pos.y < height - 3) {
         lines[i].stuck = true;
         lines[i].rand = random(100);
+        let newX = lines[i].pos.x
+        let newY = lines[i].pos.y
         tree.push(lines[i]);
         lines.splice(i, 1);
-        lines.push(new Walker(width / 2, height / 2));
+        lines.push(new Walker(newX, newY - height / 2));
       }
     }
   }
@@ -332,7 +334,7 @@ class Walker {
       if (this.stuck) {
         saturation = 40 + (frameCount/10 + this.rand % 150) % 40
         brightness = 100;
-        opacity = 5;
+        opacity = 2;
       }
 
       let c = color(hue, saturation, brightness, opacity);
