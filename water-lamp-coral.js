@@ -95,7 +95,7 @@ function draw() {
 
   for (walker of tree) {
     walker.show();
-    if (walker.pos.y < (height / 4) * 3 + lines[0].r) {
+    if (walker.pos.y < (height / 10) * 6 ) {
       frozen = true;
       stroke(51, 100, 100, 100);
       strokeWeight(4);
