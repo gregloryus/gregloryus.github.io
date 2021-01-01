@@ -1,6 +1,6 @@
 // Initializing various things
-let coralStrokeSize = 1
-let coralDist = 2.5
+let coralStrokeSize = 2
+let coralDist = 2
 
 let pos;
 let prev;
@@ -48,7 +48,7 @@ function setup() {
   sun.r = width / 20;
   lines.push(sun);
 
-  for (i = 0; i < 10; i++) {
+  for (i = 0; i < 3; i++) {
     coral = new Walker(width / 2, height - i);
     coral.water = false;
     coral.fire = false;
@@ -329,13 +329,14 @@ class Walker {
       if (this.stuck) {
         saturation = 40 + (frameCount/2 + this.rand % 150) % 40
         brightness = 100;
-        opacity = 10;
+        opacity = 100;
       }
 
       let c = color(hue, saturation, brightness, opacity);
       stroke(c);
       strokeWeight(newSize);
       if (this.stuck) {
+        strokeWeight(coralStrokeSize)
         point(this.pos.x, this.pos.y);
       } else {
         point(this.pos.x, this.pos.y);
