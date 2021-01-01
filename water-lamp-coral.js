@@ -119,7 +119,7 @@ function draw() {
         tree.push(lines[i]);
         lines.splice(i, 1);
         let replacement = new Walker(width/2, height/2);
-        replacement.temp = 99
+        replacement.temp = 150
         lines.push(replacement);
       }
     }
