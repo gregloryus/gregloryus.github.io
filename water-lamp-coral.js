@@ -328,10 +328,10 @@ class Walker {
 
       if (this.stuck) {
         colorMode(HSB, 360, 100, 100, 100);
-        hue = 345.7;
+        hue = this.hue
         saturation = (frameCount/2 + this.rand % 150) % 40
         brightness = 100;
-        opacity = 100;
+        opacity = 1;
       }
 
       let c = color(hue, saturation, brightness, opacity);
