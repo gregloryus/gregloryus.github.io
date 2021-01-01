@@ -103,6 +103,7 @@ function draw() {
       line(width, 0, width, height);
       line(width, height, 0, height);
       line(0, height, 0, 0);
+      window.location.reload()
     }
   }
 
