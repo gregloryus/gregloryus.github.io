@@ -329,8 +329,8 @@ class Walker {
 
       if (this.stuck) {
         colorMode(HSB, 360, 100, 100, 100);
-        hue = 4.11;
-        saturation = 50 + Math.abs(25 - ((frameCount + this.rand) % 150));
+        hue = 345.7;
+        saturation = 18 - (frameCount/2 % 15)
         brightness = 100;
         opacity = 100;
       }
