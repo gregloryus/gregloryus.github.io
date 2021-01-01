@@ -54,7 +54,7 @@ function setup() {
     coral.fire = false;
     coral.stuck = true;
     coral.rand = random(100);
-    this.sat = 0
+    coral.sat = 0
     tree.push(coral);
   }
 
