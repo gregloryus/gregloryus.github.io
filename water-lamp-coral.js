@@ -55,6 +55,7 @@ function setup() {
     coral.stuck = true;
     coral.rand = random(100);
     coral.sat = 0
+    coral.hue = 66
     tree.push(coral);
   }
 
