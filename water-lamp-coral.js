@@ -118,8 +118,8 @@ function draw() {
         let newY = lines[i].pos.y
         tree.push(lines[i]);
         lines.splice(i, 1);
-        let replacement = new Walker(newX, newY - height / 2);
-        replacement.temp = 70
+        let replacement = new Walker(random(width), newY - height / 2);
+        replacement.temp = 90
         lines.push(replacement);
       }
     }
