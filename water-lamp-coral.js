@@ -134,7 +134,7 @@ class Walker {
     this.pos = createVector(x, y);
     this.water = true;
     this.fire = false;
-    this.hue = 66;
+    this.hue = 1;
     this.temp = 100;
     this.uplift = p5.Vector.fromAngle(TWO_PI * 0.75, 1);
     this.acc = 0;
@@ -327,9 +327,7 @@ class Walker {
       let opacity = newOpacity;
 
       if (this.stuck) {
-        colorMode(HSB, 360, 100, 100, 100);
-        hue = this.hue
-        saturation = (frameCount/2 + this.rand % 150) % 40
+        saturation = 40 + (frameCount/2 + this.rand % 150) % 40
         brightness = 100;
         opacity = 10;
       }
