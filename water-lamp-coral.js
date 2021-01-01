@@ -342,7 +342,7 @@ class Walker {
       strokeWeight(newSize);
       if (this.stuck) {
         strokeWeight(coralStrokeSize)
-        point(this.pos.x + 0.5 - random(1), this.pos.y + 0.5 - random(1));
+        point(this.pos.x , this.pos.y);
       } else {
         point(this.pos.x, this.pos.y);
       }
