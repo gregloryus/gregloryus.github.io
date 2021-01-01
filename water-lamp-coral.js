@@ -109,7 +109,7 @@ function draw() {
 
   for (var i = 0; i < lines.length; i++) {
     for (var j = 0; j < tree.length; j++) {
-      if (checkDist(lines[i].pos, tree[j].pos) && lines[i].pos.y > height / 2) {
+      if (checkDist(lines[i].pos, tree[j].pos) && lines[i].pos.y > height / 2 && lines[i].pos.y < height - 3) {
         lines[i].stuck = true;
         lines[i].rand = random(100);
         tree.push(lines[i]);
