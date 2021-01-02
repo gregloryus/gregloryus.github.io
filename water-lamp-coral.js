@@ -1,6 +1,6 @@
 // Initializing various things
-let coralStrokeSize = 1
-let coralDist = 2.5
+let coralStrokeSize = 2
+let coralDist = 4
 
 let pos;
 let prev;
