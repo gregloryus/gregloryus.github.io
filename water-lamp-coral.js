@@ -334,7 +334,7 @@ class Walker {
       let opacity = newOpacity;
 
       if (this.stuck) {
-        saturation = (frameCount + (this.rand * 10)) % 100
+        saturation = (frameCount + (this.rand * 10)) % 1000
         brightness = 100;
         opacity = 5;
       }
