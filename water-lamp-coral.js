@@ -1,6 +1,6 @@
 // Initializing various things
-let coralStrokeSize = 1.5
-let coralDist = 2
+let coralStrokeSize = 1.5;
+let coralDist = 2;
 
 let pos;
 let prev;
@@ -54,8 +54,8 @@ function setup() {
     coral.fire = false;
     coral.stuck = true;
     coral.rand = random(100);
-    coral.sat = 0
-    coral.hue = 66
+    coral.sat = 0;
+    coral.hue = 66;
     tree.push(coral);
   }
 
@@ -97,7 +97,7 @@ function draw() {
 
   for (walker of tree) {
     walker.show();
-    if (walker.pos.y < (height / 10) * 6 ) {
+    if (walker.pos.y < (height / 10) * 6) {
       frozen = true;
       stroke(51, 100, 100, 100);
       strokeWeight(4);
@@ -105,21 +105,25 @@ function draw() {
       line(width, 0, width, height);
       line(width, height, 0, height);
       line(0, height, 0, 0);
-      window.location.reload()
+      window.location.reload();
     }
   }
 
   for (var i = 0; i < lines.length; i++) {
     for (var j = 0; j < tree.length; j++) {
-      if (checkDist(lines[i].pos, tree[j].pos) && lines[i].pos.y > height / 2 && lines[i].pos.y < height - 3) {
+      if (
+        checkDist(lines[i].pos, tree[j].pos) &&
+        lines[i].pos.y > height / 2 &&
+        lines[i].pos.y < height - 3
+      ) {
         lines[i].stuck = true;
         lines[i].rand = random(100);
-        let newX = lines[i].pos.x
-        let newY = lines[i].pos.y
+        let newX = lines[i].pos.x;
+        let newY = lines[i].pos.y;
         tree.push(lines[i]);
         lines.splice(i, 1);
-        let replacement = new Walker(width/2, height/2);
-        replacement.temp = 150
+        let replacement = new Walker(width / 2, height / 2);
+        replacement.temp = 150;
         lines.push(replacement);
       }
     }
@@ -146,7 +150,7 @@ class Walker {
     this.acc = 0;
     this.stuck = false;
     this.rand = Math.random();
-    this.sat = 100
+    this.sat = 100;
   }
 
   update() {
@@ -334,7 +338,7 @@ class Walker {
       let opacity = newOpacity;
 
       if (this.stuck) {
-        saturation = 20+ (frameCount/5 + (this.rand)) % 400
+        saturation = 20 + ((frameCount / 5 + this.rand) % 200);
         brightness = 100;
         opacity = 5;
       }
@@ -343,8 +347,8 @@ class Walker {
       stroke(c);
       strokeWeight(newSize);
       if (this.stuck) {
-        strokeWeight(coralStrokeSize)
-        point(this.pos.x , this.pos.y);
+        strokeWeight(coralStrokeSize);
+        point(this.pos.x, this.pos.y);
       } else {
         point(this.pos.x, this.pos.y);
       }
