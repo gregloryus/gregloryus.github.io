@@ -126,8 +126,8 @@ function draw() {
         tree[j].stuckAge < plantAge &&
         checkDist(lines[i].pos, tree[j].pos) &&
         lines[i].pos.y > height / 2 &&
-        lines[i].pos.x > 5 &&
-        lines[i].pos.x < width - 5
+        lines[i].pos.x > width / 3 &&
+        lines[i].pos.x < width / 3 * 2
       ) {
         lines[i].stuck = true;
         lines[i].rand = random(100);
