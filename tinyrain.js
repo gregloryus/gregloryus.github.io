@@ -17,7 +17,7 @@ const vh = Math.max(
 let numOfLines = 244;
 let releaseSpeed = 2;
 let canvasSize = 333;
-let scaleNum = Math.min(vw, vh) / 100;
+let scaleNum = Math.min(vw, vh) / 150;
 
 let plantAge = 1000;
 
@@ -396,7 +396,7 @@ class Walker {
       saturation = this.sat;
     }
     if (!this.vapor && this.water && this.pos.y < (height / 4) * 3) {
-      opacity = 100 - (height - this.pos.y);
+      opacity = 125 - ((height - this.pos.y) / height) * 100;
     }
     let c = color(hue, saturation, brightness, opacity);
     stroke(c);
