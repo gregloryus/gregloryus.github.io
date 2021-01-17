@@ -17,7 +17,7 @@ const vh = Math.max(
 let numOfLines = 244;
 let releaseSpeed = 2;
 let canvasSize = 333;
-let scaleNum = Math.min(vw, vh) / 150;
+let scaleNum = Math.min(vw, vh) / 75
 
 let plantAge = 1000;
 
