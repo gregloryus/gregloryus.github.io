@@ -99,7 +99,7 @@ function draw() {
             let roll = random(100);
             if (roll < 1) {
               lines[i].vapor = false;
-              lines[i].temp = 0;
+              lines[i].temp = -100;
               lines.splice(j, 1);
               console.log("vapor turned to water");
               vaporCount = vaporCount - 2;
@@ -141,8 +141,8 @@ function draw() {
 
   colorMode(RGB, 100, 100, 100, 100);
   stroke(color(100, 100, 100, 100));
-  text(`${lines.length - vaporCount}`, width / 2, height / 2);
-  text(`${vaporCount}`, width / 2, height / 2 - 20);
+  // text(`${lines.length-vaporCount}`, width/2, height/2)
+  // text(`${vaporCount}`, width/2, height/2 - 20)
   if (frameCount % fadeRate === 1) {
     background(0, 0, 0, 5);
   }
@@ -171,16 +171,16 @@ class Walker {
       return;
     }
     //if your temp is over 125, turn into 2 vapors
-    if (this.temp > 125 && !this.vapor) {
-      let roll = random(10);
-      if (roll < 1 + this.temp / 100) {
+    if (this.water && !this.vapor) {
+      let roll = random(1000);
+      if (roll < this.temp / 100) {
         this.vapor = true;
         vaporCount++;
-        this.temp = 300;
+        this.temp = 0;
         let newVapor = new Walker(this.pos.x, this.pos.y);
         newVapor.vapor = true;
         vaporCount++;
-        newVapor.temp = 300;
+        newVapor.temp = 0;
         lines.push(newVapor);
       }
     }
@@ -395,6 +395,9 @@ class Walker {
     if (!this.vapor && this.water) {
       saturation = this.sat;
     }
+    if (!this.vapor && this.water && this.pos.y < (height / 4) * 3) {
+      opacity = 100 - (height - this.pos.y);
+    }
     let c = color(hue, saturation, brightness, opacity);
     stroke(c);
     strokeWeight(newSize);
@@ -404,7 +407,7 @@ class Walker {
     // }
     point(this.pos.x, this.pos.y);
     if (this.vapor) {
-      stroke(1, 0, 100, 5 + (height - this.pos.y));
+      stroke(1, 0, 100, height - this.pos.y);
       strokeWeight(1);
       point(this.pos.x, this.pos.y);
     }
