@@ -125,7 +125,7 @@ function draw() {
       if (
         tree[j].stuckAge < plantAge &&
         checkDist(lines[i].pos, tree[j].pos) &&
-        lines[i].pos.y > height / 2 &&
+        lines[i].pos.y > height / 5 &&
         lines[i].pos.x > width / 3 &&
         lines[i].pos.x < width / 3 * 2
       ) {
