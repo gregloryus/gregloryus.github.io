@@ -262,8 +262,8 @@ class Walker {
     // }
     point(this.pos.x, this.pos.y);
     if (this.vapor) {
-      stroke(1, 0, 100, map(this.pos.y, 0, height, 0.2, 100))
-      strokeWeight(map(this.pos.y, height, 0, 0.5, width/20))
+      stroke(1, 0, 100, map(this.pos.y, 0, height, 0.1, 100))
+      strokeWeight(map(this.pos.y, height, 0, 0.5, width/10))
       if (dotMode) {
         strokeWeight(1)
       }
