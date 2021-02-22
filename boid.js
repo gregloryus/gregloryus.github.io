@@ -17,9 +17,6 @@ class Walker {
   }
 
   rain() {
-    if (newVaporCount < 20) {
-      return
-    }
     if (!rain) {
       return
     }
