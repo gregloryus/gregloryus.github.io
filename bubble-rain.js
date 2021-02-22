@@ -109,7 +109,7 @@ function draw() {
   stroke(color(100, 100, 100, 100));
   // textSize(50)
   // text(`${lines.length}`, width/2, height/2)
-  // text(`${vaporCount}`, width/2, height/2 - 50)
+  text(`${newVaporCount}`, width/2, height/2 - 50)
   if (frameCount % 10 === 1) {
     background(0, 0, 0, 5);
   }
