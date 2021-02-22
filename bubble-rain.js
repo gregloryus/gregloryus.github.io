@@ -116,7 +116,7 @@ function draw() {
   }
 
   
-  if (frameCount % 10 === 1) {
+  if (frameCount % 20 === 1) {
     background(0, 0, 0, 5);
   }
   // background(0,0,0,3)
