@@ -255,15 +255,15 @@ class Walker {
     }
     let c = color(hue, saturation, brightness, opacity);
     stroke(c);
-    strokeWeight(1);
+    strokeWeight(map(this.pos.y, 0, height, 0.5, width/40));
     // if (this.vapor) {
     //   stroke(66, 0, 100, 0.2)
     //   strokeWeight(1 + (height-this.pos.y)/10)
     // }
     point(this.pos.x, this.pos.y);
     if (this.vapor) {
-      stroke(1, 0, 100, map(this.pos.y, 0, height, 1, 5))
-      strokeWeight(map(this.pos.y, height, 0, 0.1, 1))
+      stroke(1, 0, 100, map(this.pos.y, 0, height, 0.5, 100))
+      strokeWeight(map(this.pos.y, height, 0, 0.5, width/40))
       point(this.pos.x, this.pos.y)
     }
     // text(`${floor(this.temp)}`, this.pos.x, this.pos.y)
