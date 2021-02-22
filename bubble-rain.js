@@ -23,6 +23,7 @@ let numOfLines = 256
 let releaseSpeed = 2;
 let canvasSize = 333
 
+let newVaporCount = 0
 let vaporCount = 0
 let rain = false
 
@@ -60,11 +61,13 @@ function draw() {
     lines.push(walker);
   }
 
+
+
  //determines when it rains
-  if (vaporCount > rainStart) {
+  if (newVaporCount > rainStart) {
     rain = true
   }
-  if (vaporCount < rainStop) {
+  if (newVaporCount < rainStop) {
     rain = false
   }
   
@@ -87,9 +90,14 @@ function draw() {
 
 //have each line update and show
   for (var walker of lines) {
+    if (walker.vapor && walker.pos.y < height / 4) {
+      newVaporCount++
+    }
     walker.rain()
     walker.update();
     walker.show();
+    newVaporCount = 0
+    
   }
   
   colorMode(RGB, 100, 100, 100, 100);
