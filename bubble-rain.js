@@ -61,6 +61,13 @@ function draw() {
     lines.push(walker);
   }
 
+  newVaporCount = 0
+  for (walker of lines) {
+    if (this.vapor && this.pos.y < height/4) {
+      newVaporCount++
+    }
+  }
+
 
 
  //determines when it rains
@@ -90,14 +97,9 @@ function draw() {
 
 //have each line update and show
   for (var walker of lines) {
-    if (walker.vapor && walker.pos.y < height / 4) {
-      newVaporCount++
-    }
     walker.rain()
     walker.update();
     walker.show();
-    newVaporCount = 0
-    
   }
   
   colorMode(RGB, 100, 100, 100, 100);
