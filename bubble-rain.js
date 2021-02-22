@@ -28,7 +28,7 @@ let vaporCount = 0
 let rain = false
 let dotMode = false
 
-let rainStart = numOfLines*2
+let rainStart = numOfLines*2 - 1
 let rainStop = numOfLines
 
 let newOpacity = 100; // opacity of lines
