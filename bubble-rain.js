@@ -19,7 +19,7 @@ let quadTree
 
 //SLIDERS
 
-let numOfLines = 500
+let numOfLines = 100
 let releaseSpeed = 2;
 let canvasSize = 333
 
