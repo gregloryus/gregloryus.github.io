@@ -163,7 +163,7 @@ class Walker {
     // this.vel = this.vel * (1 + this.acc/100)
     // this.acc = this.acc - 1
     
-    this.vel.mult(1)
+    this.vel.mult(0.5)
 
     this.pos.add(this.vel);
 
@@ -249,14 +249,14 @@ class Walker {
     }
     let c = color(hue, saturation, brightness, opacity);
     stroke(c);
-    strokeWeight(noise(this.pos.x/50000)*50);
+    strokeWeight(noise(this.pos.x/100)*30);
     // if (this.vapor) {
     //   stroke(66, 0, 100, 0.2)
     //   strokeWeight(1 + (height-this.pos.y)/10)
     // }
     point(this.pos.x, this.pos.y);
     if (this.vapor) {
-      stroke(1, 0, 100, map(this.pos.y, 0, height, 0, 10))
+      stroke(1, 0, 100, map(this.pos.y, 0, height, 0, 5))
       strokeWeight(map(this.pos.y, height, 0, 0, 100))
       point(this.pos.x, this.pos.y)
     }
