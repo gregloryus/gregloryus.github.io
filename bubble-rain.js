@@ -109,7 +109,11 @@ function draw() {
   textSize(50)
   // text(`${lines.length}`, width/2, height/2)
 
-  text(`${newVaporCount} ${rain}`, width/2, height/3)
+  if (dotMode) {
+    text(`${newVaporCount} ${rain}`, width/2, height/3)
+  }
+
+  
   if (frameCount % 10 === 1) {
     background(0, 0, 0, 5);
   }
