@@ -26,6 +26,7 @@ let canvasSize = 333
 let newVaporCount = 0
 let vaporCount = 0
 let rain = false
+let dotMode = false
 
 let rainStart = numOfLines
 let rainStop = numOfLines/2
@@ -61,6 +62,7 @@ function draw() {
     lines.push(walker);
   }
 
+  newVaporCount = 0
   for (walker of lines) {
     if (walker.vapor) {
       newVaporCount++
@@ -107,7 +109,7 @@ function draw() {
   textSize(50)
   // text(`${lines.length}`, width/2, height/2)
 
-  text(`${newVaporCount}`, width/4, height/2)
+  text(`${newVaporCount}`, width/4*3, height/2)
   if (frameCount % 10 === 1) {
     background(0, 0, 0, 5);
   }
@@ -122,5 +124,13 @@ function checkDist(a, b) {
   var dy = b.y - a.y;
   if (Math.abs(dx) <= 1 && Math.abs(dy) <= 1) {
     return true;
+  }
+}
+
+function mouseClicked() {
+  if (!dotMode) {
+    dotMode = true
+  } else if (dotMode) {
+    dotMode = false
   }
 }
