@@ -19,7 +19,7 @@ let quadTree
 
 //SLIDERS
 
-let numOfLines = 100
+let numOfLines = 1000
 let releaseSpeed = 2;
 let canvasSize = 333
 
@@ -102,7 +102,7 @@ function draw() {
   // // }
   background(0,0,0,3)
   
-  quadTree.debugRender();
+  // quadTree.debugRender();
 }
 
 
