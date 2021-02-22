@@ -166,7 +166,7 @@ class Walker {
     // this.vel = this.vel * (1 + this.acc/100)
     // this.acc = this.acc - 1
     
-    this.vel.mult(0.5)
+    this.vel.mult(0.1)
 
     this.pos.add(this.vel);
 
