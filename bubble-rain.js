@@ -56,7 +56,7 @@ function draw() {
   
   //releases a set number of lines from the center of screen
   if (frameCount % releaseSpeed === 1 && lines.length < numOfLines) {
-    walker = new Walker(random(width), height / 2);
+    walker = new Walker(random(width), 0);
     lines.push(walker);
   }
 
