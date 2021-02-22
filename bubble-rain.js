@@ -70,12 +70,14 @@ function draw() {
 
 
  //determines when it rains
-  if (newVaporCount > rainStart) {
+ if (newVaporCount < rainStop) {
+  rain = false
+} 
+ 
+ if (newVaporCount > rainStart) {
     rain = true
   }
-  if (newVaporCount < rainStop) {
-    rain = false
-  }
+
   
 //if it's raining, for every line, check it against every line, and if both lines are vapor and in the upper 4th and the lines aren't the same line, then condensate
 // if (rain) {
