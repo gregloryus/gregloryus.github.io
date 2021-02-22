@@ -249,7 +249,7 @@ class Walker {
     }
     let c = color(hue, saturation, brightness, opacity);
     stroke(c);
-    strokeWeight(noise(this.pos.x/100)*30);
+    strokeWeight(width/100);
     // if (this.vapor) {
     //   stroke(66, 0, 100, 0.2)
     //   strokeWeight(1 + (height-this.pos.y)/10)
