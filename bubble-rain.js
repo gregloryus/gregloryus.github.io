@@ -63,7 +63,7 @@ function draw() {
 
   newVaporCount = 0
   for (walker of lines) {
-    if (this.vapor && this.pos.y < height/4) {
+    if (this.vapor) {
       newVaporCount++
     }
   }
