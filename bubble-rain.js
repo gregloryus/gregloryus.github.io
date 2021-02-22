@@ -61,7 +61,7 @@ function draw() {
     lines.push(walker);
   }
 
-  
+  newVaporCount = 0
   for (walker of lines) {
     if (this.vapor && this.pos.y < height/4) {
       newVaporCount++
@@ -102,8 +102,6 @@ function draw() {
     walker.update();
     walker.show();
   }
-
-  newVaporCount = 0
   
   colorMode(RGB, 100, 100, 100, 100);
   stroke(color(100, 100, 100, 100));
