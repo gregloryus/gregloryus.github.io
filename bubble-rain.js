@@ -19,7 +19,7 @@ let quadTree
 
 //SLIDERS
 
-let numOfLines = 100
+let numOfLines = 256
 let releaseSpeed = 2;
 let canvasSize = 333
 
@@ -97,10 +97,10 @@ function draw() {
   // textSize(50)
   // text(`${lines.length}`, width/2, height/2)
   // text(`${vaporCount}`, width/2, height/2 - 50)
-  // // if (frameCount % 2 === 1) {
-  // //   background(0, 0, 0, 5);
-  // // }
-  background(0,0,0,3)
+  if (frameCount % 10 === 1) {
+    background(0, 0, 0, 5);
+  }
+  // background(0,0,0,3)
   
   // quadTree.debugRender();
 }
