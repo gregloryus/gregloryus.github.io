@@ -28,8 +28,8 @@ let vaporCount = 0
 let rain = false
 let dotMode = false
 
-let rainStart = numOfLines*2 - 1
-let rainStop = numOfLines
+let rainStart = numOfLines*1.5
+let rainStop = numOfLines/2
 
 let newOpacity = 100; // opacity of lines
 let newSize = 1; // stroke size
@@ -109,7 +109,7 @@ function draw() {
   textSize(50)
   // text(`${lines.length}`, width/2, height/2)
 
-  text(`${newVaporCount} ${rain}`, width/2, height/3)
+  text(`${newVaporCount} ${rain}`, width/2, height/3*4)
   if (frameCount % 10 === 1) {
     background(0, 0, 0, 5);
   }
