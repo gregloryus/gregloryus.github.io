@@ -32,9 +32,9 @@ class Walker {
       return
     }
       
-    if (this.age < this.ageLimit) {
-      return
-    }
+    // if (this.age < this.ageLimit) {
+    //   return
+    // }
 
     for (const other of quadTree.getItemsInRadius(this.pos.x, this.pos.y, perceptionRadius, perceptionCount)) {
 
@@ -262,7 +262,7 @@ class Walker {
     // }
     point(this.pos.x, this.pos.y);
     if (this.vapor) {
-      stroke(1, 0, 100, map(this.pos.y, 0, height, 0, 5))
+      stroke(1, 0, 100, map(this.pos.y, 0, height, 0.2, 5))
       strokeWeight(map(this.pos.y, height, 0, 0, 100))
       point(this.pos.x, this.pos.y)
     }
