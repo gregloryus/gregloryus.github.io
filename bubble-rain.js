@@ -26,8 +26,8 @@ let canvasSize = 333
 let vaporCount = 0
 let rain = false
 
-let rainStart = numOfLines/2
-let rainStop = numOfLines/3
+let rainStart = numOfLines * 1.3
+let rainStop = numOfLines/4
 
 let newOpacity = 100; // opacity of lines
 let newSize = 1; // stroke size

@@ -17,6 +17,12 @@ class Walker {
   }
 
   rain() {
+    if (vaporCount < 20) {
+      return
+    }
+    if (!rain) {
+      return
+    }
     let perceptionRadius = 2;
     let perceptionCount = 6;
     if (this.pos.y > height/4) {
