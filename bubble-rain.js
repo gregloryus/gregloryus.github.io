@@ -61,9 +61,8 @@ function draw() {
     lines.push(walker);
   }
 
-  newVaporCount = 0
   for (walker of lines) {
-    if (this.vapor) {
+    if (walker.vapor) {
       newVaporCount++
     }
   }
