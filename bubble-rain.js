@@ -27,8 +27,8 @@ let newVaporCount = 0
 let vaporCount = 0
 let rain = false
 
-let rainStart = numOfLines * 1.3
-let rainStop = numOfLines/4
+let rainStart = numOfLines
+let rainStop = numOfLines/2
 
 let newOpacity = 100; // opacity of lines
 let newSize = 1; // stroke size
