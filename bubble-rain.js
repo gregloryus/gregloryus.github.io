@@ -111,6 +111,8 @@ function draw() {
 
   if (dotMode) {
     text(`${newVaporCount} ${rain}`, width/2, height/3)
+  } else if (!dotMode) {
+    console.log("no text displayed")
   }
 
   
