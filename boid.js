@@ -20,7 +20,7 @@ class Walker {
     if (!rain) {
       return
     }
-    let perceptionRadius = 2;
+    let perceptionRadius = 1;
     let perceptionCount = 6;
     if (this.pos.y > height/4) {
       return
@@ -37,12 +37,15 @@ class Walker {
 
       let d = dist(this.pos.x, this.pos.y, other.pos.x, other.pos.y);
 
-      if (other != this && d < perceptionRadius && other.vapor && other.age > other.ageLimit) {
-        this.vapor = false
-        this.temp = 0
-        lines.splice(lines.indexOf(other), 1)
-        console.log("splice attempted...vapor turned to water")
-        vaporCount = vaporCount -2
+      if (other != this && d < perceptionRadius && other.vapor) {
+        let roll = random(100)
+        if (roll < 1) {
+          this.vapor = false
+          this.temp = 0
+          lines.splice(lines.indexOf(other), 1)
+          console.log("splice attempted...vapor turned to water")
+          vaporCount = vaporCount -2
+        }
       }
     }
   }
