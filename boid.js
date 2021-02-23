@@ -38,7 +38,7 @@ class Walker {
       let d = dist(this.pos.x, this.pos.y, other.pos.x, other.pos.y);
 
       if (other != this && d < perceptionRadius && other.vapor) {
-        let roll = random(100)
+        let roll = random(10000)
         if (roll < 1) {
           this.vapor = false
           this.temp = 0
