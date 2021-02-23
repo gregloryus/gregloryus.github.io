@@ -140,3 +140,26 @@ function mouseClicked() {
     dotMode = false
   }
 }
+
+
+function touchStarted() {
+  if (!dotMode) {
+    dotMode = true
+  } else if (dotMode) {
+    dotMode = false
+  }
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
