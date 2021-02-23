@@ -64,7 +64,7 @@ function draw() {
 
   newVaporCount = 0
   for (walker of lines) {
-    if (walker.vapor) {
+    if (walker.vapor && walker.pos.y < height/4) {
       newVaporCount++
     }
   }
