@@ -87,7 +87,7 @@ function draw() {
     walker.update();
     walker.show();
   }
-  let sun = createVector(width/2, height*0.75)
+  let sun = createVector(width/2, height*0.95)
   let perceptionRadius = 100;
   let perceptionCount = 100;
 
