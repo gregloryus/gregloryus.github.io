@@ -87,8 +87,8 @@ function draw() {
     walker.update();
     walker.show();
   }
-  let sun = createVector(width/2, height*0.95)
-  let perceptionRadius = 100;
+  let sun = createVector(width/2, height)
+  let perceptionRadius = noise(frameCount/2000)*200
   let perceptionCount = 100;
 
   for (const other of quadTree.getItemsInRadius(sun.x, sun.y, perceptionRadius, perceptionCount)) {
