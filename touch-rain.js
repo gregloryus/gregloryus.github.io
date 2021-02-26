@@ -87,6 +87,20 @@ function draw() {
     walker.update();
     walker.show();
   }
+  let sun = createVector(width/2, height)
+  let perceptionRadius = 100;
+  let perceptionCount = 100;
+
+  for (const other of quadTree.getItemsInRadius(sun.x, sun.y, perceptionRadius, perceptionCount)) {
+
+      let d = dist(sun.x, sun.y, other.pos.x, other.pos.y);
+
+      if (d < perceptionRadius) {
+        other.temp = other.temp + (100 - d)/10
+        console.log("heating")
+      }
+    
+    }
   
   colorMode(RGB, 100, 100, 100, 100);
   stroke(color(100, 100, 100, 100));
