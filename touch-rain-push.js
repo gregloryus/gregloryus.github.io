@@ -50,7 +50,7 @@ function setup() {
 
 // p5 draw, loops forever
 function draw() {
-  line(mouseX, mouseY, pmouseX, pmouseY);
+  // line(mouseX, mouseY, pmouseX, pmouseY);
   pmouseX = mouseX
   pmouseY = mouseY
   quadTree.clear();
@@ -130,9 +130,9 @@ function mouseDragged() {
   dragForce.mult(0.2)
   // console.log(dragForce.mag())
   
-  noFill()
+  // noFill()
   
-  circle(mouseX, mouseY, 200)
+  // circle(mouseX, mouseY, 200)
   
 
   for (const other of quadTree.getItemsInRadius(mouseX, mouseY, perceptionRadius, perceptionCount)) {
