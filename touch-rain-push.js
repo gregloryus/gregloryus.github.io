@@ -35,6 +35,11 @@ function setup() {
   createCanvas(vw, vh);
   background(0);
   
+  for (i = 0; i < numOfLines; i++) {
+    walker = new Walker(random(width), random(height));
+    lines.push(walker);
+  }
+  
   quadTree = new QuadTree(Infinity, 30, new Rect(0, 0, width, height));
   
   noLoop();
@@ -45,16 +50,19 @@ function setup() {
 
 // p5 draw, loops forever
 function draw() {
+  line(mouseX, mouseY, pmouseX, pmouseY);
+  pmouseX = mouseX
+  pmouseY = mouseY
   quadTree.clear();
   for (const boid of lines) {
     quadTree.addItem(boid.pos.x, boid.pos.y, boid);
   }
   
   //releases a set number of lines from the center of screen
-  if (frameCount % releaseSpeed === 1 && lines.length < numOfLines) {
-    walker = new Walker(random(width), random(height));
-    lines.push(walker);
-  }
+  // if (frameCount % releaseSpeed === 1 && lines.length < numOfLines) {
+  //   walker = new Walker(random(width), random(height));
+  //   lines.push(walker);
+  // }
 
  //determines when it rains
   if (vaporCount > rainStart) {
@@ -87,20 +95,6 @@ function draw() {
     walker.update();
     walker.show();
   }
-  let sun = createVector(width/2, height)
-  let perceptionRadius = 10
-  let perceptionCount = 100;
-
-  for (const other of quadTree.getItemsInRadius(sun.x, sun.y, perceptionRadius, perceptionCount)) {
-
-      let d = dist(sun.x, sun.y, other.pos.x, other.pos.y);
-
-      if (d < perceptionRadius) {
-        other.temp = other.temp + (100 - d)/10
-        console.log("heating")
-      }
-    
-    }
   
   colorMode(RGB, 100, 100, 100, 100);
   stroke(color(100, 100, 100, 100));
@@ -125,17 +119,34 @@ function checkDist(a, b) {
 }
 
 function mouseDragged() {
+
   let perceptionRadius = 100;
   let perceptionCount = 100;
+  
+  let mouseV = createVector(mouseX, mouseY)
+  let pmouseV = createVector(pmouseX, pmouseY)
+  // line(mouseV.x, mouseV.y, pmouseV.x, pmouseV.y)
+  let dragForce = p5.Vector.sub(mouseV, pmouseV)
+  dragForce.mult(0.2)
+  // console.log(dragForce.mag())
+  
+  noFill()
+  
+  circle(mouseX, mouseY, 200)
+  
 
   for (const other of quadTree.getItemsInRadius(mouseX, mouseY, perceptionRadius, perceptionCount)) {
-
       let d = dist(mouseX, mouseY, other.pos.x, other.pos.y);
+      
+    
+    
+      other.temp = other.temp + (100 - d)/10
+      other.acc.add(dragForce)
+      other.acc.mult((100-d)/100)
+      
+      other.acc.limit(10)
+    
 
-      if (d < perceptionRadius) {
-        other.temp = other.temp + (100 - d)/10
-        console.log("heating")
-      }
     
     }
 }
