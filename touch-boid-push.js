@@ -7,7 +7,13 @@ class Walker {
     this.hue = 1;
     this.temp = 0;
     this.uplift = p5.Vector.fromAngle(TWO_PI * 0.75, 1);
-    this.acc = 0;
+    this.downlift = p5.Vector.fromAngle(TWO_PI * 0.25, 1);
+    this.acc = createVector();
+    this.vel = p5.Vector.random2D();
+    this.vel.normalize();
+    this.vel.setMag(1);
+    this.uplift = p5.Vector.fromAngle(TWO_PI * 0.75, 1);
+    this.downlift = p5.Vector.fromAngle(TWO_PI * 0.25, 1);
     this.stuck = false;
     this.rand = Math.random();
     this.sat = 100;
@@ -195,6 +201,8 @@ class Walker {
     // this.vel = this.vel * (1 + this.acc/100)
     // this.acc = this.acc - 1
     
+    this.vel.add(this.acc)
+    this.acc.mult(0.99)
     this.vel.mult(0.5)
 
     this.pos.add(this.vel);
