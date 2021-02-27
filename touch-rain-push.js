@@ -35,10 +35,10 @@ function setup() {
   createCanvas(vw, vh);
   background(0);
   
-  for (i = 0; i < numOfLines; i++) {
-    walker = new Walker(random(width), random(height));
-    lines.push(walker);
-  }
+  // for (i = 0; i < numOfLines; i++) {
+  //   walker = new Walker(random(width), random(height));
+  //   lines.push(walker);
+  // }
   
   quadTree = new QuadTree(Infinity, 30, new Rect(0, 0, width, height));
   
@@ -58,11 +58,11 @@ function draw() {
     quadTree.addItem(boid.pos.x, boid.pos.y, boid);
   }
   
-  //releases a set number of lines from the center of screen
-  // if (frameCount % releaseSpeed === 1 && lines.length < numOfLines) {
-  //   walker = new Walker(random(width), random(height));
-  //   lines.push(walker);
-  // }
+  // releases a set number of lines from the center of screen
+  if (frameCount % releaseSpeed === 1 && lines.length < numOfLines) {
+    walker = new Walker(random(width), random(height));
+    lines.push(walker);
+  }
 
  //determines when it rains
   if (vaporCount > rainStart) {
