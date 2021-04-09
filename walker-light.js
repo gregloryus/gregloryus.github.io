@@ -73,7 +73,7 @@ class Light extends Walker {
     }
 
     if (this.sun && sunMoveMode) {
-      this.pos.x = this.start.x + -sunPathRadius * 4 * cos(sunAngle);
+      this.pos.x = this.start.x + -sunPathRadius * cos(sunAngle);
       this.pos.y = this.start.y + sunPathRadius * sin(sunAngle);
       sunAngle = sunAngle + sunAngleSpeed;
     }
