@@ -101,7 +101,7 @@ class Water extends Walker {
 
     // sets the hue according to the temperature
     this.hue = 50 + this.temp / 8;
-    this.hue = Math.min(83, this.hue);
+    this.hue = Math.min(80, this.hue);
 
     //adds acceleration to velocity
     this.vel.add(this.acc);
