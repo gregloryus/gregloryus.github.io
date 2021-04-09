@@ -122,7 +122,7 @@ function draw() {
   // quadTree.debugRender();
 
   if (resetSketchWarning) {
-    text(`everything resets when a plant reaches mid-screen`, 10, 10);
+    text(`growth stops when plants reach mid-screen`, 10, 10);
     text(`tallest plant: ${tallestPlantHeight}% up-screen`, 10, 35);
   }
 
