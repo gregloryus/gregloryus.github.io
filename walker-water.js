@@ -5,7 +5,7 @@ let numOfWater = 100; // number of water particles (100)
 let touchRadius = 100; // touching water
 
 //Light effects
-let lightHeat = 20; // how much light heats up water
+let lightHeat = 10; // how much light heats up water
 
 //WALKER CLASS
 
