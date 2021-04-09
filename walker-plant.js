@@ -134,7 +134,7 @@ class Plant extends Walker {
       }
 
       if (this.pos.y < height * 0.5) {
-        resetSketch = true;
+        resetSketch = true; // test
       }
     }
   }
