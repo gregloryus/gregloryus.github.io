@@ -122,11 +122,14 @@ function draw() {
   // quadTree.debugRender();
 
   if (resetSketchWarning) {
+  return
     text(`growth stops when plants reach mid-screen`, 10, 10);
     text(`tallest plant: ${tallestPlantHeight}% up-screen`, 10, 35);
   }
 
   if (resetSketch) {
-    window.location.reload();
+    for (walker of lines) {
+       walker.stuck = true
+       }
   }
 }

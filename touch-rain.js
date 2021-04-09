@@ -96,7 +96,7 @@ function draw() {
       let d = dist(sun.x, sun.y, other.pos.x, other.pos.y);
 
       if (d < perceptionRadius) {
-        other.temp = other.temp + (100 - d)/10
+        other.temp = other.temp + (10 - d)/10
         console.log("heating")
       }
     
