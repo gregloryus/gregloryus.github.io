@@ -30,7 +30,7 @@ p5.disableFriendlyErrors = true;
 // p5 setup, runs once when page loads
 function setup() {
   // creates canvas with viewport dimensions
-  createCanvas(vw, vh);
+  createCanvas(500, 400);
 
   //sets the background to black
   background(0);
