@@ -20,7 +20,7 @@ let refractAngle = 2; // how much water refracts light (8, lower is bigger angle
 
 //Sun sliders
 let sunSpeed = 1; //  speed of sun
-let sunPathRadius = height / 10;
+let sunPathRadius = 100;
 let sunAngle = 1;
 let sunAngleSpeed = 0.005; // (0.0015)
 
@@ -73,6 +73,7 @@ class Light extends Walker {
     }
 
     if (this.sun && sunMoveMode) {
+      let sunPathRadius = height / 10;
       this.pos.x = this.start.x + -sunPathRadius * 4 * cos(sunAngle);
       this.pos.y = this.start.y + sunPathRadius * sin(sunAngle);
       sunAngle = sunAngle + sunAngleSpeed;
