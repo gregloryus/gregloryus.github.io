@@ -136,6 +136,7 @@ function draw() {
   // text(`${lines.length}`, 10, 10);
   stroke(17, 100, 100, 100);
   // textSize(20);
+  strokeWeight(0.5);
   text(currentStatus, 10, 30);
 
   if (newRecord) {
