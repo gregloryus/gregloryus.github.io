@@ -142,6 +142,7 @@ function draw() {
   stroke(17, 100, 100, 100);
   // textSize(20);
   strokeWeight(0.5);
+  textSize(width / 50);
   text(currentStatus, 10, 30);
 
   if (newRecord) {
@@ -150,7 +151,7 @@ function draw() {
     New record! Genes passed on!
     Red seeds are clones
     Purple seeds are mutants`,
-      150,
+      width / 2,
       30
     );
   }
