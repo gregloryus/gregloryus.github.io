@@ -30,6 +30,7 @@ let newRecord = false;
 let startingNodeLength = 500;
 let startingSplitChance = 20;
 let startingBranchChance = 80;
+let overheat = 100000;
 
 let currentStatus = `
 Time: ...
@@ -422,7 +423,8 @@ Gen: ${generation}`
       return;
     }
 
-    if (this.core.calories > 100000) {
+    if (this.core.calories > overheat) {
+      this.brightness = 100;
       this.dead = true;
     }
 
