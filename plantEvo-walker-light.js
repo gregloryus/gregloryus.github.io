@@ -20,7 +20,7 @@ let refractAngle = 2; // how much water refracts light (8, lower is bigger angle
 
 //Sun sliders
 let sunSpeed = 1; //  speed of sun
-let sunPathRadius = vh / 10;
+let sunPathRadius = height / 10;
 let sunAngle = 1;
 let sunAngleSpeed = 0.005; // (0.0015)
 
