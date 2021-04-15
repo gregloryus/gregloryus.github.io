@@ -17,7 +17,7 @@ const vh = Math.max(
 let numOfLines = 244;
 let releaseSpeed = 2;
 let canvasSize = 333;
-let scaleNum = Math.min(vw, vh) / 75
+let scaleNum = Math.min(vw, vh) / 75;
 
 let plantAge = 1000;
 
@@ -127,7 +127,7 @@ function draw() {
         checkDist(lines[i].pos, tree[j].pos) &&
         lines[i].pos.y > height / 5 &&
         lines[i].pos.x > width / 3 &&
-        lines[i].pos.x < width / 3 * 2
+        lines[i].pos.x < (width / 3) * 2
       ) {
         lines[i].stuck = true;
         lines[i].rand = random(100);

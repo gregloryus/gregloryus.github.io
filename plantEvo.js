@@ -17,6 +17,7 @@ const vh = Math.max(
 
 // Declaring things
 let quadTree;
+let scaleNum = vh / 400;
 
 //SLIDERS
 let redrawSpeed = 0; // speed that draw() executes (0)
@@ -30,7 +31,10 @@ p5.disableFriendlyErrors = true;
 // p5 setup, runs once when page loads
 function setup() {
   // creates canvas with viewport dimensions
-  createCanvas(500, 400);
+  createCanvas(vw, vh);
+
+  width = width / scaleNum;
+  height = height / scaleNum;
 
   //sets the background to black
   background(0);
@@ -87,6 +91,7 @@ function setup() {
 
 // p5 draw, loops forever
 function draw() {
+  scale(scaleNum);
   time++;
   //this saves the current mouse position to the previous variable
   pmouseX = mouseX;
