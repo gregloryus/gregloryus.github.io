@@ -426,7 +426,6 @@ Gen: ${generation}`
     if (this.core.calories > overheat) {
       this.brightness = 100;
       this.dead = true;
-      return;
     }
 
     if (this.leaf) {
