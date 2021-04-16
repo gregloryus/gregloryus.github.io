@@ -5,7 +5,7 @@
 //SLIDERS
 
 //Amounts
-let numOfPlants = 7;
+let numOfPlants = 4;
 let lightCals = 1000; // calories/energy that each photon gives (100)
 let growthCost = 1; // cost of growing once (1)
 let growthRate = 0.01; // ACTUALLY SCALE?! magnitude of each velocity step applied to position (0.00001, four 0s)
@@ -20,7 +20,7 @@ let startingBranchChance = 0;
 let helioLimit = 0.01; // limit on heliotropism force (0.005)
 let caloricFadeRate = 0.95;
 let seedChance = 50;
-let seedWind;
+let seedWindLength = 4;
 
 //LEGACY SLIDERS
 let prune80 = false;
@@ -140,23 +140,22 @@ class Plant extends Walker {
       //start of seedFall
       if (this.pos.y < 0) {
         this.core.dead = true;
-        if (random(100) < seedChance) {
-          let seed = new Plant(this.pos.x, this.pos.y);
-          seed.seed = true;
-          seed.size = 4;
-          seed.hue = 13;
-          seed.sat = 100;
-          seed.fallLimit = 1 + random();
-          seed.vel = p5.Vector.fromAngle(
-            TWO_PI * 0.25 + random(-0.25, 0.25),
-            10
-          ); //downwards
-          seed.offset = random(1000000);
-          seed.leaf = false;
-          seed.stuck = false;
-          seed.randomizeGenes();
-          lines.push(seed);
-        }
+        let seed = new Plant(this.pos.x, this.pos.y);
+        seed.seed = true;
+        seed.size = 4;
+        seed.hue = 13;
+        seed.sat = 100;
+        seed.fallLimit = 0.25 + random();
+        seed.vel = p5.Vector.fromAngle(TWO_PI * 0.25, 1); //downwards
+        seed.offset = random(1000000);
+        seed.leaf = false;
+        seed.stuck = false;
+        seed.randomizeGenes();
+        lines.push(seed);
+        // let waterSeed = new Water(this.pos.x, this.pos.y);
+        // waterSeed.size = 10;
+        // waterSeed.hue = 1;
+        // lines.push(waterSeed);
       }
     }
   }
@@ -293,11 +292,11 @@ class Plant extends Walker {
 
   seedFall() {
     if (!this.seed || this.stuck) return;
-    let seedWind = p5.Vector.fromAngle(TWO_PI, 10 * cos(this.y));
-    this.vel.add(seedWind);
-    this.vel.limit(this.fallLimit);
     this.pos.add(this.vel);
-
+    this.pos.x =
+      this.pos.x -
+      seedWindLength +
+      seedWindLength * 2 * noise((frameCount + this.offset) / 100);
     //seed gets wet
 
     let perceptionRadius = this.size;

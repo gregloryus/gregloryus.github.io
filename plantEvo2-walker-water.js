@@ -1,11 +1,11 @@
 //SLIDERS
 
 //Amounts
-let numOfWater = 100; // number of water particles (100)
+let numOfWater = 40; // number of water particles (100)
 let touchRadius = 100; // touching water
 
 //Light effects
-let lightHeat = 7.5; // how much light heats up water
+let lightHeat = 1500 / numOfLight; // how much light heats up water
 
 //WALKER CLASS
 
@@ -15,7 +15,7 @@ class Water extends Walker {
     //move this to water
     this.water = true;
     this.temp = 0;
-    this.size = 8;
+    this.size = 5;
     this.opacity = 40;
   }
 
