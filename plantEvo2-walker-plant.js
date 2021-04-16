@@ -5,7 +5,7 @@
 //SLIDERS
 
 //Amounts
-let numOfPlants = 16;
+let numOfPlants = 7;
 let lightCals = 1000; // calories/energy that each photon gives (100)
 let growthCost = 1; // cost of growing once (1)
 let growthRate = 0.01; // ACTUALLY SCALE?! magnitude of each velocity step applied to position (0.00001, four 0s)
@@ -14,7 +14,7 @@ let ageToProduce = 1000;
 let leafChance = 20; // % chance to produce a leaf OR BRANCH instead of a normal stem (20%)
 let leafSize = 6;
 let branchChance = 80;
-let startingNodeLength = 200;
+let startingNodeLength = 300;
 let startingSplitChance = 20;
 let startingBranchChance = 0;
 let helioLimit = 0.01; // limit on heliotropism force (0.005)
@@ -426,9 +426,9 @@ class Plant extends Walker {
   }
 
   randomizeGenes() {
-    this.ageToProduce = this.ageToProduce * random(0.5, 1.5); // 1000;
-    this.growthRate = this.growthRate * random(0.5, 1.5);
-    this.helioLimit = this.helioLimit * random(0.5, 1.5);
+    this.ageToProduce = this.ageToProduce * random(0.5, 1.25); // 1000;
+    this.growthRate = this.growthRate * random(0.75, 1.25);
+    this.helioLimit = this.helioLimit * random(0.75, 1.25);
   }
 
   notPassGenes() {
