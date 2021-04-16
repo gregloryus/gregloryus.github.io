@@ -21,7 +21,7 @@ let scaleNum = 1;
 
 //SLIDERS
 let redrawSpeed = 0; // speed that draw() executes (0)
-let fadeOpacity = 15; // how quickly tails fade (3)
+let fadeOpacity = 3; // how quickly tails fade (3)
 
 //turns off descriptive errors that add computing costs
 p5.disableFriendlyErrors = true;
@@ -46,7 +46,7 @@ function setup() {
   let sun = new Light(width / 2, height / 10);
   sun.sun = true;
   sun.opacity = 100;
-  sun.size = 16;
+  sun.size = 2;
   if (sunMoveMode) {
     sun.stuck = false;
   } else {
@@ -70,7 +70,7 @@ function setup() {
     //evenly spaces out plants, leaving the edges
     plant = new Plant(
       width / numOfPlants / 2 + (width / numOfPlants) * i,
-      (height / 10) * 9 + random(height / 10)
+      height
     );
     plant.seed = true;
     plant.size = 10;
