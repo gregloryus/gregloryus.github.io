@@ -70,7 +70,7 @@ function setup() {
     //evenly spaces out plants, leaving the edges
     plant = new Plant(
       width / numOfPlants / 2 + (width / numOfPlants) * i,
-      height
+      (height / 10) * 9 + random(height / 10)
     );
     plant.seed = true;
     plant.size = 10;
