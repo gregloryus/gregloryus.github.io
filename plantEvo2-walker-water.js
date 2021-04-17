@@ -15,7 +15,7 @@ class Water extends Walker {
     //move this to water
     this.water = true;
     this.temp = 0;
-    this.size = 5;
+    this.size = 6;
     this.opacity = 40;
   }
 
