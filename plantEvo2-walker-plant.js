@@ -12,7 +12,7 @@ let growthRate = 0.01; // ACTUALLY SCALE?! magnitude of each velocity step appli
 let heliotropismFadeRate = 0.999; //acceleration divided by this amount each frame (0.999)
 let ageToProduce = 1000;
 let leafChance = 20; // % chance to produce a leaf OR BRANCH instead of a normal stem (20%)
-let leafSize = 6;
+let leafSize = 5;
 let branchChance = 80;
 let startingNodeLength = 300;
 let startingSplitChance = 20;
@@ -37,7 +37,7 @@ let prevAgeToProduce;
 let prevLeafChance;
 let prevBranchChance;
 let generation = 1;
-let terminalHeight = 0.5;
+let terminalHeight = 0.66;
 let overheat = 100000;
 
 class Plant extends Walker {
@@ -60,7 +60,7 @@ class Plant extends Walker {
     this.flash = 0; // counts down to dim flash that's applied during photosynthesis
     this.leafStem = false;
     this.dead = false;
-    this.growthRate = 0.1;
+    this.growthRate = 0.0667;
     this.ageToProduce = startingNodeLength;
     this.leafChance = startingSplitChance;
     this.branchChance = startingBranchChance;
@@ -370,7 +370,7 @@ class Plant extends Walker {
           this.stem = true;
           return;
         } else {
-          // console.log("leaf");
+          // console.log("leaf"); // leaf made here
           this.leaf = true;
           this.size = leafSize;
           this.stuck = true;
