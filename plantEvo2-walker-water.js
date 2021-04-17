@@ -1,7 +1,7 @@
 //SLIDERS
 
 //Amounts
-let numOfWater = 40; // number of water particles (100)
+let numOfWater = 100; // number of water particles (100)
 let touchRadius = 100; // touching water
 
 //Light effects
