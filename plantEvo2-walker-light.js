@@ -7,9 +7,9 @@ let lightFree = true;
 let sunMoveMode = true; // is the sun moving? if false, sun is fixed
 
 //Amount sliders
-let numOfLight = 100; // number of light particles
+let numOfLight = 200; // number of light particles
 let lightSize = 3;
-let lightOpacity = 40; //opacity of light (20 min)
+let lightOpacity = 25; //opacity of light (20 min)
 let lightSpeed = 4; // speed of light
 let lightPulseRate = 400; // how quickly light pulses (400 = chill)
 // let lightCals = 50; // amount of calories given by each photon
