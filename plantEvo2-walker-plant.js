@@ -5,7 +5,7 @@
 //SLIDERS
 
 //Amounts
-let numOfPlants = 4;
+let numOfPlants = 16;
 let lightCals = 1000; // calories/energy that each photon gives (100)
 let growthCost = 1; // cost of growing once (1)
 let growthRate = 0.01; // ACTUALLY SCALE?! magnitude of each velocity step applied to position (0.00001, four 0s)
@@ -21,6 +21,7 @@ let helioLimit = 0.01; // limit on heliotropism force (0.005)
 let caloricFadeRate = 0.95;
 let seedChance = 50;
 let seedWindLength = 4;
+let canPhotoAmount = 2000;
 
 //LEGACY SLIDERS
 let prune80 = false;
@@ -57,7 +58,7 @@ class Plant extends Walker {
     this.growthAge = 0;
     this.vel = p5.Vector.fromAngle(TWO_PI * 0.75, 1); //upwards
     this.acc = createVector();
-    this.flash = 0; // counts down to dim flash that's applied during photosynthesis
+    this.flash = 100; // counts down to dim flash that's applied during photosynthesis
     this.leafStem = false;
     this.dead = false;
     this.growthRate = 0.0667;
@@ -71,6 +72,18 @@ class Plant extends Walker {
 
   photosynthesize() {
     //photosynthesis
+
+    if (!this.seed && this.canPhoto < 1) {
+      return;
+    }
+    if (!this.seed) {
+      this.canPhoto = this.canPhoto - 1;
+
+      //when it can't photosynethize, it'll be 75% transparent
+      // this.sat = map(this.canPhoto, 0, 1000, 75, 100);
+      this.brightness = map(this.canPhoto, 0, canPhotoAmount, 50, 100);
+      this.hue = map(this.canPhoto, 0, 2000, 36, 33);
+    }
 
     let perceptionRadius = this.size;
     let perceptionCount = 10;
@@ -99,6 +112,9 @@ class Plant extends Walker {
         //flash
         this.flash = 100;
         this.core.flash = 40;
+
+        //refresh canPhoto
+        this.canPhoto = canPhotoAmount;
       }
     }
   }
@@ -376,6 +392,8 @@ class Plant extends Walker {
           this.stuck = true;
           this.leafStem = false;
           this.stem = false;
+
+          this.canPhoto = canPhotoAmount;
 
           // // drain calories
           // this.core.calories = 0;
