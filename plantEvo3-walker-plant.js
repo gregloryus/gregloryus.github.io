@@ -5,9 +5,9 @@
 //SLIDERS
 
 //Amounts
-let numOfPlants = 1;
-let lightCals = 10000; // calories/energy that each photon gives (100)
-let growthCost = 1; // cost of growing once (1)
+let numOfPlants = 400;
+let lightCals = 1000; // calories/energy that each photon gives (100)
+let growthCost = 0.1; // cost of growing once (1)
 let growthRate = 0.01; // ACTUALLY SCALE?! magnitude of each velocity step applied to position (0.00001, four 0s)
 let heliotropismFadeRate = 0.999; //acceleration divided by this amount each frame (0.999)
 let ageToProduce = 1000;
@@ -22,7 +22,7 @@ let caloricFadeRate = 0.95;
 let seedChance = 50;
 let seedWindLength = 4;
 let canPhotoAmount = 2000;
-let wetPlus = 100;
+let wetPlus = 1000;
 let wetMinus = 1;
 
 //LEGACY SLIDERS
@@ -85,7 +85,8 @@ class Plant extends Walker {
     //   console.log(`${this.wetness}`);
     // }
     if (this.wetness < -1000) {
-      this.wetness = -1000;
+      //if too dry, kill the core
+      this.core.dead = true;
     }
   }
 
