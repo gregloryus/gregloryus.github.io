@@ -5,7 +5,7 @@ let numOfWater = 100; // number of water particles (100)
 let touchRadius = 100; // touching water
 
 //Light effects
-let lightHeat = 1500 / numOfLight; // how much light heats up water
+let lightHeat = 500 / numOfLight; // how much light heats up water
 
 //WALKER CLASS
 
@@ -20,6 +20,33 @@ class Water extends Walker {
   }
 
   update() {
+    //check if absorbed core is still alive
+    if (this.absorbed) {
+      if (frameCount % 200 == 1) {
+        console.log("absorbed water here");
+      }
+
+      if (this.core.dead || !this.core) {
+        this.pos = this.core.deadSpot;
+        this.absorbed = false;
+        this.offscreen = false;
+        console.log("water released");
+        console.log(`${this.pos}`);
+      }
+    }
+
+    //if offscreen, return
+    if (this.offscreen) {
+      return;
+    }
+
+    //if absorbed, move offscreen
+    if (this.absorbed) {
+      this.pos.x = -1000;
+      this.pos.y = -1000;
+      this.offscreen = true;
+    }
+
     //edges, if particle goes off-screen, warp left/right, stay up/down
     if (this.pos.y > height - 1) {
       this.pos.y = height - 1;
@@ -116,6 +143,9 @@ class Water extends Walker {
   }
 
   show() {
+    if (this.offscreen) {
+      return;
+    }
     super.show();
   }
 }
