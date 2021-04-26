@@ -5,7 +5,7 @@
 //SLIDERS
 
 //Amounts
-let numOfPlants = 16;
+let numOfPlants = 10;
 let lightCals = 1000; // calories/energy that each photon gives (100)
 let growthCost = 1; // cost of growing once (1)
 let growthRate = 0.01; // ACTUALLY SCALE?! magnitude of each velocity step applied to position (0.00001, four 0s)
@@ -22,6 +22,8 @@ let caloricFadeRate = 0.95;
 let seedChance = 50;
 let seedWindLength = 4;
 let canPhotoAmount = 2000;
+let wetPlus = 200;
+let wetMinus = 1;
 
 //LEGACY SLIDERS
 let prune80 = false;
@@ -68,6 +70,45 @@ class Plant extends Walker {
     this.mutant = false;
     this.brightnessFade = 0.1;
     this.helioLimit = 0.01;
+    this.wetness = 0;
+  }
+
+  dry() {
+    //if not a seed, return
+    if (!this.seed) {
+      return;
+    }
+    this.wetness = this.wetness - wetMinus;
+    // if (this.wetness % 1000 == 0) {
+    //   console.log(`${this.wetness}`);
+    // }
+    if (this.wetness < -2) {
+      this.wetness = -1;
+    }
+  }
+
+  absorb() {
+    //if not a seed, return
+    if (!this.seed) {
+      return;
+    }
+    let perceptionRadius = this.size;
+    let perceptionCount = 10;
+
+    for (const other of quadTree.getItemsInRadius(
+      this.pos.x,
+      this.pos.y,
+      perceptionRadius,
+      perceptionCount
+    )) {
+      if (other.water) {
+        this.wetness = this.wetness + wetPlus;
+        console.log(`${this.wetness}`);
+
+        other.absorbed = true;
+        other.core = this.core;
+      }
+    }
   }
 
   photosynthesize() {
@@ -156,6 +197,7 @@ class Plant extends Walker {
       //start of seedFall
       if (this.pos.y < 0) {
         this.core.dead = true;
+        this.core.deadSpot = this.pos;
         let seed = new Plant(this.pos.x, this.pos.y);
         seed.seed = true;
         seed.size = 4;
@@ -343,6 +385,12 @@ class Plant extends Walker {
         lines.splice(lines.indexOf(this), 1);
       }
       return;
+    }
+
+    //if seed, absorb and dry
+    if (this.seed) {
+      this.absorb();
+      this.dry();
     }
 
     //if core is dead, you're dead

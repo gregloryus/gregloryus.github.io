@@ -46,7 +46,7 @@ function setup() {
   let sun = new Light(width / 2, height / 10);
   sun.sun = true;
   sun.opacity = 100;
-  sun.size = 2;
+  sun.size = 8;
   if (sunMoveMode) {
     sun.stuck = false;
   } else {
@@ -70,7 +70,7 @@ function setup() {
     //evenly spaces out plants, leaving the edges
     plant = new Plant(
       width / numOfPlants / 2 + (width / numOfPlants) * i,
-      height
+      height * 0.9
     );
     plant.seed = true;
     plant.size = 10;
