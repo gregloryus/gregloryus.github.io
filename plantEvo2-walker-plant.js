@@ -103,7 +103,7 @@ class Plant extends Walker {
     )) {
       if (other.water) {
         this.wetness = this.wetness + wetPlus;
-        console.log(`${this.wetness}`);
+        // console.log(`${this.wetness}`);
 
         other.absorbed = true;
         other.core = this.core;
@@ -197,7 +197,10 @@ class Plant extends Walker {
       //start of seedFall
       if (this.pos.y < 0) {
         this.core.dead = true;
+        this.core.deadX = this.pos.x;
+        this.core.deadY = this.pos.y;
         this.core.deadSpot = this.pos;
+        console.log("died");
         let seed = new Plant(this.pos.x, this.pos.y);
         seed.seed = true;
         seed.size = 4;

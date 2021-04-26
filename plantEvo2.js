@@ -88,7 +88,7 @@ function setup() {
 
   //sets the redraw speed, usually set to 0
   noLoop();
-  setInterval(redraw, 0); // where 10 is the minimum time between frames in ms
+  setInterval(redraw, redrawSpeed); // where 10 is the minimum time between frames in ms
 }
 
 // p5 draw, loops forever
