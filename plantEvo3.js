@@ -21,7 +21,7 @@ let scaleNum = 1;
 
 //SLIDERS
 let redrawSpeed = 0; // speed that draw() executes (0)
-let fadeOpacity = 10; // how quickly tails fade (3)
+let fadeOpacity = 5; // how quickly tails fade (3)
 
 //turns off descriptive errors that add computing costs
 p5.disableFriendlyErrors = true;
