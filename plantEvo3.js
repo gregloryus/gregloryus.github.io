@@ -18,7 +18,7 @@ const vh = Math.max(
 // Declaring things
 let quadTree;
 let scaleNum = 1;
-
+let noPlants = false;
 //SLIDERS
 let redrawSpeed = 0; // speed that draw() executes (0)
 let fadeOpacity = 5; // how quickly tails fade (3)
@@ -93,6 +93,7 @@ function setup() {
 
 // p5 draw, loops forever
 function draw() {
+  noPlants = true;
   scale(scaleNum);
   time++;
   //this saves the current mouse position to the previous variable
@@ -116,6 +117,22 @@ function draw() {
   for (var walker of lines) {
     walker.update();
     walker.show();
+  }
+
+  //if no plants, drop a new seed from the middle top
+  if (noPlants === true) {
+    let seed = new Plant(width / 2, 0);
+    seed.seed = true;
+    seed.size = 4;
+    seed.hue = 13;
+    seed.sat = 100;
+    seed.fallLimit = 0.25 + random();
+    seed.vel = p5.Vector.fromAngle(TWO_PI * 0.25, 1); //downwards
+    seed.offset = random(1000000);
+    seed.leaf = false;
+    seed.stuck = false;
+    seed.randomizeGenes();
+    lines.push(seed);
   }
 
   // turns off the light switch

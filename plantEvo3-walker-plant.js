@@ -5,7 +5,7 @@
 //SLIDERS
 
 //Amounts
-let numOfPlants = 3;
+let numOfPlants = 7;
 let lightCals = 1000; // calories/energy that each photon gives (100)
 let growthCost = 0.1; // cost of growing once (1)
 let growthRate = 0.01; // ACTUALLY SCALE?! magnitude of each velocity step applied to position (0.00001, four 0s)
@@ -23,7 +23,8 @@ let seedChance = 50;
 let seedWindLength = 4;
 let canPhotoAmount = 2000;
 let wetPlus = 1000;
-let wetMinus = 1;
+let wetMinus = 2;
+// let noPlants = false;
 
 //LEGACY SLIDERS
 let prune80 = false;
@@ -77,7 +78,7 @@ class Plant extends Walker {
 
   dry() {
     //if not a seed, return
-    if (!this.seed) {
+    if (!this.seed || !this.stuck) {
       return;
     }
     this.wetness = this.wetness - wetMinus;
@@ -367,12 +368,17 @@ class Plant extends Walker {
 
   seedFall() {
     if (!this.seed || this.stuck) return;
+    if (this.pos.y > height) {
+      this.dead = true;
+    }
     this.pos.add(this.vel);
     this.pos.x =
       this.pos.x -
       seedWindLength +
       seedWindLength * 2 * noise((frameCount + this.offset) / 100);
     //seed gets wet
+
+    console.log(`${this.core.dead}`);
 
     let perceptionRadius = this.size;
     let perceptionCount = 5;
@@ -394,6 +400,9 @@ class Plant extends Walker {
   }
 
   update() {
+    if (noPlants) {
+      noPlants = false;
+    }
     //if dead, fade until eventually spliced out
     if (this.dead) {
       //lower brightness by 1
