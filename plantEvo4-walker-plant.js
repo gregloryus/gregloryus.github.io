@@ -6,7 +6,7 @@
 
 //Amounts
 let numOfPlants = 7;
-let lightCals = 1000; // calories/energy that each photon gives (100)
+// let lightCals = 1000; // calories/energy that each photon gives (100)
 let growthCost = 0.1; // cost of growing once (1)
 let growthRate = 0.01; // ACTUALLY SCALE?! magnitude of each velocity step applied to position (0.00001, four 0s)
 let heliotropismFadeRate = 0.999; //acceleration divided by this amount each frame (0.999)
@@ -18,7 +18,7 @@ let startingNodeLength = 300;
 let startingSplitChance = 20;
 let startingBranchChance = 0;
 let helioLimit = 0.01; // limit on heliotropism force (0.005)
-let caloricFadeRate = 0.95;
+// let caloricFadeRate = 0.95;
 let seedChance = 50;
 let seedWindLength = 4;
 let canPhotoAmount = 2000;
@@ -55,7 +55,7 @@ class Plant extends Walker {
     this.leaf = false;
     this.stem = false;
     this.seed = false;
-    this.calories = 0;
+    // this.calories = 0;
     this.children = [];
     this.parent = this;
     this.growthAge = 0;
@@ -64,14 +64,14 @@ class Plant extends Walker {
     this.flash = 100; // counts down to dim flash that's applied during photosynthesis
     this.leafStem = false;
     this.dead = false;
-    this.growthRate = 0.1;
+    this.growthRate = 0.05;
     this.ageToProduce = startingNodeLength;
     this.leafChance = startingSplitChance;
     this.branchChance = startingBranchChance;
     this.mutant = false;
     this.brightnessFade = 0.1;
     this.helioLimit = 0.01;
-    this.wetness = 0;
+    // this.wetness = 0;
     this.lightAbsorbCount = 0;
     this.waterAbsorbCount = 0;
   }
@@ -81,14 +81,14 @@ class Plant extends Walker {
     if (!this.seed || !this.stuck) {
       return;
     }
-    this.wetness = this.wetness - wetMinus;
+    // this.wetness = this.wetness - wetMinus;
     // if (this.wetness % 1000 == 0) {
     //   console.log(`${this.wetness}`);
     // }
-    if (this.wetness < -1000) {
-      //if too dry, kill the core
-      this.core.dead = true;
-    }
+    // if (this.wetness < -1000) {
+    //   //if too dry, kill the core
+    //   this.core.dead = true;
+    // }
   }
 
   absorb() {
@@ -107,7 +107,7 @@ class Plant extends Walker {
     )) {
       //if collide with water, add up wetness, wet count, mark water absorbed
       if (other.water) {
-        this.wetness = this.wetness + wetPlus;
+        // this.wetness = this.wetness + wetPlus;
         // console.log(`${this.wetness}`);
 
         other.absorbed = true;
@@ -128,7 +128,7 @@ class Plant extends Walker {
 
       //when it can't photosynethize, it'll be 75% transparent
       // this.sat = map(this.canPhoto, 0, 1000, 75, 100);
-      this.brightness = map(this.canPhoto, 0, canPhotoAmount, 50, 100);
+      this.brightness = map(this.canPhoto, 0, canPhotoAmount, 25, 100);
       this.hue = map(this.canPhoto, 0, 2000, 36, 33);
     }
 
@@ -154,12 +154,13 @@ class Plant extends Walker {
         other.absorbedX = this.pos.x;
         other.absorbedY = this.pos.y;
 
-        //adds a count to the core of the plant (not the particle itself)
-        if (this.seed) {
-          this.core.calories += lightCals / 10;
-        } else {
-          this.core.calories += lightCals * 10;
-        }
+        // //adds a count to the core of the plant (not the particle itself)
+        // if (this.seed) {
+        //   this.core.calories += lightCals / 10;
+        // } else {
+        //   this.core.calories += lightCals * 10;
+        // }
+        this.core.growing = true;
 
         //heliotropism
         this.core.acc.add(p5.Vector.sub(other.pos, this.pos));
@@ -182,8 +183,11 @@ class Plant extends Walker {
 
     //if not stuck, use up one light calorie, move the position
     if (!this.stuck) {
-      //subtracts a light cal from the core
-      this.core.calories -= growthCost;
+      // //subtracts a light cal from the core
+      // this.core.calories -= growthCost;
+
+      //mark it as not growing after this
+      this.growing = false;
 
       //advances the growth age
       this.growthAge++;
@@ -202,7 +206,7 @@ class Plant extends Walker {
       //adds acceleration to velocity
       this.vel.add(this.acc);
 
-      // modulates growth rate, i.e. velocity (number less than 1.0 so always diminishing)
+      // // modulates growth rate, i.e. velocity (number less than 1.0 so always diminishing)
       this.vel.mult(this.core.growthRate);
 
       //adds velocity to position
@@ -378,7 +382,7 @@ class Plant extends Walker {
       seedWindLength * 2 * noise((frameCount + this.offset) / 100);
     //seed gets wet
 
-    console.log(`${this.core.dead}`);
+    // console.log(`${this.core.dead}`);
 
     let perceptionRadius = this.size;
     let perceptionCount = 5;
@@ -400,6 +404,9 @@ class Plant extends Walker {
   }
 
   update() {
+    if (this.seed && frameCount % 100 == 1) {
+      this.growing = false;
+    }
     if (noPlants) {
       noPlants = false;
     }
@@ -429,22 +436,31 @@ class Plant extends Walker {
       this.photosynthesize();
     }
 
-    //if seed, lose calories
-    if (this.seed) {
-      this.core.calories = this.core.calories * caloricFadeRate;
-    }
+    // //if seed, lose calories
+    // if (this.seed) {
+    //   this.core.calories = this.core.calories * caloricFadeRate;
+    // }
 
     //if seed and not stuck, fall
     if (this.seed && !this.stuck) {
       this.seedFall();
     }
 
-    //if the plant has calories, grow
-    if (this.core.calories < 1) {
-      return;
-    } else {
-      this.grow();
+    //if the plant's core is growing, grow
+    if (this.core.growing) {
+      this.growing = true;
     }
+
+    if (this.growing) {
+      // property
+      this.grow(); //method
+    }
+
+    // if (this.core.calories < 1) {
+    //   return;
+    // } else {
+    //   this.grow();
+    // }
 
     // stems of a certain age with less than 3 children produce a child
     if (
@@ -498,13 +514,13 @@ class Plant extends Walker {
       strokeWeight(1);
       stroke(17, 100, 100, 100);
       noFill();
-      text(`${Math.floor(this.core.calories)}`, this.pos.x + 25, this.pos.y);
+      // text(`${Math.floor(this.core.calories)}`, this.pos.x + 25, this.pos.y);
       stroke(70, 30, 100, 100);
-      text(
-        `${Math.floor(this.core.wetness)}`,
-        this.pos.x + 25,
-        this.pos.y + 25
-      );
+      // text(
+      //   `${Math.floor(this.core.wetness)}`,
+      //   this.pos.x + 25,
+      //   this.pos.y + 25
+      // );
       stroke(17, 100, 100, 100);
       noFill();
       text(
@@ -534,7 +550,7 @@ class Plant extends Walker {
     line(this.pos.x, this.pos.y, this.parent.pos.x, this.parent.pos.y);
 
     //if there's light, light up halo
-    if (this.core.calories == 0 || this.stuck) {
+    if (!this.growing || this.stuck) {
       return;
     } else {
       // stroke(17, 100, 100, 40);
