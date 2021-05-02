@@ -5,7 +5,7 @@
 //SLIDERS
 
 //Amounts
-let numOfPlants = 7;
+let numOfPlants = 1;
 // let lightCals = 1000; // calories/energy that each photon gives (100)
 let growthCost = 0.1; // cost of growing once (1)
 let growthRate = 0.01; // ACTUALLY SCALE?! magnitude of each velocity step applied to position (0.00001, four 0s)
