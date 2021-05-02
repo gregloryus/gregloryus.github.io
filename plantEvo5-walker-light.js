@@ -7,7 +7,7 @@ let lightFree = true;
 let sunMoveMode = true; // is the sun moving? if false, sun is fixed
 
 //Amount sliders
-let numOfLight = 1000; // number of light particles
+let numOfLight = 100; // number of light particles
 let lightSize = 2;
 let lightOpacity = 100; //opacity of light (20 min)
 let lightSpeed = 3; // speed of light
