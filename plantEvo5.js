@@ -120,6 +120,12 @@ function draw() {
     walker.show();
   }
 
+  //iterate backwards
+  // for (let index = lines.length - 1; index >= 0; index--) {
+  //   lines[index].update();
+  //   lines[index].show();
+  // }
+
   //if no plants, drop a new seed from the middle top
   if (noPlants === true) {
     let seed = new Plant(width / 2, 0);

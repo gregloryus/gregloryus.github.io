@@ -5,14 +5,14 @@
 //SLIDERS
 
 //Amounts
-let numOfPlants = 1;
+let numOfPlants = 11;
 // let lightCals = 1000; // calories/energy that each photon gives (100)
 let growthCost = 0.1; // cost of growing once (1)
 let growthRate = 0.01; // ACTUALLY SCALE?! magnitude of each velocity step applied to position (0.00001, four 0s)
 let heliotropismFadeRate = 0.999; //acceleration divided by this amount each frame (0.999)
 let ageToProduce = 1000;
 let leafChance = 20; // % chance to produce a leaf OR BRANCH instead of a normal stem (20%)
-let leafSize = 10;
+let leafSize = 7;
 let branchChance = 80;
 let startingNodeLength = 300;
 let startingSplitChance = 20;
@@ -21,10 +21,13 @@ let helioLimit = 0.01; // limit on heliotropism force (0.005)
 // let caloricFadeRate = 0.95;
 let seedChance = 50;
 let seedWindLength = 4;
-let canPhotoAmount = 2000;
+// let canPhotoAmount = 2000;
 let wetPlus = 1000;
 let wetMinus = 2;
 // let noPlants = false;
+
+//WEIRD DECLARATIONS
+let waterFound = false;
 
 //LEGACY SLIDERS
 let prune80 = false;
@@ -112,7 +115,12 @@ class Plant extends Walker {
 
         other.absorbed = true;
         other.core = this.core;
+        other.leaf = false;
         this.core.waterAbsorbCount++;
+        if (!this.core.waterStored) {
+          this.core.waterStored = [];
+        }
+        this.core.waterStored.push(other);
       }
     }
   }
@@ -120,17 +128,18 @@ class Plant extends Walker {
   photosynthesize() {
     //photosynthesis
 
-    if (!this.seed && this.canPhoto < 1) {
+    //if you're a leaf and you're not wet, return
+    if (!this.seed && this.wet == false) {
       return;
     }
-    if (!this.seed) {
-      this.canPhoto = this.canPhoto - 1;
+    // if (!this.seed) {
+    //   // this.canPhoto = this.canPhoto - 1;
 
-      //when it can't photosynethize, it'll be 75% transparent
-      // this.sat = map(this.canPhoto, 0, 1000, 75, 100);
-      this.brightness = map(this.canPhoto, 0, canPhotoAmount, 25, 100);
-      this.hue = map(this.canPhoto, 0, 2000, 36, 33);
-    }
+    //   //when it can't photosynethize, it'll be 75% transparent
+    //   // this.sat = map(this.canPhoto, 0, 1000, 75, 100);
+    //   // this.brightness = map(this.canPhoto, 0, canPhotoAmount, 25, 100);
+    //   // this.hue = map(this.canPhoto, 0, 2000, 36, 33);
+    // }
 
     let perceptionRadius = this.size;
     let perceptionCount = 10;
@@ -170,8 +179,12 @@ class Plant extends Walker {
         this.flash = 100;
         this.core.flash = 40;
 
-        //refresh canPhoto
-        this.canPhoto = canPhotoAmount;
+        // //refresh canPhoto
+        // this.canPhoto = canPhotoAmount;
+
+        //sweat water
+        this.sweating = true;
+        this.wet = false;
       }
     }
   }
@@ -370,6 +383,18 @@ class Plant extends Walker {
     }
   }
 
+  leafFall() {
+    if (this.pos.y > height) {
+      this.dead = true;
+    }
+    this.pos.add(this.vel);
+    this.pos.x =
+      this.pos.x -
+      seedWindLength +
+      seedWindLength * 2 * noise((frameCount + this.offset) / 100);
+    console.log(this.pos);
+  }
+
   seedFall() {
     if (!this.seed || this.stuck) return;
     if (this.pos.y > height) {
@@ -403,8 +428,42 @@ class Plant extends Walker {
     }
   }
 
+  checkForWater() {
+    //if you're not a leaf, return; if you are a leaf but you're wet, return
+    if (!this.leaf || this.wet) {
+      return;
+    }
+
+    //if your core has more than one water, continue...
+    if (this.core.waterAbsorbCount > 1) {
+      //iterate through waterStored to look for a water particle that's not assigned to a leaf
+      waterFound = false;
+      for (var water of this.core.waterStored) {
+        if (waterFound) {
+          return;
+        }
+        if (!water.leaf) {
+          water.leaf = this;
+          //signal that water is found, can stop looking
+          waterFound = true;
+        }
+      }
+
+      this.core.waterAbsorbCount = this.core.waterAbsorbCount - 1;
+      this.wet = true;
+    } else {
+      this.hue = this.hue - 0.01;
+      if (this.hue < 10) {
+        this.offset = random(1000000);
+        this.vel = p5.Vector.fromAngle(TWO_PI * 0.25, 1); //downwards
+        this.leafFalling = true;
+        this.leafFall();
+      }
+    }
+  }
+
   update() {
-    if (this.seed && frameCount % 100 == 1) {
+    if (this.seed && frameCount % 1000 == 1) {
       this.growing = false;
     }
     if (noPlants) {
@@ -423,7 +482,7 @@ class Plant extends Walker {
     //if seed, absorb and dry
     if (this.seed) {
       this.absorb();
-      this.dry();
+      // this.dry();
     }
 
     //if core is dead, you're dead
@@ -433,7 +492,17 @@ class Plant extends Walker {
 
     //if leaf, photosynthesize
     if (this.leaf) {
-      this.photosynthesize();
+      if (!this.wet && !this.seed) {
+        this.checkForWater();
+      }
+      if (this.wet || this.seed) {
+        if (!this.seed) {
+          this.brightness = 100;
+          this.hue = 33;
+          this.sat = 100;
+        }
+        this.photosynthesize();
+      }
     }
 
     // //if seed, lose calories
@@ -447,12 +516,11 @@ class Plant extends Walker {
     }
 
     //if the plant's core is growing, grow
-    if (this.core.growing) {
+    if (this.core.growing && this.core.waterAbsorbCount > 3) {
       this.growing = true;
     }
 
     if (this.growing) {
-      // property
       this.grow(); //method
     }
 
@@ -483,7 +551,9 @@ class Plant extends Walker {
           this.leafStem = false;
           this.stem = false;
 
-          this.canPhoto = canPhotoAmount;
+          this.wet = false;
+
+          // this.canPhoto = canPhotoAmount;
 
           // // drain calories
           // this.core.calories = 0;
@@ -547,6 +617,9 @@ class Plant extends Walker {
     // }
 
     strokeWeight(1);
+    if (this.leafFalling == true) {
+      return;
+    }
     line(this.pos.x, this.pos.y, this.parent.pos.x, this.parent.pos.y);
 
     //if there's light, light up halo

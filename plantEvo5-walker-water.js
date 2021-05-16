@@ -35,6 +35,20 @@ class Water extends Walker {
         this.temp = 0;
         console.log("water released");
       }
+
+      if (this.leaf) {
+        if (this.leaf.sweating) {
+          // this.core.waterAbsorbedCount = this.core.waterAbsorbedCount - 1;
+          this.pos.x = this.leaf.pos.x;
+          this.pos.y = this.leaf.pos.y;
+          this.absorbed = false;
+          this.offscreen = false;
+          this.temp = 100;
+          this.leaf.sweating = false;
+          this.leaf = false;
+          // console.log("leaf dripped");
+        }
+      }
     }
 
     //if offscreen, return
