@@ -212,9 +212,6 @@ function draw() {
       stonkmarket[holdingIndex].name
     }
   
-      Current noise: ${Math.floor(noiseNum * 100) / 100}
-      Average noise: ${Math.floor(noiseAvg * 100) / 100}
-  
       You have $${Math.floor(money)} in stonks
       `,
     width / 2,
