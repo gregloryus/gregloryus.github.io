@@ -79,7 +79,7 @@ function setup() {
   prev.mousePressed(prevHighlight);
 
   next = createButton("👇");
-  next.position((width / 10) * 5.5, (height / 10) * 8.5);
+  next.position((width / 10) * 6.25, (height / 10) * 8.5);
   next.mousePressed(nextHighlight);
 
   prev = createButton(
