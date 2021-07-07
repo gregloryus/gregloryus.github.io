@@ -256,7 +256,7 @@ class Light {
   }
   show() {
     colorMode(HSB, 100, 100, 100, 100);
-    let c = color(this.hue, this.sat, this.brightness, 10);
+    let c = color(this.hue, this.sat, this.brightness, 40);
     stroke(c);
 
     // //sets the size
@@ -297,7 +297,7 @@ class Node {
     this.depth = 1;
     this.stuck = true;
     this.size = 1;
-    this.leafSize = 16;
+    this.leafSize = 8;
     this.rendered = false;
     this.growing = false;
     this.growthCount = 0;
