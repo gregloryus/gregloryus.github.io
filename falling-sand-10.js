@@ -887,7 +887,7 @@ class Plant extends Particle {
 
     //if actively growing, move position
     if (this.growing) {
-      if (this.falling) {
+      if (this.falling || this.pos.y < 10) {
         return;
       }
       if (this.waitCounter > 0) {
