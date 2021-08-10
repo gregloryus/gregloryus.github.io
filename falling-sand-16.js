@@ -24,6 +24,8 @@ let numOfDirt = 1000;
 let numOfWater = 100;
 let numOfSeeds = 1;
 
+let rained = false;
+
 let directions = [
   "up",
   "down",
@@ -473,14 +475,14 @@ function setup() {
   //   particles.push(sand);
   // }
 
-  for (i = 0; i < numOfWater; i++) {
-    let sand = new Water(
-      Math.floor(random(rows * 0.4, rows * 0.6)),
-      Math.floor(random(rows * 0.2, rows * 0.6))
-    );
-    sand.falling = true;
-    particles.push(sand);
-  }
+  // for (i = 0; i < numOfWater; i++) {
+  //   let sand = new Water(
+  //     Math.floor(random(rows * 0.4, rows * 0.6)),
+  //     Math.floor(random(rows * 0.2, rows * 0.6))
+  //   );
+  //   sand.falling = true;
+  //   particles.push(sand);
+  // }
 
   for (i = 0; i < numOfSeeds; i++) {
     let seed = new Sed(
@@ -513,6 +515,18 @@ function draw() {
 
   // background(204 / 360, 0.7, 0.3, 1);
   background(0);
+
+  if (!rained && frameCount == 100) {
+    for (i = 0; i < numOfWater; i++) {
+      let sand = new Water(
+        Math.floor(random(rows * 0.4, rows * 0.6)),
+        Math.floor(random(rows * 0.2, rows * 0.6))
+      );
+      sand.falling = true;
+      particles.push(sand);
+      let rained = true;
+    }
+  }
 
   for (var particle of particles) {
     particle.update();
