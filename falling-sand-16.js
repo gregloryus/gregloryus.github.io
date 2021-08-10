@@ -21,7 +21,7 @@ let leafSize = 1;
 let waitTime = 3;
 
 let numOfDirt = 1000;
-let numOfWater = 0;
+let numOfWater = 100;
 let numOfSeeds = 1;
 
 let directions = [
