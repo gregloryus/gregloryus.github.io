@@ -16,6 +16,8 @@ let rows = 100;
 // let steamSpeed = 4;
 let steamSpeed = 0.5;
 let steamWhiteness = 0.75;
+// let chanceOfEvap = 0.001;
+let chanceOfEvap = 0;
 
 let depthLimit = 5;
 let growthAngle = 45;
@@ -25,7 +27,7 @@ let leafSize = 1;
 let waitTime = 3;
 
 let numOfDirt = 1000;
-let numOfWater = 100;
+let numOfWater = 144;
 let numOfSeeds = 1;
 
 let rained = false;
@@ -413,23 +415,25 @@ function setup() {
   quadTree = new QuadTree(Infinity, 30, new Rect(0, 0, width, height));
 
   // creates a border of immovable stones
-  for (i = 0; i < rows; i++) {
-    let bottom = new Stone(i, rows - 1);
+  for (i = 0; i < rows - 4; i++) {
+    let bottom = new Stone(i + 4, rows - 4);
     bottom.falling = false;
     particles.push(bottom);
 
-    let top = new Stone(i, 1);
+    let top = new Stone(i + 4, 4);
     top.falling = false;
     particles.push(top);
 
-    let left = new Stone(0, rows - 1 - i);
+    let left = new Stone(4, rows - 4 - i);
     left.falling = false;
     particles.push(left);
 
-    let right = new Stone(rows - 1, rows - 1 - i);
+    let right = new Stone(rows - 4, rows - 4 - i);
     right.falling = false;
     particles.push(right);
   }
+
+  // STONE CIRCLE STARTS HERE
 
   let phaseShift = 1;
   let period = 0.01;
@@ -461,6 +465,8 @@ function setup() {
     curves.falling = false;
     particles.push(curves);
   }
+
+  // STONE CIRCLE ENDS HERE
 
   for (i = 0; i < numOfDirt; i++) {
     let sand = new Dirt(
@@ -1092,6 +1098,39 @@ class Particle {
   //   //prints a point
   //   point(this.pos.x, this.pos.y);
   // }
+
+  checkForWater() {
+    if (
+      // square below is filled with water
+      (grid[this.grid.x][this.grid.y + 1].length !== 0 &&
+        grid[this.grid.x][this.grid.y + 1][0].water) ||
+      // square below-right is water
+      (grid[this.grid.x + 1][this.grid.y + 1].length !== 0 &&
+        grid[this.grid.x + 1][this.grid.y + 1][0].water) ||
+      // square below-left is water
+      (grid[this.grid.x - 1][this.grid.y + 1].length !== 0 &&
+        grid[this.grid.x - 1][this.grid.y + 1][0].water) ||
+      // square left is water
+      (grid[this.grid.x - 1][this.grid.y].length !== 0 &&
+        grid[this.grid.x - 1][this.grid.y][0].water) ||
+      // square right is water
+      (grid[this.grid.x + 1][this.grid.y].length !== 0 &&
+        grid[this.grid.x + 1][this.grid.y][0].water) ||
+      // square above-right is water
+      (grid[this.grid.x + 1][this.grid.y - 1].length !== 0 &&
+        grid[this.grid.x + 1][this.grid.y - 1][0].water) ||
+      // square above-left is water
+      (grid[this.grid.x - 1][this.grid.y - 1].length !== 0 &&
+        grid[this.grid.x - 1][this.grid.y - 1][0].water) ||
+      // square above is water
+      (grid[this.grid.x][this.grid.y - 1].length !== 0 &&
+        grid[this.grid.x][this.grid.y - 1][0].water)
+    ) {
+      return true;
+    } else {
+      return false;
+    }
+  }
 }
 
 class Sand extends Particle {
@@ -1163,13 +1202,16 @@ class Water extends Sand {
 
   update() {
     super.update();
+    // if (frameCount % 100 == 1) {
+    //   console.log(this.pos);
+    // }
     // if (frameCount % 500 == 1 && this.pos.y > (height / 4) * 3) {
     //   this.refresh();
     // }
 
     if (this.checkUp()) {
       let roll = Math.random();
-      if (roll < 0.001) {
+      if (roll < chanceOfEvap) {
         if (!this.steam) {
           this.steam = true;
           this.falling = false;
@@ -1218,8 +1260,10 @@ class Water extends Sand {
       return;
     }
 
-    if (grid[this.pos.x][this.pos.y + 1].length == 0) {
-      this.pos.y = this.pos.y + 1;
+    // console.log(this.pos);
+
+    if (grid[this.grid.x][this.grid.y + 1].length == 0) {
+      this.grid.y = this.grid.y + 1;
     } else {
       let roll = random();
       if (roll > 0.5) {
@@ -1257,7 +1301,7 @@ class Water extends Sand {
       }
     }
 
-    if (grid[this.pos.x][this.pos.y + 1].length == 0) {
+    if (grid[this.grid.x][this.grid.y + 1].length == 0) {
       this.pos.y = this.pos.y + 1;
     } else {
       let roll = random();
@@ -1350,7 +1394,7 @@ function mouseClicked() {
       particles.push(sand);
     }
   } else if (clickType == "Water") {
-    for (i = 0; i < 10; i++) {
+    for (i = 0; i < 1; i++) {
       let sand = new Water(
         Math.floor(mouseX / scaleNum + random(-3, 3)),
         Math.floor(mouseY / scaleNum + random(-7, 7))
@@ -1494,6 +1538,9 @@ class Plent extends Particle {
             particles.push(plant); // add new particle to the world
             this.up.push(plant); // assign it to this particle
             this.growing = false; // this particle stops growing
+            // this.core.lastGrowthPosX = plant.pos.x;
+            // this.core.lastGrowthPosY = plant.pos.y;
+            this.core.lastGrowthPos = plant.pos.copy();
           }
           break;
         case 1:
@@ -1515,6 +1562,9 @@ class Plent extends Particle {
             particles.push(plant); // add new particle to the world
             this.up.push(plant); // assign it to this particle
             this.growing = false; // this particle stops growing
+            // this.core.lastGrowthPosX = plant.pos.x;
+            // this.core.lastGrowthPosY = plant.pos.y;
+            this.core.lastGrowthPos = plant.pos.copy();
           }
           break;
 
@@ -1537,6 +1587,9 @@ class Plent extends Particle {
             particles.push(plant); // add new particle to the world
             this.up.push(plant); // assign it to this particle
             this.growing = false; // this particle stops growing
+            // this.core.lastGrowthPosX = plant.pos.x;
+            // this.core.lastGrowthPosY = plant.pos.y;
+            this.core.lastGrowthPos = plant.pos.copy();
           }
           break;
         default:
@@ -1623,7 +1676,11 @@ class Plent extends Particle {
       this.grow();
     }
 
-    if (this.checkUp() == false && frameCount % 2 == 1) {
+    if (
+      this.checkUp() == false &&
+      this.checkForWater() == false &&
+      frameCount % 2 == 1
+    ) {
       this.core.dead = true;
       let sed = new Sed(this.grid.x, this.grid.y);
       sed.falling = true;
@@ -1649,6 +1706,7 @@ class Sed extends Plent {
     this.wet = true;
     // this.wet = false;
     // this.core.wet = false; // wet = near water
+    this.lastGrowthPos = this.pos.copy();
 
     //Plant stats
     this.depth = 1;
@@ -1667,6 +1725,108 @@ class Sed extends Plent {
     this.left = []; // child node, left
     this.right = []; // child node, right
     this.down = []; // parent node
+  }
+
+  absorbWater() {
+    // console.log("checking for water in the function");
+    // needs to check all 8 neighbor squares, not just 3 below
+    if (
+      // square below is filled with water
+      grid[this.grid.x][this.grid.y + 1].length !== 0 &&
+      grid[this.grid.x][this.grid.y + 1][0].water
+    ) {
+      grid[this.grid.x][this.grid.y + 1][0].pos =
+        this.core.lastGrowthPos.copy();
+      // grid[this.grid.x][this.grid.y + 1][0].pos.x = this.lastGrowthPosX;
+      // grid[this.grid.x][this.grid.y + 1][0].pos.y = this.lastGrowthPosY; //RETURNHERE recall the saved position of the last growth
+      grid[this.grid.x][this.grid.y + 1][0].snap();
+      grid[this.grid.x][this.grid.y + 1][0].steam = true;
+      grid[this.grid.x][this.grid.y + 1][0].falling = false;
+    } else if (
+      // // square below-right is water
+      grid[this.grid.x + 1][this.grid.y + 1].length !== 0 &&
+      grid[this.grid.x + 1][this.grid.y + 1][0].water
+    ) {
+      grid[this.grid.x + 1][this.grid.y + 1][0].pos =
+        this.core.lastGrowthPos.copy();
+      // grid[this.grid.x + 1][this.grid.y + 1][0].pos.x = this.lastGrowthPosX;
+      // grid[this.grid.x + 1][this.grid.y + 1][0].pos.y = this.lastGrowthPosY; //RETURNHERE recall the saved position of the last growth
+      grid[this.grid.x + 1][this.grid.y + 1][0].snap();
+      grid[this.grid.x + 1][this.grid.y + 1][0].steam = true;
+      grid[this.grid.x + 1][this.grid.y + 1][0].falling = false;
+    } else if (
+      // // square below-left is water
+      grid[this.grid.x - 1][this.grid.y + 1].length !== 0 &&
+      grid[this.grid.x - 1][this.grid.y + 1][0].water
+    ) {
+      grid[this.grid.x - 1][this.grid.y + 1][0].pos =
+        this.core.lastGrowthPos.copy();
+      // grid[this.grid.x - 1][this.grid.y + 1][0].pos.x = this.lastGrowthPosX;
+      // grid[this.grid.x - 1][this.grid.y + 1][0].pos.y = this.lastGrowthPosY; //RETURNHERE recall the saved position of the last growth
+      grid[this.grid.x - 1][this.grid.y + 1][0].snap();
+      grid[this.grid.x - 1][this.grid.y + 1][0].steam = true;
+      grid[this.grid.x - 1][this.grid.y + 1][0].falling = false;
+    } else if (
+      // // square left is water
+      grid[this.grid.x - 1][this.grid.y].length !== 0 &&
+      grid[this.grid.x - 1][this.grid.y][0].water
+    ) {
+      grid[this.grid.x - 1][this.grid.y][0].pos =
+        this.core.lastGrowthPos.copy();
+      // grid[this.grid.x - 1][this.grid.y][0].pos.x = this.lastGrowthPosX;
+      // grid[this.grid.x - 1][this.grid.y][0].pos.y = this.lastGrowthPosY; //RETURNHERE recall the saved position of the last growth
+      grid[this.grid.x - 1][this.grid.y][0].snap();
+      grid[this.grid.x - 1][this.grid.y][0].steam = true;
+      grid[this.grid.x - 1][this.grid.y][0].falling = false;
+    } else if (
+      // // square right is water
+      grid[this.grid.x + 1][this.grid.y].length !== 0 &&
+      grid[this.grid.x + 1][this.grid.y][0].water
+    ) {
+      grid[this.grid.x + 1][this.grid.y][0].pos =
+        this.core.lastGrowthPos.copy();
+      // grid[this.grid.x + 1][this.grid.y][0].pos.x = this.lastGrowthPosX;
+      // grid[this.grid.x + 1][this.grid.y][0].pos.y = this.lastGrowthPosY; //RETURNHERE recall the saved position of the last growth
+      grid[this.grid.x + 1][this.grid.y][0].snap();
+      grid[this.grid.x + 1][this.grid.y][0].steam = true;
+      grid[this.grid.x + 1][this.grid.y][0].falling = false;
+    } else if (
+      // // square above-right is water
+      grid[this.grid.x + 1][this.grid.y - 1].length !== 0 &&
+      grid[this.grid.x + 1][this.grid.y - 1][0].water
+    ) {
+      grid[this.grid.x + 1][this.grid.y - 1][0].pos =
+        this.core.lastGrowthPos.copy();
+      // grid[this.grid.x + 1][this.grid.y - 1][0].pos.x = this.lastGrowthPosX;
+      // grid[this.grid.x + 1][this.grid.y - 1][0].pos.y = this.lastGrowthPosY; //RETURNHERE recall the saved position of the last growth
+      grid[this.grid.x + 1][this.grid.y - 1][0].snap();
+      grid[this.grid.x + 1][this.grid.y - 1][0].steam = true;
+      grid[this.grid.x + 1][this.grid.y - 1][0].falling = false;
+    } else if (
+      // // square above-left is water
+      grid[this.grid.x - 1][this.grid.y - 1].length !== 0 &&
+      grid[this.grid.x - 1][this.grid.y - 1][0].water
+    ) {
+      grid[this.grid.x - 1][this.grid.y - 1][0].pos =
+        this.core.lastGrowthPos.copy();
+      // grid[this.grid.x - 1][this.grid.y - 1][0].pos.x = this.lastGrowthPosX;
+      // grid[this.grid.x - 1][this.grid.y - 1][0].pos.y = this.lastGrowthPosY; //RETURNHERE recall the saved position of the last growth
+      grid[this.grid.x - 1][this.grid.y - 1][0].snap();
+      grid[this.grid.x - 1][this.grid.y - 1][0].steam = true;
+      grid[this.grid.x - 1][this.grid.y - 1][0].falling = false;
+    } else if (
+      // // square above is water
+      grid[this.grid.x][this.grid.y - 1].length !== 0 &&
+      grid[this.grid.x][this.grid.y - 1][0].water
+    ) {
+      grid[this.grid.x][this.grid.y - 1][0].pos =
+        this.core.lastGrowthPos.copy();
+      // grid[this.grid.x][this.grid.y - 1][0].pos.x = this.lastGrowthPosX;
+      // grid[this.grid.x][this.grid.y - 1][0].pos.y = this.lastGrowthPosY; //RETURNHERE recall the saved position of the last growth
+      grid[this.grid.x][this.grid.y - 1][0].snap();
+      grid[this.grid.x][this.grid.y - 1][0].steam = true;
+      grid[this.grid.x][this.grid.y - 1][0].falling = false;
+    }
   }
 
   checkForWater() {
@@ -1701,6 +1861,7 @@ class Sed extends Plent {
       // console.log("water found");
       this.wet = true;
       this.core.wet = true;
+      this.absorbWater();
       return true;
       // this.wet = true;
       // return true;c
@@ -1735,6 +1896,7 @@ class Sed extends Plent {
       // this.wet = false;
       // this.core.wet = false;
       this.checkForWater();
+      // this.absorbWater();
     }
     this.smartFall();
 
