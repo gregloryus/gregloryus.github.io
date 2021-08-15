@@ -577,17 +577,16 @@ function draw() {
   textAlign(CENTER);
   stroke(1, 0, 1, 1);
   fill(0, 0, 0, 0);
-  text(
-    `
-  FPS: ${Math.floor(frameRate())}
-  Particles: ${particles.length} (${
-      particles.length - 1024 - numOfDirt - numOfWater
-    })
-  Create: ${clickType}
-  `,
-    (rows * scaleNum) / 2,
-    (columns * scaleNum) / 20
-  );
+  // text(
+    // `
+  // FPS: ${Math.floor(frameRate())}
+  // Particles: ${particles.length} (${
+      // particles.length - 1024 - numOfDirt - numOfWater
+    // })
+  // Create: ${clickType}
+ // `,
+ // (rows * scaleNum) / 2, (columns * scaleNum) / 200
+ // );
 }
 
 class Particle {
