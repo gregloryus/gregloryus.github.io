@@ -9,7 +9,7 @@
 
 let targetFrameRate = 100;
 let particles = [];
-let clickType = "Water";
+let clickType = "Seed";
 let columns = 100;
 let rows = 100;
 
@@ -17,7 +17,13 @@ let rows = 100;
 let steamSpeed = 0.5;
 let steamWhiteness = 0.75;
 // let chanceOfEvap = 0.001;
-let chanceOfEvap = 0;
+let chanceOfEvap = 0.0;
+
+let waterDensity = 0.3;
+let stoneDensity = 1.0;
+let dirtDensity = 0.9;
+let plentDensity = 0.2;
+let sedDensity = 0.2;
 
 let depthLimit = 5;
 let growthAngle = 45;
@@ -27,8 +33,8 @@ let leafSize = 1;
 let waitTime = 3;
 
 let numOfDirt = 1000;
-let numOfWater = 144;
-let numOfSeeds = 1;
+let numOfWater = 200;
+let numOfSeeds = 3;
 
 let rained = false;
 
@@ -496,7 +502,7 @@ function setup() {
 
   for (i = 0; i < numOfSeeds; i++) {
     let seed = new Sed(
-      Math.floor(random(columns * 0.05, columns * 0.95)),
+      Math.floor(random(columns * 0.35, columns * 0.65)),
       Math.floor(columns / 2)
     );
     particles.push(seed);
@@ -540,6 +546,7 @@ function draw() {
 
   for (var particle of particles) {
     particle.update();
+    // particle.checkSelf();
     particle.snap();
     particle.show();
   }
@@ -585,12 +592,12 @@ function draw() {
   fill(0, 0, 0, 0);
   text(
     `
-  FPS: ${Math.floor(frameRate())}
-  Particles: ${particles.length} (${
+    FPS: ${Math.floor(frameRate())}
+    Particles: ${particles.length} (${
       particles.length - 1024 - numOfDirt - numOfWater
     })
-  Create: ${clickType}
-  `,
+    Create: ${clickType}
+    `,
     (rows * scaleNum) / 2,
     (columns * scaleNum) / 20
   );
@@ -634,7 +641,6 @@ class Particle {
       // space below is empty
       grid[this.grid.x][this.grid.y + 1].length == 0 &&
       nextGrid[this.grid.x][this.grid.y + 1].length == 0
-      // || grid[this.grid.x][this.grid.y + 1][0].density < this.density
     ) {
       this.pos.y = this.pos.y + 1;
     } else {
@@ -660,7 +666,14 @@ class Particle {
           this.pos.y = this.pos.y + 1;
           this.pos.x = this.pos.x + 1;
         } else {
-          // this.falling = false;
+          if (
+            grid[this.grid.x][this.grid.y + 1].length > 0 &&
+            nextGrid[this.grid.x][this.grid.y + 1].length > 0
+          ) {
+            if (grid[this.grid.x][this.grid.y + 1][0].density < this.density) {
+              this.pos.y = this.pos.y + 1;
+            }
+          }
         }
       } else {
         // check right, then left
@@ -815,6 +828,100 @@ class Particle {
     this.pos.x = this.pos.x + 1;
   }
 
+  checkSelf() {
+    if (
+      grid[this.grid.x][this.grid.y].length >= 2 &&
+      nextGrid[this.grid.x][this.grid.y].length >= 2
+    ) {
+      let directions = [
+        "up",
+        "down",
+        "left",
+        "right",
+        "upLeft",
+        "upRight",
+        "downLeft",
+        "downRight",
+      ];
+      let moveDir = random(directions);
+      switch (moveDir) {
+        case "up":
+          if (this.checkUp()) {
+            this.moveUp();
+            //   } else {
+            //     this.moveUp();
+            //   }
+          }
+          //   else if (
+          //     grid[this.grid.x][this.grid.y - 1][0].density > this.density &&
+          //     nextGrid[this.grid.x][this.grid.y - 1][0].density > this.density
+          //   ) {
+          //     this.moveUp();
+          //   }
+          break;
+        case "down":
+          if (this.checkDown()) {
+            this.moveDown();
+          } else if (
+            grid[this.grid.x][this.grid.y + 1][0].density < this.density &&
+            nextGrid[this.grid.x][this.grid.y + 1][0].density < this.density
+          ) {
+            this.moveDown();
+          }
+          break;
+        case "left":
+          if (this.checkLeft()) {
+            this.moveLeft();
+          }
+          break;
+        case "right":
+          if (this.checkRight()) {
+            this.moveRight();
+          }
+          break;
+        case "upLeft":
+          if (this.checkUpLeft()) {
+            this.moveUpLeft();
+          }
+          break;
+        case "upRight":
+          if (this.checkUpRight()) {
+            this.moveUpRight();
+          }
+          break;
+        case "downLeft":
+          if (this.checkDownLeft()) {
+            this.moveDownLeft();
+          }
+          break;
+        case "downRight":
+          if (this.checkDownRight()) {
+            this.moveDownRight();
+          }
+          break;
+        default:
+          return;
+      }
+      //   if (this.checkUp()) {
+      //     this.moveUp();
+      //   } else if (this.checkUpLeft) {
+      //     this.moveUpLeft();
+      //   } else if (this.checkUpRight) {
+      //     this.moveUpRight();
+      //   } else if (this.checkLeft()) {
+      //     this.moveLeft();
+      //   } else if (this.checkRight()) {
+      //     this.moveRight();
+      //   } else if (this.checkDownLeft()) {
+      //     this.moveDownLeft();
+      //   } else if (this.checkDownRight()) {
+      //     this.moveDownRight();
+      //   } else {
+      //     console.log("couldn't spread out");
+      //   }
+    }
+  }
+
   betterFloat() {
     let directions = [
       "up",
@@ -875,7 +982,7 @@ class Particle {
 
   betterRise() {
     let directions = [
-      // up x6, down x3, left x5, right x5
+      // up x7, down x3, left x5, right x5
       "up",
       "up",
       "up",
@@ -883,15 +990,9 @@ class Particle {
       "up",
       "up",
       "up",
-      "upLeft",
-      "upLeft",
-      "upRight",
-      "upRight",
       "down",
       "down",
       "down",
-      "downLeft",
-      "downRight",
       "left",
       "left",
       "left",
@@ -902,14 +1003,6 @@ class Particle {
       "right",
       "right",
       "right",
-      // "up",
-      // "down",
-      // "left",
-      // "right",
-      // "upLeft",
-      // "upRight",
-      // "downLeft",
-      // "downRight",
     ];
     let moveDir = random(directions);
     switch (moveDir) {
@@ -1162,6 +1255,7 @@ class Water extends Sand {
     this.steam = false;
     this.color = random(waterColors);
     this.offset = Math.floor(Math.random() * 100);
+    this.density = waterDensity;
   }
   refresh() {
     this.pos.y = this.pos.y - 150;
@@ -1331,6 +1425,7 @@ class Steam extends Water {
     super(x, y);
     this.falling = false;
     // this.rising = true;
+    this.density = steamDensity;
   }
   update() {
     super.update();
@@ -1350,6 +1445,7 @@ class Dirt extends Sand {
     this.dirt = true;
     this.water = false;
     this.color = random(dirtColors);
+    this.density = dirtDensity;
   }
 }
 
@@ -1361,6 +1457,7 @@ class Stone extends Sand {
     this.stone = true;
     this.water = false;
     this.color = random(stoneColors);
+    this.density = stoneDensity;
   }
 
   smartFall() {
@@ -1394,7 +1491,7 @@ function mouseClicked() {
       particles.push(sand);
     }
   } else if (clickType == "Water") {
-    for (i = 0; i < 1; i++) {
+    for (i = 0; i < 1000; i++) {
       let sand = new Water(
         Math.floor(mouseX / scaleNum + random(-3, 3)),
         Math.floor(mouseY / scaleNum + random(-7, 7))
@@ -1490,7 +1587,10 @@ class Plent extends Particle {
     this.vel.setMag(this.maxSpeed);
 
     this.waitCounter = waitTime;
+    this.density = plentDensity;
   }
+
+  checkSelf() {}
 
   grow() {
     if (this.falling || !this.growing) {
@@ -1651,7 +1751,11 @@ class Plent extends Particle {
       //lower brightness by 1
       this.brightness = this.brightness - 0.01;
       if (this.brightness < 0.1) {
-        particles.splice(particles.indexOf(this), 1);
+        particles.splice(
+          particles.indexOf(this),
+          1,
+          new Dirt(this.pos.x, this.pos.y)
+        );
       }
       return;
     }
@@ -1712,6 +1816,7 @@ class Sed extends Plent {
     this.depth = 1;
     this.leafSize = 1;
     this.growthCount = 0;
+    this.density = sedDensity;
 
     //genes
     this.geneIterator = 0;
@@ -1892,7 +1997,7 @@ class Sed extends Plent {
       // this.core.wet = false;
       // this.refresh();
     }
-    if (frameCount % 100 == 90) {
+    if (frameCount % 10 == 90) {
       // this.wet = false;
       // this.core.wet = false;
       this.checkForWater();
