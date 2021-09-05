@@ -10,8 +10,8 @@
 let targetFrameRate = 100;
 let particles = [];
 let clickType = "Seed";
-let columns = 256;
-let rows = 256;
+let columns = 64;
+let rows = 64
 
 // let steamSpeed = 4;
 let steamSpeed = 0.5;
