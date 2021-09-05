@@ -441,36 +441,36 @@ function setup() {
 
   // STONE CIRCLE STARTS HERE
 
-  let phaseShift = 1;
-  let period = 0.01;
-  let verticalShift = height * 0.5;
+  // let phaseShift = 1;
+  // let period = 0.01;
+  // let verticalShift = height * 0.5;
   // let amp = height * 0.386; // size of circle, safe = 0.25
-  let amp = height * 0.39; // size of circle, safe = 0.25
+ // let amp = height * 0.39; // size of circle, safe = 0.25
 
-  for (i = 0; i < rows * TWO_PI; i++) {
-    let curve = new Stone(
-      Math.floor(amp * cos(period * (i + phaseShift)) + verticalShift),
-      Math.floor(amp * sin(period * (i + phaseShift)) + verticalShift)
-    );
-    curve.falling = false;
-    particles.push(curve);
-  }
-  for (i = 0; i < rows * TWO_PI; i++) {
-    let curves = new Stone(
-      Math.floor(amp * cos(period * (i + phaseShift)) + verticalShift),
-      Math.floor(amp * sin(period * (i + phaseShift)) + verticalShift) + 1
-    );
-    curves.falling = false;
-    particles.push(curves);
-  }
-  for (i = 0; i < rows * TWO_PI; i++) {
-    let curves = new Stone(
-      Math.floor(amp * cos(period * (i + phaseShift)) + verticalShift) + 1,
-      Math.floor(amp * sin(period * (i + phaseShift)) + verticalShift) + 1
-    );
-    curves.falling = false;
-    particles.push(curves);
-  }
+//  for (i = 0; i < rows * TWO_PI; i++) {
+//    let curve = new Stone(
+//      Math.floor(amp * cos(period * (i + phaseShift)) + verticalShift),
+//      Math.floor(amp * sin(period * (i + phaseShift)) + verticalShift)
+//    );
+//    curve.falling = false;
+//    particles.push(curve);
+//  }
+//  for (i = 0; i < rows * TWO_PI; i++) {
+//    let curves = new Stone(
+//      Math.floor(amp * cos(period * (i + phaseShift)) + verticalShift),
+//      Math.floor(amp * sin(period * (i + phaseShift)) + verticalShift) + 1
+//    );
+//    curves.falling = false;
+//    particles.push(curves);
+//  }
+//  for (i = 0; i < rows * TWO_PI; i++) {
+//     let curves = new Stone(
+//      Math.floor(amp * cos(period * (i + phaseShift)) + verticalShift) + 1,
+//      Math.floor(amp * sin(period * (i + phaseShift)) + verticalShift) + 1
+//    );
+//     curves.falling = false;
+ //   particles.push(curves);
+//  }
 
   // STONE CIRCLE ENDS HERE
 
