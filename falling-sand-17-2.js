@@ -32,8 +32,8 @@ let maxSpeed = 3; // velocity per step
 let leafSize = 1;
 let waitTime = 3;
 
-let numOfDirt = 4000;
-let numOfWater = 1000
+let numOfDirt = rows * 100;
+let numOfWater = rows * 10
 let numOfSeeds = 3;
 
 let rained = false;
