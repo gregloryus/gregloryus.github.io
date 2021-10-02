@@ -806,7 +806,7 @@ class Plant {
   }
 }
 
-function mouseClicked() {
+function mouseReleased() {
   //create new seed
   let particle = new Plant(Math.floor(mouseX), Math.floor(mouseY));
   particle.seed = true;
