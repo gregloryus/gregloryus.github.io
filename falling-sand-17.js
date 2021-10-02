@@ -32,9 +32,9 @@ let maxSpeed = 3; // velocity per step
 let leafSize = 1;
 let waitTime = 3;
 
-let numOfDirt = 1000;
-let numOfWater = 200;
-let numOfSeeds = 3;
+let numOfDirt = 200;
+let numOfWater = 100;
+let numOfSeeds = 4;
 
 let rained = false;
 
@@ -546,7 +546,7 @@ function draw() {
 
   for (var particle of particles) {
     particle.update();
-    // particle.checkSelf();
+    particle.checkSelf();
     particle.snap();
     particle.show();
   }
@@ -672,6 +672,7 @@ class Particle {
           ) {
             if (grid[this.grid.x][this.grid.y + 1][0].density < this.density) {
               this.pos.y = this.pos.y + 1;
+              grid[this.grid.x][this.grid.y + 1][0].pos.y = this.pos.y - 1;
             }
           }
         }
@@ -867,6 +868,8 @@ class Particle {
             nextGrid[this.grid.x][this.grid.y + 1][0].density < this.density
           ) {
             this.moveDown();
+            nextGrid[this.grid.x][this.grid.y + 1][0].pos.y = this.pos.y - 1;
+            grid[this.grid.x][this.grid.y + 1][0].pos.y = this.pos.y - 1;
           }
           break;
         case "left":
@@ -1599,6 +1602,7 @@ class Plent extends Particle {
     // let roll = random(100);
     // if (roll < 1) {
     //   this.growing = false;
+    //   this.core.dead = true;
     //   console.log("natural terminus");
     //   return;
     // }
