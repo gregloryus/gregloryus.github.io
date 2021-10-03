@@ -28,6 +28,9 @@ let updateCounter = 0;
 let canvasContext;
 let counter = 0;
 let highestEnergy = 0;
+let highestEnergyColor;
+
+let numOfSeeds = 100;
 
 const vw = Math.max(
   document.documentElement.clientWidth || 0,
@@ -151,7 +154,7 @@ function draw() {
   }
   background(0);
 
-  if (particles.length < 10000) {
+  if (particles.length < 100000) {
     for (var particle of particles) {
       particle.update();
       particle.show();
@@ -160,28 +163,40 @@ function draw() {
     for (var particle of particles) {
       if (particle.readyToRecordGenes) {
         particle.readyToRecordGenes = false;
-        if (particle.energyCount > highestEnergy * 0.75) {
-          if (particle.energyCount > highestEnergy) {
-            highestEnergy = particle.energyCount;
-            console.log("new high!");
-            let geneticRecord = particle.genes;
-            genePool.push(geneticRecord);
-            console.log("new genes stored!!!");
-          }
-
-          let geneticRecord = particle.genes;
-          genePool.push(geneticRecord);
-          console.log("new genes stored!!!");
+        if (particle.energyCount > highestEnergy) {
+          highestEnergy = particle.energyCount;
+          //   highestEnergyColor = particle.color;
+          highestEnergyBlue = particle.blue;
+          highestEnergyRed = particle.red;
+          highestEnergyGreen = particle.green;
+          // console.log("new high!");
+          //   let geneticRecord = particle.genes;
+          genePool = [particle.genes];
+          console.log(`new high: ${highestEnergy}`);
         }
-        console.log(
-          `
-plant #${particle.id} recorded with
-${particle.cellCount + 1} cells and
-${particle.energyCount} energy
-${
-  Math.floor((particle.energyCount / (particle.cellCount + 1)) * 100) / 100
-} e/c `
-        );
+
+        // if (particle.energyCount > highestEnergy * 0.75) {
+        //   if (particle.energyCount > highestEnergy) {
+        //     highestEnergy = particle.energyCount;
+        //     // console.log("new high!");
+        //     let geneticRecord = particle.genes;
+        //     genePool.push(geneticRecord);
+        //     console.log(`new high: ${highestEnergy}`);
+        //   }
+
+        //   let geneticRecord = particle.genes;
+        //   genePool.push(geneticRecord);
+        //   //   console.log("new genes stored!!!");
+        // }
+        //         console.log(
+        //           `
+        // plant #${particle.id} recorded with
+        // ${particle.cellCount + 1} cells and
+        // ${particle.energyCount} energy
+        // ${
+        //   Math.floor((particle.energyCount / (particle.cellCount + 1)) * 100) / 100
+        // } e/c `
+        //         );
       }
     }
 
@@ -190,10 +205,10 @@ ${
         particle.energyReport = true;
         particle.setEnergyValue();
         particle.core.energyCount += particle.energy;
-        console.log(`
-        cell ${particle.id} 
-        reporting ${particle.energy} energy
-        core now has ${particle.core.energyCount}`);
+        // console.log(`
+        // cell ${particle.id}
+        // reporting ${particle.energy} energy
+        // core now has ${particle.core.energyCount}`);
         particle.core.readyToRecordGenes = true;
       }
     }
@@ -250,9 +265,11 @@ ${
   stroke(1, 0, 1, 1);
   fill(0, 0, 0, 0);
   //  FPS: ${Math.floor(frameRate())}
+  //   Particles: ${particles.length}
+
   text(
     `
-  Particles: ${particles.length}
+  High score: ${highestEnergy}
   `,
     vw / 2,
     vh / 20
@@ -363,6 +380,26 @@ class Plant {
     this.green = Math.floor(random(255));
     this.blue = Math.floor(random(255));
     this.opacity = 1;
+  }
+
+  mutateGenes() {
+    // console.log(this.genes);
+    for (var strands of this.genes) {
+      for (var i = this.genes.length - 1; i >= 0; i--) {
+        let geneRecencyCounter = 1;
+        for (var gene of this.genes[i]) {
+          //genes in newest strand have 50% chance; 2nd newest, 25%; 3rd, 12.5%, etc.
+          if (random() < 0.8 / geneRecencyCounter) {
+            if (gene === 1) {
+              gene = 0;
+            } else if (gene === 0) {
+              gene = 1;
+            }
+          }
+        }
+        geneRecencyCounter++;
+      }
+    }
   }
 
   setEnergyValue() {
@@ -807,18 +844,33 @@ class Plant {
 }
 
 function mouseReleased() {
+  particles = [];
   //create new seed
-  let particle = new Plant(Math.floor(mouseX), Math.floor(mouseY));
-  particle.seed = true;
-  particle.seedMarker = true;
-  particle.oldSeed = true;
-  particle.growing = true;
-  particle.id = particles.length + 1;
-  if (particle.pos.y < height/2) {
-    particle.genes = random(genePool);
+  for (i = 0; i < numOfSeeds; i++) {
+    let particle = new Plant(
+      Math.floor(width / 8 + random(width / 2 + width / 4)),
+      Math.floor(height / 8 + random(height / 2 + height / 4))
+    );
+    particle.seed = true;
+    particle.seedMarker = true;
+    particle.oldSeed = true;
+    particle.growing = true;
+    particle.id = particles.length + 1;
+    if (particle.pos.y < height / 2 || particle.pos.x < width / 2) {
+      particle.genes = random(genePool);
+      if (particle.pos.x > width / 2 || particle.pos.y > height / 2) {
+        particle.mutateGenes();
+      } else if (particle.pos.x < width / 2) {
+        // particle.color = highestEnergyColor;
+        particle.red = highestEnergyRed;
+        particle.green = highestEnergyGreen;
+        particle.blue = highestEnergyBlue;
+        // console.log("old color set...");
+      }
+    }
+    particles.push(particle);
+    grid[particle.pos.x][particle.pos.y].push(particle);
   }
-  particles.push(particle);
-  grid[particle.pos.x][particle.pos.y].push(particle);
 }
 
 function keyPressed() {
