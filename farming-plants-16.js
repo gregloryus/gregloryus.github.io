@@ -43,7 +43,7 @@ let particles = [];
 let columns = vw;
 let rows = vh;
 
-let numOfSeeds = Math.floor((rows * columns) / 2000);
+let numOfSeeds = Math.floor((rows * columns) / 5000);
 
 //SLIDERS
 leafSize = 1;
@@ -163,10 +163,12 @@ function draw() {
     for (var particle of particles) {
       if (particle.readyToRecordGenes) {
         particle.readyToRecordGenes = false;
+
         if (particle.energyCount > highestEnergy) {
+          particle.flashing = true;
           highestEnergy = particle.energyCount;
           highestEnergyGenes = particle.genes;
-          //   highestEnergyColor = particle.color;
+          // highestEnergyColor = particle.color;
           highestEnergyBlue = particle.blue;
           highestEnergyRed = particle.red;
           highestEnergyGreen = particle.green;
@@ -270,9 +272,7 @@ function draw() {
 
   text(
     `
-  High score: ${highestEnergy}
-  ${numOfSeeds}
-  `,
+  High score: ${highestEnergy} `,
     vw / 2,
     vh / 20
   );
@@ -305,7 +305,7 @@ class Particle {
     this.red = 250;
     this.green = 150;
     this.blue = 50;
-    this.opacity = 1;
+    this.opacity = 0.1;
 
     //movement chances
     this.childUp = 0.0;
@@ -354,6 +354,8 @@ class Plant {
     this.finalReport = false;
     this.energyReport = false;
     this.readyToRecordGenes = false;
+    this.faded = false;
+    this.flashing = false;
 
     this.xOffset = 0;
     this.yOffset = 0;
@@ -851,6 +853,13 @@ class Plant {
   }
 
   show() {
+    if (this.core.flashing) {
+      if (frameCount % 40 < 20) {
+        this.opacity = 0;
+      } else {
+        this.opacity = 1;
+      }
+    }
     this.color = `rgba(${this.red}, ${this.green}, ${this.blue}, ${this.opacity})`;
     canvasContext.fillStyle = this.color;
     canvasContext.fillRect(this.grid.x, this.grid.y, 1, 1);
@@ -877,13 +886,20 @@ function mouseReleased() {
     particle.oldSeed = true;
     particle.growing = true;
     particle.id = particles.length + 1;
-    //leftmost 3/4ths get a copy of genes
-    if (particle.pos.x < (width / 4) * 3) {
-      particle.genes = JSON.parse(JSON.stringify(highestEnergyGenes));
-      if (particle.pos.x > width / 4) {
-        particle.mutateGenes();
-      }
+
+    particle.genes = JSON.parse(JSON.stringify(highestEnergyGenes));
+    if (particle.pos.y > height / 4) {
+      particle.mutateGenes();
+    } else {
+      particle.red = highestEnergyRed;
+      particle.green = highestEnergyGreen;
+      particle.blue = highestEnergyBlue;
+      particle.opacity = 1;
     }
+    //leftmost 3/4ths get a copy of genes
+    // if (particle.pos.y < (height / 4) * 3) {
+
+    // }
     // if (particle.pos.y < height / 2 || particle.pos.x < width / 2) {
     //   particle.genes = random(genePool);
     //   if (particle.pos.x > width / 2 || particle.pos.y > height / 2) {
