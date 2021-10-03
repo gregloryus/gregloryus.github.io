@@ -814,7 +814,7 @@ function mouseReleased() {
   particle.oldSeed = true;
   particle.growing = true;
   particle.id = particles.length + 1;
-  if (random() > 0.5) {
+  if (particle.pos.y < height/2) {
     particle.genes = random(genePool);
   }
   particles.push(particle);
