@@ -1,5 +1,16 @@
 //DECLARATIONS
 // like the look of these settings
+// note: good settings:
+// water opacity = 0.2, shadow = 3 x 100f
+
+let frameModulus = 50;
+let shadowDegree = 3;
+let waterOpacity = 0.5;
+
+let numOfEarth = 100;
+
+let numOfLines = 1600;
+let releaseSpeed = 2; // modulus for particle gen
 
 let lines = [];
 //Creates variables for the viewport w/h
@@ -18,10 +29,6 @@ let canvas;
 let canvasContext;
 
 //SLIDERS
-
-let numOfLines = 1600;
-let numOfEarth = 400;
-let releaseSpeed = 2; // modulus for particle gen
 
 //P5 STUFF
 
@@ -85,8 +92,8 @@ function draw() {
   // if (frameCount % 1000 === 500) {
   //   background(0, 0, 0, 25);
   // }
-  if (frameCount % 400 === 1) {
-    background(0, 0, 0, 10);
+  if (frameCount % frameModulus === 1) {
+    background(0, 0, 0, shadowDegree);
   }
 
   // quadTree.debugRender();
