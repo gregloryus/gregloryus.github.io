@@ -1,4 +1,3 @@
-let waterOpacity = 0.1;
 let earthOpacity = 0.0;
 let plantOpacity = 0.0;
 let repelChance = 1;
@@ -227,7 +226,7 @@ class Earth extends Walker {
     this.water = false;
     this.temp = random(0.4, 0.6);
     let minDem = Math.min(vw, vh);
-    this.size = random(minDem / 100, minDem / 10);
+    this.size = random(minDem / 100, minDem / 4);
     this.opacity = earthOpacity;
     this.brightness = 1;
 
