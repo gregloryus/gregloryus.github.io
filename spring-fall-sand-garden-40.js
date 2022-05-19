@@ -20,7 +20,7 @@ let pauseFlagged;
 let perceptionRadius = 2;
 let perceptionCount = 27;
 
-let scaleSize = 8;
+let scaleSize = 10;
 let cols = Math.floor(window.innerWidth / scaleSize);
 let rows = Math.floor(window.innerHeight / scaleSize);
 console.log(cols, rows);
@@ -1553,13 +1553,13 @@ class Branch extends Stem {
 //   }
 // }
 // // p5 function for when touch screen is tapped
-// function touchStarted() {
-//   let seed = new Seed(
-//     Math.floor(mouseX / scaleSize),
-//     Math.floor(mouseY / scaleSize)
-//   );
-//   particles.push(seed);
-// }
+function touchStarted() {
+  let seed = new Seed(
+    Math.floor(mouseX / scaleSize),
+    Math.floor(mouseY / scaleSize)
+  );
+  particles.push(seed);
+}
 
 // function doubleClicked() {
 //   let seed = new Seed(
@@ -1570,15 +1570,30 @@ class Branch extends Stem {
 // }
 
 function doubleClicked() {
-  let x = Math.floor(mouseX / scaleSize);
-  let y = Math.floor(mouseY / scaleSize);
-  for (let i = 0; i < particles.length; i++) {
-    if (particles[i].pos.x == x && particles[i].pos.y == y) {
-      console.log(particles[i]);
-    }
-  }
+  let seed = new Seed(
+    Math.floor(mouseX / scaleSize),
+    Math.floor(mouseY / scaleSize)
+  );
+  particles.push(seed);
+
+  //   // NEW DOUBLECLICKED, MAKES PLANTS ADVANCE TO NEXT GROWTH STAGE
+  //   for (var particle of particles) {
+  //     if (particle.isFlowerBud) {
+  //       particle.growthStage++;
+  //       console.log(`${particle.id} grew to stage ${particle.growthStage}`);
+  //     }
+  //   }
+
+  // OLD DOUBLECLICKED, RETURNS PARTICLE YOU CLICKED ON
+  //   let x = Math.floor(mouseX / scaleSize);
+  //   let y = Math.floor(mouseY / scaleSize);
+  //   for (let i = 0; i < particles.length; i++) {
+  //     if (particles[i].pos.x == x && particles[i].pos.y == y) {
+  //       console.log(particles[i]);
+  //     }
+  //   }
 }
-function mouseClicked() {
+function touchStarted() {
   for (var particle of particles) {
     if (particle.isFlowerBud) {
       particle.growthStage++;
