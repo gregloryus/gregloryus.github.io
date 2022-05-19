@@ -714,6 +714,8 @@ class Seed extends Plant {
   constructor(x, y) {
     super(x, y);
 
+    this.density = 0.2;
+
     // plant qualities
     this.isStatic = false;
     this.isDead = false;
@@ -729,18 +731,21 @@ class Seed extends Plant {
     this.chanceToSprout = 0.1;
 
     this.age = 0;
-    this.ageLimit = 500;
+    this.ageLimit = 1600;
 
     //seed qualities
     this.children = [];
 
-    this.color = "Brown";
+    this.color = "White";
     this.hasKilled = false;
 
     // maxHeightPotential limits the height of the bud; 1 = bud can reach top of screen, 0 = bud cannot grow past the bottom of the screen
     this.maxHeightPotential = 0.95; // percentage of the screen height it can fill from the bottom up
     this.maxHeight =
       rows - Math.floor(Math.random() * this.maxHeightPotential * rows);
+
+    this.maxHeightPercentage = (rows - this.maxHeight) / rows;
+    this.ageLimit = this.ageLimit * this.maxHeightPercentage;
   }
 
   killPlant() {
@@ -774,6 +779,9 @@ class Seed extends Plant {
     }
     let seed = new Seed(this.highestChild.pos.x, this.highestChild.pos.y - 3);
     particles.push(seed);
+    console.dir(seed);
+    this.isDead = true;
+    this.color = "Grey";
   }
 
   update() {
@@ -795,6 +803,7 @@ class Seed extends Plant {
       Math.random() < this.chanceToSprout
     ) {
       this.sprout();
+      this.isStatic = true;
     }
   }
 
@@ -917,7 +926,7 @@ class FlowerBud extends Bud {
     this.chancesToSprout = 0;
     // this.sproutsAttempted = 0
     this.sproutChanceLimit = 10000;
-    this.chanceToMature = 0.003; // odds of rolling to mature
+    this.chanceToMature = 0.01; // odds of rolling to mature
     this.chancesToMature = 0;
     this.matureChanceLimit = 10000; // number of max rolls to mature
     this.hasTerminated = false;
