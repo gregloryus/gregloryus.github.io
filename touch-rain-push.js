@@ -140,7 +140,8 @@ function mouseDragged() {
 
     other.acc.add(dragForce);
     other.acc.mult((100 - d) / 100);
-
     other.acc.limit(10);
+
+    other.temp = other.temp + ((100 - d) / 100) * 10;
   }
 }

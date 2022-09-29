@@ -17,39 +17,43 @@ class Walker {
     this.stuck = false;
     this.rand = Math.random();
     this.sat = 100;
-    this.vapor = false
-    this.age = 0
-    this.ageLimit = 1000 + random(1000)
-    this.size = 1
+    this.vapor = false;
+    this.age = 0;
+    this.ageLimit = 1000 + random(1000);
+    this.size = 1;
   }
-  
-//   heatCheck() {
-//     let perceptionRadius = 1;
-//     let perceptionCount = 6;
 
-//     for (const other of quadTree.getItemsInRadius(this.pos.x, this.pos.y, perceptionRadius, perceptionCount)) {
+  //   heatCheck() {
+  //     let perceptionRadius = 1;
+  //     let perceptionCount = 6;
 
-//       let d = dist(this.pos.x, this.pos.y, other.pos.x, other.pos.y);
+  //     for (const other of quadTree.getItemsInRadius(this.pos.x, this.pos.y, perceptionRadius, perceptionCount)) {
 
-//       if (other != this && d < perceptionRadius) {
-        
-//       }
-//     }
+  //       let d = dist(this.pos.x, this.pos.y, other.pos.x, other.pos.y);
+
+  //       if (other != this && d < perceptionRadius) {
+
+  //       }
+  //     }
   // }
-  
+
   combine() {
     let perceptionRadius = 1;
     let perceptionCount = 6;
 
-    for (const other of quadTree.getItemsInRadius(this.pos.x, this.pos.y, perceptionRadius, perceptionCount)) {
-
+    for (const other of quadTree.getItemsInRadius(
+      this.pos.x,
+      this.pos.y,
+      perceptionRadius,
+      perceptionCount
+    )) {
       let d = dist(this.pos.x, this.pos.y, other.pos.x, other.pos.y);
 
       if (other != this && d < perceptionRadius) {
-        this.size = this.size + other.size
-        this.temp = (this.temp + other.temp)/2
-        lines.splice(lines.indexOf(other), 1)
-        console.log("splice attempted...vapor turned to water")
+        this.size = this.size + other.size;
+        this.temp = (this.temp + other.temp) / 2;
+        lines.splice(lines.indexOf(other), 1);
+        console.log("splice attempted...vapor turned to water");
       }
     }
   }
@@ -57,49 +61,58 @@ class Walker {
   rain() {
     let perceptionRadius = 2;
     let perceptionCount = 6;
-    if (this.pos.y > height/4) {
-      return
+    if (this.pos.y > height / 4) {
+      return;
     }
     if (!this.vapor) {
-      return
+      return;
     }
-      
+
     if (this.age < this.ageLimit) {
-      return
+      return;
     }
 
-    for (const other of quadTree.getItemsInRadius(this.pos.x, this.pos.y, perceptionRadius, perceptionCount)) {
-
+    for (const other of quadTree.getItemsInRadius(
+      this.pos.x,
+      this.pos.y,
+      perceptionRadius,
+      perceptionCount
+    )) {
       let d = dist(this.pos.x, this.pos.y, other.pos.x, other.pos.y);
 
-      if (other != this && d < perceptionRadius && other.vapor && other.age > other.ageLimit) {
-        this.vapor = false
-        this.temp = 0
-        lines.splice(lines.indexOf(other), 1)
-        console.log("splice attempted...vapor turned to water")
-        vaporCount = vaporCount -2
+      if (
+        other != this &&
+        d < perceptionRadius &&
+        other.vapor &&
+        other.age > other.ageLimit
+      ) {
+        this.vapor = false;
+        this.temp = 0;
+        lines.splice(lines.indexOf(other), 1);
+        console.log("splice attempted...vapor turned to water");
+        vaporCount = vaporCount - 2;
       }
     }
   }
-// if (rain) {
-//   for (var i = 0; i < lines.length; i++) {
-//     for (var j = 0; j < lines.length; j++) {
-//       if (lines[j].vapor && lines[i].vapor && lines[i].pos.y < height/4 && lines[j].pos.y < height/4 && i !== j) {
-//         if (checkDist(lines[i].pos, lines[j].pos)) {
-//           lines[i].vapor = false
-//           lines[i].temp = 0
-//           lines.splice(j, 1)
-//           console.log("vapor turned to water")
-//           vaporCount = vaporCount -2
-//         }
-//       }
-//     }
-//   }
-// }
+  // if (rain) {
+  //   for (var i = 0; i < lines.length; i++) {
+  //     for (var j = 0; j < lines.length; j++) {
+  //       if (lines[j].vapor && lines[i].vapor && lines[i].pos.y < height/4 && lines[j].pos.y < height/4 && i !== j) {
+  //         if (checkDist(lines[i].pos, lines[j].pos)) {
+  //           lines[i].vapor = false
+  //           lines[i].temp = 0
+  //           lines.splice(j, 1)
+  //           console.log("vapor turned to water")
+  //           vaporCount = vaporCount -2
+  //         }
+  //       }
+  //     }
+  //   }
+  // }
 
   update() {
-    this.age++
-    // //if your temp is over 125, turn into 2 vapors 
+    this.age++;
+    // //if your temp is over 125, turn into 2 vapors
     // if (this.temp > 150 && !this.vapor) {
     //   this.vapor = true
     //   this.age = 0
@@ -120,22 +133,21 @@ class Walker {
     //if you're in the bottom 3/4th of the canvas, you gain heat as you approach the bottom
     if (this.pos.y > (height / 4) * 3) {
       this.temp =
-        this.temp + (((this.pos.y - (height / 4) * 3) / height / 4) * 3);
+        this.temp + ((this.pos.y - (height / 4) * 3) / height / 4) * 3;
     }
 
     //if you're vapor below the top 10th, you gain heat
     if (this.pos.y > height / 10 && this.vapor) {
-      this.temp = this.temp + 1
+      this.temp = this.temp + 1;
     }
 
     //if you're vapor within the top 10th, you lose heat
     if (this.pos.y < height / 10 && this.vapor) {
-      this.temp = this.temp - 1
+      this.temp = this.temp - 1;
     }
 
-
-    let waterCurrent = noise(frameCount / 500 + this.pos.y * .05);
-    let gravCurrent = noise(12345 + frameCount / 500 + this.pos.x * .05);
+    let waterCurrent = noise(frameCount / 500 + this.pos.y * 0.05);
+    let gravCurrent = noise(12345 + frameCount / 500 + this.pos.x * 0.05);
 
     this.hue = 50 + this.temp / 8;
 
@@ -157,14 +169,14 @@ class Walker {
     }
     if (this.water) {
       this.vel.add(noisyLeft.add(noisyRight));
-      this.vel.add(noisyUp.add(noisyDown))
+      this.vel.add(noisyUp.add(noisyDown));
 
-      this.vel.add(this.downlift.setMag(.5))
+      this.vel.add(this.downlift.setMag(0.5));
 
       // if (this.temp < 1) {
       // }
 
-      //if you're in the bottom 10th, get pushed up more the lower you go 
+      //if you're in the bottom 10th, get pushed up more the lower you go
       if (this.pos.y > height - height / 10) {
         let up = p5.Vector.fromAngle(TWO_PI * 0.75, 1);
         up.setMag(10 * (this.pos.y / height - 0.9));
@@ -200,10 +212,10 @@ class Walker {
 
     // this.vel = this.vel * (1 + this.acc/100)
     // this.acc = this.acc - 1
-    
-    this.vel.add(this.acc)
-    this.acc.mult(0.99)
-    this.vel.mult(0.5)
+
+    this.vel.add(this.acc);
+    this.acc.mult(0.99);
+    this.vel.mult(0.5);
 
     this.pos.add(this.vel);
 
@@ -267,7 +279,7 @@ class Walker {
       this.pos.x = width;
     }
     if (this.temp < 0) {
-      this.temp = 0
+      this.temp = 0;
     }
   }
 
@@ -281,11 +293,11 @@ class Walker {
     let brightness = 100;
     let opacity = newOpacity;
     if (this.vapor) {
-      saturation = 0
-      opacity = 1
+      saturation = 0;
+      opacity = 1;
     }
     if (!this.vapor) {
-      saturation = this.sat
+      saturation = this.sat;
     }
     let c = color(hue, saturation, brightness, opacity);
     stroke(c);
@@ -296,11 +308,10 @@ class Walker {
     // }
     point(this.pos.x, this.pos.y);
     if (this.vapor) {
-      stroke(1, 0, 100, map(this.pos.y, 0, height, 0, 10))
-      strokeWeight(map(this.pos.y, height, 0, 0, 100))
-      point(this.pos.x, this.pos.y)
+      stroke(1, 0, 100, map(this.pos.y, 0, height, 0, 10));
+      strokeWeight(map(this.pos.y, height, 0, 0, 100));
+      point(this.pos.x, this.pos.y);
     }
     // text(`${floor(this.temp)}`, this.pos.x, this.pos.y)
-
   }
 }

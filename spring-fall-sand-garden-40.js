@@ -30,7 +30,7 @@ console.log(cols, rows);
 let numOfDirt = cols * 0;
 let numOfWater = cols * 0;
 // let numOfSeeds = Math.floor(cols / 10);
-let numOfSeeds = 1;
+let numOfSeeds = 3;
 // Global sliders written into genes
 let fallChance = 0.2; // written into genes
 let selfCheckChance = 0.5; // written into genes
@@ -122,14 +122,14 @@ function draw() {
   textAlign(CENTER);
   stroke(255, 0, 255, 255);
   fill(255, 0, 0, 0);
-  text(
-    `
-    FPS: ${Math.floor(frameRate())}
-    Particles: ${particles.length} 
-    `,
-    (cols * scaleSize) / 2,
-    (rows * scaleSize) / 20
-  );
+  // text(
+  //   `
+  //   FPS: ${Math.floor(frameRate())}
+  //   Particles: ${particles.length}
+  //   `,
+  //   (cols * scaleSize) / 2,
+  //   (rows * scaleSize) / 20
+  // );
   // paused = true;
 
   particles = shuffle(particles);
@@ -731,7 +731,7 @@ class Seed extends Plant {
     this.chanceToSprout = 0.1;
 
     this.age = 0;
-    this.ageLimit = 1600;
+    this.ageLimit = 1200;
 
     //seed qualities
     this.children = [];
@@ -1553,13 +1553,13 @@ class Branch extends Stem {
 //   }
 // }
 // // p5 function for when touch screen is tapped
-function touchStarted() {
-  let seed = new Seed(
-    Math.floor(mouseX / scaleSize),
-    Math.floor(mouseY / scaleSize)
-  );
-  particles.push(seed);
-}
+// function touchStarted() {
+//   let seed = new Seed(
+//     Math.floor(mouseX / scaleSize),
+//     Math.floor(mouseY / scaleSize)
+//   );
+//   particles.push(seed);
+// }
 
 // function doubleClicked() {
 //   let seed = new Seed(
@@ -1569,7 +1569,7 @@ function touchStarted() {
 //   particles.push(seed);
 // }
 
-function doubleClicked() {
+function mouseClicked() {
   let seed = new Seed(
     Math.floor(mouseX / scaleSize),
     Math.floor(mouseY / scaleSize)
