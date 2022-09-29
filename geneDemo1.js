@@ -2,13 +2,13 @@
 
 let numOfSeeds = 1;
 let numOfLights = 100;
-let growthAngle = 45;
+let growthAngle = 90;
 let growthLimit = 40; // inter-node length
 let leafSize = 10;
 let depthLimit = 5;
 let leafCost = 0;
 let heightLimit = 6; // height / heightLimit = how high plants can grow// v4 accomplishment: got efficiency working, and created a new efficiency model where leaves have a finite cost (instead of energy/leafCount)
-let frameRateSetting = 20;
+let frameRateSetting = 60;
 
 let nodes = [];
 let lights = [];
@@ -59,6 +59,20 @@ let genePool = [
 
   // WORKING PINNATELY COMPOUND
   [
+    [1, 1, 0], // main stem, branch left
+    [2, 1, 2], // left branch flair
+    [0, 1, 1], // main stem, branch right
+    [2, 2, 2], // left branch terminate
+    [0, 1, 0], // main stem
+    [2, 1, 2], // right branch flair
+    [2, 2, 2], // right branch terminate
+    [1, 1, 0], // main stem, branch left
+    [2, 1, 2], // left branch flair
+    [0, 1, 1], // main stem, branch right
+    [2, 2, 2], // left branch terminate
+    [0, 1, 0], // main stem
+    [2, 1, 2], // right branch flair
+    [2, 2, 2], // right branch terminate
     [1, 1, 0], // main stem, branch left
     [2, 1, 2], // left branch flair
     [0, 1, 1], // main stem, branch right
@@ -149,7 +163,7 @@ function draw() {
     quadTree.addItem(light.pos.x, light.pos.y, light);
   }
 
-  background(0, 0, 0, 20);
+  background(0, 0, 0, 10);
   for (var node of nodes) {
     node.update();
     node.show();
@@ -299,7 +313,7 @@ class Node {
 
     //genes
     this.nodeLength = 100;
-    this.growthAngle = 45;
+    this.growthAngle = 90;
 
     //visuals
     this.hue = 33;
@@ -409,8 +423,7 @@ class Node {
       !this.growing
     ) {
       //follow genetic instructions...
-      let geneticPlan =
-        this.core.genes[this.core.geneIterator % this.core.genes.length];
+      let geneticPlan = this.core.genes[this.core.geneIterator];
       this.core.geneIterator++;
 
       switch (
@@ -426,7 +439,7 @@ class Node {
           leafL.down.push(this);
           leafL.depth = this.depth;
           leafL.vel = this.vel.copy();
-          leafL.vel.rotate(-this.core.growthAngle / this.depth);
+          leafL.vel.rotate(-this.core.growthAngle);
           leafL.growing = true;
           this.core.growingCount++;
           leafL.growthCount = 0;
@@ -448,7 +461,7 @@ class Node {
           stemL.down.push(this);
           stemL.vel = this.vel;
           stemL.depth = this.depth + 1;
-          stemL.vel.rotate(-this.core.growthAngle / this.depth);
+          stemL.vel.rotate(-this.core.growthAngle);
           stemL.growing = true;
           this.core.growingCount++;
           stemL.id = nodes.length + 1;
@@ -526,7 +539,7 @@ class Node {
           leafR.down.push(this);
           leafR.depth = this.depth;
           leafR.vel = this.vel.copy();
-          leafR.vel.rotate(this.core.growthAngle / this.depth);
+          leafR.vel.rotate(this.core.growthAngle);
           leafR.growing = true;
           this.core.growingCount++;
           leafR.id = nodes.length + 1;
@@ -546,7 +559,7 @@ class Node {
           stemR.stem = true;
           stemR.down.push(this);
           //   stemR.vel = this.vel;
-          stemR.vel.rotate(this.core.growthAngle / this.depth);
+          stemR.vel.rotate(this.core.growthAngle);
           stemR.growing = true;
           this.core.growingCount++;
           stemR.id = nodes.length + 1;
@@ -682,7 +695,7 @@ class Node {
       text(
         `
         next gene:
-        ${this.genes[this.geneIterator % this.genes.length]}`,
+        ${this.genes[this.geneIterator]}`,
         this.pos.x,
         this.pos.y + 20
       );
