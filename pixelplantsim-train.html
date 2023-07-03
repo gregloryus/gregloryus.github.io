@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>falling plants - falling sand sim + plant genes</title>
+    <title>falling plants - falling sand sim + plant</title>
     <style>
       html {
         overflow: hidden;
@@ -13,14 +13,20 @@
         padding: 0;
         margin: 0;
       }
+      #canvas-div {
+        position: absolute;
+        top: 0;
+        right: 0;
+        bottom: 0;
+        left: 0;
+      }
     </style>
-    <script src="../p5.js"></script>
-    <script src="rect.js"></script>
-    <script src="quadtree.js"></script>
-    <script src="pixelplantsim-june-6.js"></script>
   </head>
 
   <body>
-    <div id="canvas-div"></div>
+    <div id="canvas-div">
+      <canvas id="canvas"></canvas>
+    </div>
+    <script src="pixelplantsim-train.js"></script>
   </body>
 </html>
