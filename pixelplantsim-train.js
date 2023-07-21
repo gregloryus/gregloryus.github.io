@@ -3,26 +3,32 @@ document.addEventListener("DOMContentLoaded", () => {
   const canvas = document.getElementById("canvas");
   const ctx = canvas.getContext("2d");
 
+  // Set canvas size to full screen
+  canvas.width = window.innerWidth;
+  canvas.height = window.innerHeight;
+
   // Set cell size
-  const cellSize = 5;
+  const cellSize = 2;
 
   // Calculate number of cells
-  const numCellsX = Math.ceil(window.innerWidth / cellSize);
-  const numCellsY = Math.ceil(window.innerHeight / cellSize);
+  const numCellsX = Math.floor(canvas.width / cellSize);
+  const numCellsY = Math.floor(canvas.height / cellSize);
   console.log(`Cell size, in pixels: ${cellSize}`);
+  console.log(
+    `Screen size, in pixels: ${Math.floor(window.innerWidth)}x${Math.floor(
+      window.innerHeight
+    )}`
+  );
   console.log(`Dimensions, in cells ${numCellsX}x${numCellsY}`);
   console.log(
     `Dimensions, in pixels: ${numCellsX * cellSize}x${numCellsY * cellSize}`
-  );
-  console.log(
-    `Screen size, in pixels: ${numCellsX * cellSize}x${numCellsY * cellSize}`
   );
 
   // Create typed array of cells
   const cells = new Uint8Array(numCellsX * numCellsY);
 
   // Create array of sand particles
-  let numSandParticles = 100;
+  let numSandParticles = 1000;
   let sandParticles = new Uint16Array(numSandParticles * 3);
   let numPlacedSandParticles = 0;
   while (numPlacedSandParticles < numSandParticles) {
@@ -37,12 +43,14 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   }
 
+  // Create a buffer canvas
+  const bufferCanvas = document.createElement("canvas");
+  bufferCanvas.width = canvas.width;
+  bufferCanvas.height = canvas.height;
+  const bufferCtx = bufferCanvas.getContext("2d");
+
   // Update canvas each frame
   function update() {
-    // Set canvas background color to black
-    ctx.fillStyle = "black";
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
-
     // Update sand particles
     for (let i = 0; i < sandParticles.length; i += 3) {
       const x = sandParticles[i];
@@ -56,14 +64,18 @@ document.addEventListener("DOMContentLoaded", () => {
       }
     }
 
-    // Draw cells
+    // Draw cells onto the buffer canvas
+    bufferCtx.clearRect(0, 0, bufferCanvas.width, bufferCanvas.height);
     for (let y = 0; y < numCellsY; y++) {
       for (let x = 0; x < numCellsX; x++) {
         const cell = cells[y * numCellsX + x];
-        ctx.fillStyle = cell === 0 ? "black" : "yellow";
-        ctx.fillRect(x * cellSize, y * cellSize, cellSize, cellSize);
+        bufferCtx.fillStyle = cell === 0 ? "black" : "yellow";
+        bufferCtx.fillRect(x * cellSize, y * cellSize, cellSize, cellSize);
       }
     }
+
+    // Draw the buffer canvas onto the main canvas
+    ctx.drawImage(bufferCanvas, 0, 0);
 
     // Report location of sand particle
     ctx.fillStyle = "white";
