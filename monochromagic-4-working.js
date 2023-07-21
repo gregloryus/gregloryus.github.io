@@ -9,7 +9,7 @@ let pauseFlagged;
 let perceptionRadius = 2;
 let perceptionCount = 27;
 
-let scaleSize = 1;
+let scaleSize = 2;
 let cols = Math.floor(window.innerWidth / scaleSize);
 let rows = Math.floor(window.innerHeight / scaleSize);
 console.log(cols, rows);
