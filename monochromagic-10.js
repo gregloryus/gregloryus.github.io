@@ -9,19 +9,33 @@ let pauseFlagged;
 let perceptionRadius = 2;
 let perceptionCount = 27;
 
-let wallColor = "White";
-let waterColor = "White";
-
-let scaleSize = 10;
+let scaleSize = 7;
 let cols = Math.floor(window.innerWidth / scaleSize);
 let rows = Math.floor(window.innerHeight / scaleSize);
 console.log(cols, rows);
 
-let numOfWalls = 3;
-let wallGroupSize = Math.floor(cols / 3); // Change this to adjust the size of the wall groups
-let numOfWater = 400;
+let numOfWalls = 1;
+let wallGroupSize = Math.floor(cols / 1.1); // Change this to adjust the size of the wall groups
+let numOfWater = 777;
 
-BottomRowThresholdPercent = 0.5;
+let fadeFactor = 7;
+
+let wallColor = `Black`;
+let waterColors = [
+  // "Blue", // Blue
+  "White", // White
+  "Azure", // Light blue
+  "LightCyan", // Light blue
+  "AliceBlue", // Dimmer light blue
+  `MintCream`, // Seafoam green-ish
+  "HoneyDew", // Light green
+  "GhostWhite", // Light grey-ish blue
+  "Snow", // Light pink-ish
+  "Ivory", // Light yellow
+  "Lavender", // Light purple
+];
+
+BottomRowThresholdPercent = 0;
 
 let growthOptions = [-1, 0, 0, 0, 1];
 
@@ -52,9 +66,7 @@ function setup() {
   for (let i = 0; i < numOfWalls; i++) {
     let x = Math.floor(Math.random() * (cols / 2)) + Math.floor(cols / 6);
     let y = Math.floor(Math.random() * rows);
-    // let thisWallGroupSize = Math.floor(Math.random() * wallGroupSize) + 1;
-    let thisWallGroupSize = wallGroupSize;
-    for (let j = 0; j < thisWallGroupSize; j++) {
+    for (let j = 0; j < wallGroupSize; j++) {
       particles.push(new Wall(x + j, y));
     }
   }
@@ -76,7 +88,7 @@ function draw() {
   }
 
   // Sets background to black
-  background(0, 0, 0, 2);
+  background(0, 0, 0, fadeFactor);
 
   // Check the bottom row, iterating through its cells counting empty vs occupied cells; if more than 3/4 of the bottom row is occupied, set All Walls Move to true; otherwise, set All Walls Move to false if you can confirm 1/4 or more of the bottom row is unoccupied
   let bottomRowOccupied = 0;
@@ -350,6 +362,7 @@ class Wall extends Particle {
   constructor(x, y) {
     super(x, y);
     this.isWall = true;
+    this.color = "White";
     this.color = wallColor;
   }
 
@@ -382,7 +395,8 @@ class Water extends Particle {
     super(x, y);
     this.isWater = true;
     this.isStatic = false;
-    this.color = waterColor;
+    this.color = "AliceBlue";
+    this.color = random(waterColors);
     this.isFalling = true;
     // Add a property to keep track of the falling direction
     this.fallingDirection = null; // null means no direction has been set yet
