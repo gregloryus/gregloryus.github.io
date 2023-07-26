@@ -9,19 +9,24 @@ let pauseFlagged;
 let perceptionRadius = 2;
 let perceptionCount = 27;
 
-let wallColor = "White";
-let waterColor = "White";
+let wallCountdown = 10;
 
-let scaleSize = 10;
+let wallColor = `rgb(0, 0, 0)`;
+let wallColors = ["Black"];
+
+let waterColor = "rgb(0, 0, 255)";
+let waterColors = ["Blue"];
+
+let scaleSize = 3;
 let cols = Math.floor(window.innerWidth / scaleSize);
 let rows = Math.floor(window.innerHeight / scaleSize);
 console.log(cols, rows);
 
-let numOfWalls = 3;
-let wallGroupSize = Math.floor(cols / 3); // Change this to adjust the size of the wall groups
-let numOfWater = 400;
+let numOfWalls = 7;
+let wallGroupSize = Math.floor(cols / 2) - 1; // Change this to adjust the size of the wall groups
+let numOfWater = 1000;
 
-BottomRowThresholdPercent = 0.5;
+// BottomRowThresholdPercent = 1 - wallGroupSize / cols - 0.01;
 
 let growthOptions = [-1, 0, 0, 0, 1];
 
@@ -78,27 +83,7 @@ function draw() {
   // Sets background to black
   background(0, 0, 0, 2);
 
-  // Check the bottom row, iterating through its cells counting empty vs occupied cells; if more than 3/4 of the bottom row is occupied, set All Walls Move to true; otherwise, set All Walls Move to false if you can confirm 1/4 or more of the bottom row is unoccupied
-  let bottomRowOccupied = 0;
-  for (let i = 0; i < cols; i++) {
-    // use isOccupied to check if the cell is occupied
-    let check = isOccupied(i, rows - 1);
-    if (check) {
-      bottomRowOccupied++;
-    }
-  }
-  let bottomRowOccupiedPercent =
-    Math.floor((bottomRowOccupied / cols) * 100) / 100;
-  // console.log(
-  //   `Bottom row occupied: ${bottomRowOccupied} out of ${cols} cells, or ${Math.floor(
-  //     bottomRowOccupiedPercent * 100
-  //   )}%`
-  // );
-  if (bottomRowOccupiedPercent <= BottomRowThresholdPercent) {
-    allWallsMove = false;
-  } else if (bottomRowOccupiedPercent > BottomRowThresholdPercent) {
-    allWallsMove = true;
-  }
+  // Iter
 
   // Have each particle calculates its next move based on the current grid
   for (var particle of particles) {
@@ -351,6 +336,7 @@ class Wall extends Particle {
     super(x, y);
     this.isWall = true;
     this.color = wallColor;
+    this.color = random(wallColors);
   }
 
   update() {
@@ -383,6 +369,7 @@ class Water extends Particle {
     this.isWater = true;
     this.isStatic = false;
     this.color = waterColor;
+    this.color = random(waterColors);
     this.isFalling = true;
     // Add a property to keep track of the falling direction
     this.fallingDirection = null; // null means no direction has been set yet

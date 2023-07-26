@@ -9,19 +9,16 @@ let pauseFlagged;
 let perceptionRadius = 2;
 let perceptionCount = 27;
 
-let wallColor = "White";
-let waterColor = "White";
-
-let scaleSize = 10;
+let scaleSize = 5;
 let cols = Math.floor(window.innerWidth / scaleSize);
 let rows = Math.floor(window.innerHeight / scaleSize);
 console.log(cols, rows);
 
-let numOfWalls = 3;
-let wallGroupSize = Math.floor(cols / 3); // Change this to adjust the size of the wall groups
-let numOfWater = 400;
+let numOfWalls = 1;
+let wallGroupSize = Math.floor(cols / 1.1); // Change this to adjust the size of the wall groups
+let numOfWater = 1000;
 
-BottomRowThresholdPercent = 0.5;
+BottomRowThresholdPercent = 0;
 
 let growthOptions = [-1, 0, 0, 0, 1];
 
@@ -52,9 +49,7 @@ function setup() {
   for (let i = 0; i < numOfWalls; i++) {
     let x = Math.floor(Math.random() * (cols / 2)) + Math.floor(cols / 6);
     let y = Math.floor(Math.random() * rows);
-    // let thisWallGroupSize = Math.floor(Math.random() * wallGroupSize) + 1;
-    let thisWallGroupSize = wallGroupSize;
-    for (let j = 0; j < thisWallGroupSize; j++) {
+    for (let j = 0; j < wallGroupSize; j++) {
       particles.push(new Wall(x + j, y));
     }
   }
@@ -350,7 +345,7 @@ class Wall extends Particle {
   constructor(x, y) {
     super(x, y);
     this.isWall = true;
-    this.color = wallColor;
+    this.color = "Black";
   }
 
   update() {
@@ -382,7 +377,7 @@ class Water extends Particle {
     super(x, y);
     this.isWater = true;
     this.isStatic = false;
-    this.color = waterColor;
+    this.color = "Blue";
     this.isFalling = true;
     // Add a property to keep track of the falling direction
     this.fallingDirection = null; // null means no direction has been set yet
