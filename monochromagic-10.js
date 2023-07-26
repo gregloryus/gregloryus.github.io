@@ -14,9 +14,9 @@ let cols = Math.floor(window.innerWidth / scaleSize);
 let rows = Math.floor(window.innerHeight / scaleSize);
 console.log(cols, rows);
 
-let numOfWalls = 1;
-let wallGroupSize = Math.floor(cols / 1.1); // Change this to adjust the size of the wall groups
-let numOfWater = 777;
+let numOfWalls = 17;
+let wallGroupSize = Math.floor(cols / 10); // Change this to adjust the size of the wall groups
+let numOfWater = 1777;
 
 let fadeFactor = 7;
 
@@ -153,18 +153,18 @@ function draw() {
     particle.show();
   }
 
-  // textAlign(CENTER);
-  // stroke(255, 255, 255, 255);
-  // fill(255, 0, 0, 0);
-  // text(
-  //   `
-  //   FPS: ${Math.floor(frameRate())}
-  //   Particles: ${particles.length}
-  //   All Walls Move: ${allWallsMove}
-  //   `,
-  //   (cols * scaleSize) / 2,
-  //   (rows * scaleSize) / 20
-  // );
+  textAlign(CENTER);
+  stroke(255, 255, 255, 255);
+  fill(255, 0, 0, 0);
+  text(
+    `
+    FPS: ${Math.floor(frameRate())}
+    Particles: ${particles.length}
+    All Walls Move: ${allWallsMove}
+    `,
+    (cols * scaleSize) / 2,
+    (rows * scaleSize) / 20
+  );
 
   // particles = shuffle(particles);
 }
@@ -436,6 +436,8 @@ class Water extends Particle {
           }
         }
       }
+    } else if (this.isFalling == true && this.pos.y >= rows - 1) {
+      this.pos.y = 0;
     }
   }
 }
