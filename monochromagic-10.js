@@ -153,20 +153,20 @@ function draw() {
     particle.show();
   }
 
-  textAlign(CENTER);
-  stroke(255, 255, 255, 255);
-  fill(255, 0, 0, 0);
-  text(
-    `
-    FPS: ${Math.floor(frameRate())}
-    Particles: ${particles.length}
-    All Walls Move: ${allWallsMove}
-    `,
-    (cols * scaleSize) / 2,
-    (rows * scaleSize) / 20
-  );
+  // textAlign(CENTER);
+  // stroke(255, 255, 255, 255);
+  // fill(255, 0, 0, 0);
+  // text(
+  //   `
+  //   FPS: ${Math.floor(frameRate())}
+  //   Particles: ${particles.length}
+  //   All Walls Move: ${allWallsMove}
+  //   `,
+  //   (cols * scaleSize) / 2,
+  //   (rows * scaleSize) / 20
+  // );
 
-  // particles = shuffle(particles);
+  particles = shuffle(particles);
 }
 
 // END OF LOOP
