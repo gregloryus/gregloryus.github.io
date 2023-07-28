@@ -14,9 +14,9 @@ let cols = Math.floor(window.innerWidth / scaleSize);
 let rows = Math.floor(window.innerHeight / scaleSize);
 console.log(cols, rows);
 
-let numOfWalls = 17;
+let numOfWalls = 7;
 let wallGroupSize = Math.floor(cols / 10); // Change this to adjust the size of the wall groups
-let numOfWater = 1777;
+let numOfWater = 777;
 
 let fadeFactor = 7;
 
