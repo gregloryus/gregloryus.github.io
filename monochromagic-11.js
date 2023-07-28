@@ -14,9 +14,9 @@ let cols = Math.floor(window.innerWidth / scaleSize);
 let rows = Math.floor(window.innerHeight / scaleSize);
 console.log(cols, rows);
 
-let numOfWalls = 17;
+let numOfWalls = 7;
 let wallGroupSize = Math.floor(cols / 10); // Change this to adjust the size of the wall groups
-let numOfWater = 1444;
+let numOfWater = 1477;
 
 let fadeFactor = 7;
 
@@ -438,7 +438,7 @@ class Water extends Particle {
         }
       }
     } else if (this.isFalling == true && this.pos.y >= rows - 1) {
-      this.pos.y = 0;
+      this.pos.y = Math.floor(rows * 0.67);
     }
   }
 }
