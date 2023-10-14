@@ -3,8 +3,6 @@ let idCounter = 1;
 let leftRightChoices = [-1, 1];
 let threeChoices = [-1, 0, 1];
 let paused = false;
-let allWallsMove = false;
-let pauseFlagged;
 
 let perceptionRadius = 2;
 let perceptionCount = 27;
@@ -38,6 +36,13 @@ function setup() {
 
   // Initializes any starter particles
   // START HERE
+  // Initialize seeds at a random empty location
+  for (let i = 0; i < numOfSeeds; i++) {
+    let x = Math.floor(Math.random() * cols);
+    let y = Math.floor(Math.random() * rows);
+    let seed = new Seed(x, y);
+    particles.push(seed);
+  }
 }
 
 function draw() {
@@ -90,12 +95,8 @@ function make2DArray(w, h) {
 class Particle {
   constructor(x, y) {
     this.pos = createVector(x, y);
-
-    this.id = idCounter;
-    idCounter++;
-
+    this.id = idCounter++;
     this.color = "White";
-
     this.typeModulo = 0;
     this.moduloOffset = Math.floor(Math.random() * this.typeModulo);
   }
@@ -301,6 +302,155 @@ class Particle {
     } else if (this.isFalling == true && this.pos.y >= rows - 1) {
       this.pos.y = 0; // loops vertically
     }
+  }
+}
+
+// new plant particle class that extends Particle
+class Plant extends Particle {
+  constructor(x, y) {
+    super(x, y);
+    this.color = "Green";
+  }
+}
+
+// new seed particle class extends Plant
+class Seed extends Plant {
+  constructor(x, y) {
+    super(x, y);
+    this.color = "Red";
+    this.isFalling = true;
+    this.hasSprouted = false;
+  }
+
+  update() {
+    super.update();
+    if (this.isFalling == true) {
+      this.float();
+    } else if (this.isFalling == false && this.hasSprouted == false) {
+      this.sprout();
+    }
+  }
+
+  float() {
+    // seed checks below it; if occupied, it stops falling/floating; if not, it checks and if empty moves in a random cardinal direction
+    if (this.pos.y < rows - 1) {
+      let downCheck = this.downOccupied();
+      if (downCheck) {
+        this.isFalling = false;
+      } else if (!downCheck) {
+        // roll a random number, 20% chance to move left, 20% to move up, 20% to move right, 40% to move down
+        let random = Math.random();
+        if (random < 0.2) {
+          // check if the space is occupied before moving
+          let leftCheck = this.leftOccupied();
+          if (leftCheck == false) {
+            this.moveLeft();
+          }
+        } else if (random < 0.4) {
+          let upCheck = this.upOccupied();
+          if (upCheck == false) {
+            this.moveUp();
+          }
+        } else if (random < 0.6) {
+          let rightCheck = this.rightOccupied();
+          if (rightCheck == false) {
+            this.moveRight();
+          }
+        } else {
+          this.moveDown();
+        }
+      }
+    } else if (this.pos.y >= rows - 1) {
+      this.isFalling = false;
+    }
+  }
+
+  sprout() {
+    // seed checks above it; if empty, it sprouts into a bud; if occupied, it has sprouted but failed to grow
+    if (this.pos.y > 0) {
+      let upCheck = this.upOccupied();
+      if (upCheck == false) {
+        let newBud = new Bud(this.pos.x, this.pos.y - 1);
+        particles.push(newBud);
+        this.hasSprouted = true;
+      } else if (upCheck == true) {
+        this.hasSprouted = true;
+      }
+    }
+  }
+}
+
+// new stem particle class extends Plant
+class Stem extends Plant {
+  constructor(x, y) {
+    super(x, y);
+    this.color = "DarkGreen";
+  }
+}
+
+// new bud particle class extends Plant
+class Bud extends Plant {
+  constructor(x, y) {
+    super(x, y);
+    this.color = "SpringGreen";
+    this.isGrowing = true;
+  }
+
+  update() {
+    super.update();
+    if (this.isGrowing == true) {
+      console.log("bud is growing");
+      this.grow();
+    }
+  }
+
+  grow() {
+    // bud randomly checks up, up-left, or up-right; if empty, it moves there and leaves a stem in its place in the position it just left. If occupied, it stops growing
+    let random = Math.random();
+    if (random < 0.6) {
+      let upCheck = this.upOccupied();
+      if (upCheck == false) {
+        let newStem = new Stem(this.pos.x, this.pos.y);
+        this.moveUp();
+        particles.push(newStem);
+      } else if (upCheck == true) {
+        this.isGrowing = false;
+      }
+    } else if (random < 0.8) {
+      let upLeftCheck = this.upLeftOccupied();
+      if (upLeftCheck == false) {
+        let newStem = new Stem(this.pos.x, this.pos.y);
+        this.moveUpLeft();
+        particles.push(newStem);
+      } else if (upLeftCheck == true) {
+        this.isGrowing = false;
+      }
+    } else {
+      let upRightCheck = this.upRightOccupied();
+      if (upRightCheck == false) {
+        let newStem = new Stem(this.pos.x, this.pos.y);
+        this.moveUpRight();
+        particles.push(newStem);
+      } else if (upRightCheck == true) {
+        this.isGrowing = false;
+      }
+    }
+  }
+}
+
+// new leaf particle class extends Plant
+class Leaf extends Plant {
+  constructor(x, y) {
+    super(x, y);
+    this.color = "LightGreen";
+  }
+}
+
+// new leaf-stem particle class extends leaf
+class LeafStem extends Leaf {
+  constructor(x, y) {
+    super(x, y);
+    this.color = "Green";
   }
 }
 
