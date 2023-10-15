@@ -6,6 +6,11 @@ let rows = Math.floor(window.innerHeight / scaleSize);
 console.log(cols, rows);
 
 let fadeFactor = 5;
+let idCounter = 0;
+let numofStarterParticles = 100;
+let colorChoices = ["Red", "Lime", "Blue"];
+let perceptionRadius = 2;
+let perceptionCount = 27;
 
 p5.disableFriendlyErrors = true;
 
@@ -25,7 +30,12 @@ function setup() {
   // Sets background to black
   background(0, 0, 0, 255);
 
-  // Initializes any starter particles
+  // Initializes any starter particle
+  for (let i = 0; i < numofStarterParticles; i++) {
+    let x = Math.floor(Math.random() * cols);
+    let y = Math.floor(Math.random() * rows);
+    particles.push(new Particle(x, y));
+  }
 }
 
 function draw() {
@@ -60,6 +70,8 @@ function draw() {
     (cols * scaleSize) / 2,
     (rows * scaleSize) / 20
   );
+
+  particles = shuffle(particles);
 }
 
 // END OF LOOP
@@ -76,9 +88,58 @@ class Particle {
   constructor(x, y) {
     this.pos = createVector(x, y);
     this.id = idCounter++;
+    this.color = random(colorChoices);
   }
 
-  update() {}
+  move() {
+    // randomly move up, down, left, right, or stay in place
+    const randomNum = Math.random();
+    if (randomNum < 0.2) {
+      this.moveUp();
+    } else if (randomNum < 0.4) {
+      this.moveDown();
+    } else if (randomNum < 0.6) {
+      this.moveLeft();
+    } else if (randomNum < 0.8) {
+      this.moveRight();
+    } else {
+      // do nothing, stay in place
+    }
+  }
+
+  interact() {
+    for (const other of quadTree.getItemsInRadius(
+      this.pos.x,
+      this.pos.y,
+      perceptionRadius,
+      perceptionCount
+    )) {
+      if (other) {
+        if (other.id != this.id && other.color != this.color) {
+          console.log(`BEFORE this: ${this.color}, other: ${other.color}`);
+          if (this.color == "Red" && other.color == "Lime") {
+            other.color = "Red";
+          } else if (this.color == "Red" && other.color == "Blue") {
+            this.color = "Blue";
+          } else if (this.color == "Blue" && other.color == "Red") {
+            other.color = "Blue";
+          } else if (this.color == "Blue" && other.color == "Lime") {
+            this.color = "Lime";
+          } else if (this.color == "Lime" && other.color == "Blue") {
+            other.color = "Lime";
+          } else if (this.color == "Lime" && other.color == "Red") {
+            this.color = "Red";
+          }
+          console.log(`AFTER this: ${this.color}, other: ${other.color}`);
+        }
+      }
+    }
+  }
+
+  update() {
+    this.interact();
+    this.move();
+  }
 
   show() {
     canvasContext.fillStyle = this.color;
