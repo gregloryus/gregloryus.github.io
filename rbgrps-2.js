@@ -1,16 +1,18 @@
 let particles = [];
 
-let scaleSize = 10;
+let scaleSize = 35;
 let cols = Math.floor(window.innerWidth / scaleSize);
 let rows = Math.floor(window.innerHeight / scaleSize);
 console.log(cols, rows);
 
 let fadeFactor = 5;
 let idCounter = 0;
-let numofStarterParticles = 100;
+let numofStarterParticles = 1;
 let colorChoices = ["Red", "Lime", "Blue"];
 let perceptionRadius = 2;
 let perceptionCount = 27;
+let frameCounter = 0;
+let resetCounter = 0;
 
 p5.disableFriendlyErrors = true;
 
@@ -59,6 +61,25 @@ function draw() {
     particle.show();
   }
   particles = shuffle(particles);
+
+  // Check if all particles are the same color every 1000 frames
+  frameCounter++;
+  if (frameCounter % 100 == 0) {
+    let allSameColor = particles.every(
+      (particle) => particle.color === particles[0].color
+    );
+    if (allSameColor) {
+      // Reset scene with new conditions
+      numofStarterParticles++;
+      scaleSize--;
+      if (scaleSize < 1) {
+        scaleSize = 1;
+      }
+      resetScene();
+      resetCounter++;
+      console.log(`Scene reset ${resetCounter} times`);
+    }
+  }
 }
 
 // END OF LOOP
@@ -317,4 +338,22 @@ function isOccupied(x, y) {
   } else if (itemCount == 0) {
     return false;
   }
+}
+
+// Resets the scene with new conditions
+function resetScene() {
+  particles = [];
+  for (let i = 0; i < numofStarterParticles; i++) {
+    let x = Math.floor(Math.random() * cols);
+    let y = Math.floor(Math.random() * rows);
+    particles.push(new Particle(x, y));
+  }
+  scaleSize = Math.max(scaleSize, 1);
+  cols = Math.floor(window.innerWidth / scaleSize);
+  rows = Math.floor(window.innerHeight / scaleSize);
+  quadTree = new QuadTree(Infinity, 30, new Rect(0, 0, cols + 1, rows + 1));
+  background(0, 0, 0, 255);
+  console.log(
+    `Scene reset with ${numofStarterParticles} particles and scaleSize ${scaleSize}`
+  );
 }
