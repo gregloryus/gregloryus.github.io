@@ -1,6 +1,6 @@
 let particles = [];
 
-let scaleSize = 40;
+let scaleSize = 50;
 let cols = Math.floor(window.innerWidth / scaleSize);
 let rows = Math.floor(window.innerHeight / scaleSize);
 console.log(cols, rows);
@@ -36,7 +36,13 @@ function setup() {
   for (let i = 0; i < numofStarterParticles; i++) {
     let x = Math.floor(Math.random() * cols);
     let y = Math.floor(Math.random() * rows);
-    particles.push(new Particle(x, y));
+    let color = random(colorChoices);
+    if (i > 0) {
+      while (color === particles[i - 1].color) {
+        color = random(colorChoices);
+      }
+    }
+    particles.push(new Particle(x, y, color));
   }
 }
 
@@ -70,12 +76,13 @@ function draw() {
     );
     if (allSameColor) {
       // Reset scene with new conditions
+      let dominantColor = particles[0].color;
       numofStarterParticles++;
       scaleSize--;
       if (scaleSize < 1) {
         scaleSize = 1;
       }
-      resetScene();
+      resetScene(dominantColor);
       resetCounter++;
       console.log(`Scene reset ${resetCounter} times`);
     }
@@ -93,33 +100,25 @@ function make2DArray(w, h) {
 }
 
 class Particle {
-  constructor(x, y) {
+  constructor(x, y, color) {
     this.pos = createVector(x, y);
     this.id = idCounter++;
-    this.color = random(colorChoices);
+    this.color = color;
   }
 
   move() {
     // randomly move up, down, left, right, or stay in place
     const randomNum = Math.random();
-    if (randomNum < 0.11) {
-      this.moveUpLeft();
-    } else if (randomNum < 0.22) {
+    if (randomNum < 0.2) {
       this.moveUp();
-    } else if (randomNum < 0.33) {
-      this.moveUpRight();
-    } else if (randomNum < 0.44) {
-      this.moveLeft();
-    } else if (randomNum < 0.55) {
-      // do nothing, stay in place
-    } else if (randomNum < 0.66) {
-      this.moveRight();
-    } else if (randomNum < 0.77) {
-      this.moveDownLeft();
-    } else if (randomNum < 0.88) {
+    } else if (randomNum < 0.4) {
       this.moveDown();
+    } else if (randomNum < 0.6) {
+      this.moveLeft();
+    } else if (randomNum < 0.8) {
+      this.moveRight();
     } else {
-      this.moveDownRight();
+      // do nothing, stay in place
     }
   }
 
@@ -353,12 +352,19 @@ function isOccupied(x, y) {
 }
 
 // Resets the scene with new conditions
-function resetScene() {
+function resetScene(dominantColor) {
   particles = [];
-  for (let i = 0; i < numofStarterParticles; i++) {
+  particles.push(
+    new Particle(Math.floor(cols / 2), Math.floor(rows / 2), dominantColor)
+  );
+  for (let i = 1; i < numofStarterParticles; i++) {
     let x = Math.floor(Math.random() * cols);
     let y = Math.floor(Math.random() * rows);
-    particles.push(new Particle(x, y));
+    let color = random(colorChoices);
+    while (color == particles[particles.length - 1].color) {
+      color = random(colorChoices);
+    }
+    particles.push(new Particle(x, y, color));
   }
   scaleSize = Math.max(scaleSize, 1);
   cols = Math.floor(window.innerWidth / scaleSize);
