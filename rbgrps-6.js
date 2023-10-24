@@ -1,6 +1,6 @@
 let particles = [];
 
-let scaleSize = 5;
+let scaleSize = 3;
 let cols = Math.floor(window.innerWidth / scaleSize);
 let rows = Math.floor(window.innerHeight / scaleSize);
 console.log(cols, rows);
@@ -16,6 +16,7 @@ const color1 = randomRGB();
 const color2 = randomRGB();
 const color3 = randomRGB();
 const colorChoices = [color1, color2, color3];
+console.log(colorChoices);
 // // let color1 = "rgb(132, 255, 201)";
 // // let color2 = "rgb(170, 178, 255)";
 // // let color3 = "rgb(236, 160, 255)";
@@ -153,13 +154,13 @@ class Particle {
     // Define movement directions and their probabilities
     const directions = [
       { dx: -1, dy: -1, prob: 0.1 }, // up-left
-      { dx: 0, dy: -1, prob: 0.1 }, // up
+      { dx: 0, dy: -1, prob: 0.05 * (rows / cols) }, // up
       { dx: 1, dy: -1, prob: 0.1 }, // up-right
-      { dx: -1, dy: 0, prob: 0.1 }, // left
+      { dx: -1, dy: 0, prob: 0.05 * (cols / rows) }, // left
       { dx: 0, dy: 0, prob: 0.1 }, // stay in place
-      { dx: 1, dy: 0, prob: 0.1 }, // right
+      { dx: 1, dy: 0, prob: 0.05 * (cols / rows) }, // right
       { dx: -1, dy: 1, prob: 0.1 }, // down-left
-      { dx: 0, dy: 1, prob: 0.1 }, // down
+      { dx: 0, dy: 1, prob: 0.05 * (rows / cols) }, // down
       { dx: 1, dy: 1, prob: 0.1 }, // down-right
     ];
 
