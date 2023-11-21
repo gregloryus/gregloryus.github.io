@@ -21,8 +21,8 @@ let numofStarterParticles = Math.floor((cols * rows) / 10);
 // let color2 = "rgb(170, 178, 255)";
 // let color3 = "rgb(236, 160, 255)";
 let color1 = "Red";
-let color2 = "Blue";
-let color3 = "Lime";
+let color2 = "Lime";
+let color3 = "Blue";
 
 let colorChoices = [color1, color2, color3];
 
