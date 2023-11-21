@@ -8,23 +8,23 @@ console.log(cols, rows);
 let fadeFactor = 5;
 let idCounter = 0;
 let numofStarterParticles = Math.floor((cols * rows) / 10);
-const randomColor = () => Math.floor(Math.random() * 256);
-const randomRGB = () =>
-  `rgb(${randomColor()}, ${randomColor()}, ${randomColor()})`;
+// const randomColor = () => Math.floor(Math.random() * 256);
+// const randomRGB = () =>
+//   `rgb(${randomColor()}, ${randomColor()}, ${randomColor()})`;
 
-const color1 = randomRGB();
-const color2 = randomRGB();
-const color3 = randomRGB();
-const colorChoices = [color1, color2, color3];
-console.log(colorChoices);
-// // let color1 = "rgb(132, 255, 201)";
-// // let color2 = "rgb(170, 178, 255)";
-// // let color3 = "rgb(236, 160, 255)";
-// // let color1 = "DeepPink";
-// // let color2 = "Yellow";
-// let color3 = "Cyan";
+// const color1 = randomRGB();
+// const color2 = randomRGB();
+// const color3 = randomRGB();
+// const colorChoices = ["Red", "Blue", "Lime"];
+// console.log(colorChoices);
+// let color1 = "rgb(132, 255, 201)";
+// let color2 = "rgb(170, 178, 255)";
+// let color3 = "rgb(236, 160, 255)";
+let color1 = "Red";
+let color2 = "Blue";
+let color3 = "Lime";
 
-// let colorChoices = [color1, color2, color3];
+let colorChoices = [color1, color2, color3];
 
 // let colorChoices = ["rgb(254, 33, 139)", "rgb(254, 215, 0)", "rgb(33,176,254)"];
 let perceptionRadius = 2;
