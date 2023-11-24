@@ -5,12 +5,15 @@ let cols = Math.floor(window.innerWidth / scaleSize);
 let rows = Math.floor(window.innerHeight / scaleSize);
 console.log(cols, rows);
 
-let fadeFactor = 5;
+let fadeFactor = 100;
 let idCounter = 0;
-let numofStarterParticles = 100;
-let colorChoices = ["Red", "Lime", "Blue"];
+let numofStarterParticles = 3;
+// let numofStarterParticles = Math.floor((cols * rows) / 10); // 10% of the grid
 let perceptionRadius = 2;
 let perceptionCount = 27;
+
+// gravity is a vector pointing down
+// let color1 = "rgb(132, 255, 201)";
 
 p5.disableFriendlyErrors = true;
 
@@ -34,7 +37,10 @@ function setup() {
   for (let i = 0; i < numofStarterParticles; i++) {
     let x = Math.floor(Math.random() * cols);
     let y = Math.floor(Math.random() * rows);
-    particles.push(new Particle(x, y));
+    // first check that the spot is not already occupied
+    if (!isOccupied(x, y)) {
+      particles.push(new Particle(x, y));
+    }
   }
 }
 
@@ -58,7 +64,7 @@ function draw() {
   for (var particle of particles) {
     particle.show();
   }
-  particles = shuffle(particles);
+  //   particles = shuffle(particles);
 }
 
 // END OF LOOP
@@ -73,25 +79,18 @@ function make2DArray(w, h) {
 
 class Particle {
   constructor(x, y) {
+    // physical
     this.pos = createVector(x, y);
+    this.allForces = [];
+    this.netForce = createVector(0, 0);
+    this.temp = 20;
+    this.mass = 1;
+    // technical
     this.id = idCounter++;
-    this.color = random(colorChoices);
-  }
-
-  move() {
-    // randomly move up, down, left, right, or stay in place
-    const randomNum = Math.random();
-    if (randomNum < 0.2) {
-      this.moveUp();
-    } else if (randomNum < 0.4) {
-      this.moveDown();
-    } else if (randomNum < 0.6) {
-      this.moveLeft();
-    } else if (randomNum < 0.8) {
-      this.moveRight();
-    } else {
-      // do nothing, stay in place
-    }
+    this.r = 100;
+    this.g = 0;
+    this.b = 0;
+    this.color = `rgb(${this.r}, ${this.g}, ${this.b})`;
   }
 
   interact() {
@@ -102,30 +101,192 @@ class Particle {
       perceptionCount
     )) {
       if (other) {
-        if (other.id != this.id && other.color != this.color) {
-          // console.log(`BEFORE this: ${this.color}, other: ${other.color}`);
-          if (this.color == "Red" && other.color == "Lime") {
-            other.color = "Red";
-          } else if (this.color == "Red" && other.color == "Blue") {
-            this.color = "Blue";
-          } else if (this.color == "Blue" && other.color == "Red") {
-            other.color = "Blue";
-          } else if (this.color == "Blue" && other.color == "Lime") {
-            this.color = "Lime";
-          } else if (this.color == "Lime" && other.color == "Blue") {
-            other.color = "Lime";
-          } else if (this.color == "Lime" && other.color == "Red") {
-            this.color = "Red";
-          }
-          // console.log(`AFTER this: ${this.color}, other: ${other.color}`);
-        }
+        // interaction happens here
       }
     }
   }
 
+  applyGravity() {
+    // gravity is a vector pointing down
+    let gravity = createVector(0, 0.1);
+    this.allForces.push(gravity);
+  }
+
+  resolveForces() {
+    this.netForce = createVector(0, 0);
+    for (const force of this.allForces) {
+      this.netForce.add(force);
+    }
+  }
+
+  moveIfNextSpaceEmpty() {
+    // Determine the direction based on the net force
+    const direction = this.netForce.heading(); // Assuming p5.Vector.heading()
+    const nextPos = createVector(this.pos.x, this.pos.y);
+
+    // Determine next position based on the direction
+    if (direction >= -Math.PI / 8 && direction < Math.PI / 8) {
+      nextPos.x += 1;
+    } else if (direction >= Math.PI / 8 && direction < (3 * Math.PI) / 8) {
+      nextPos.x += 1;
+      nextPos.y += 1;
+    } else if (
+      direction >= (3 * Math.PI) / 8 &&
+      direction < (5 * Math.PI) / 8
+    ) {
+      nextPos.y += 1;
+    } else if (
+      direction >= (5 * Math.PI) / 8 &&
+      direction < (7 * Math.PI) / 8
+    ) {
+      nextPos.x -= 1;
+      nextPos.y += 1;
+    } else if (
+      direction >= (7 * Math.PI) / 8 ||
+      direction < (-7 * Math.PI) / 8
+    ) {
+      nextPos.x -= 1;
+    } else if (
+      direction >= (-7 * Math.PI) / 8 &&
+      direction < (-5 * Math.PI) / 8
+    ) {
+      nextPos.x -= 1;
+      nextPos.y -= 1;
+    } else if (
+      direction >= (-5 * Math.PI) / 8 &&
+      direction < (-3 * Math.PI) / 8
+    ) {
+      nextPos.y -= 1;
+    } else if (direction >= (-3 * Math.PI) / 8 && direction < -Math.PI / 8) {
+      nextPos.x += 1;
+      nextPos.y -= 1;
+    }
+
+    // Check if next position is empty
+    if (!isOccupied(nextPos.x, nextPos.y)) {
+      this.pos = nextPos; // Move into the next position if it's empty
+    }
+  }
+
+  //   isNextSpaceEmpty() {
+  //     // Determine the direction based on the net force
+  //     const direction = this.netForce.heading(); // Assuming p5.Vector.heading()
+  //     const nextPos = createVector(this.pos.x, this.pos.y);
+
+  //     // Right
+  //     if (direction >= -Math.PI / 8 && direction < Math.PI / 8) {
+  //       nextPos.x += 1;
+  //     }
+  //     // Down-Right
+  //     else if (direction >= Math.PI / 8 && direction < (3 * Math.PI) / 8) {
+  //       nextPos.x += 1;
+  //       nextPos.y += 1;
+  //     }
+  //     // Down
+  //     else if (direction >= (3 * Math.PI) / 8 && direction < (5 * Math.PI) / 8) {
+  //       nextPos.y += 1;
+  //     }
+  //     // Down-Left
+  //     else if (direction >= (5 * Math.PI) / 8 && direction < (7 * Math.PI) / 8) {
+  //       nextPos.x -= 1;
+  //       nextPos.y += 1;
+  //     }
+  //     // Left
+  //     else if (direction >= (7 * Math.PI) / 8 || direction < (-7 * Math.PI) / 8) {
+  //       nextPos.x -= 1;
+  //     }
+  //     // Up-Left
+  //     else if (
+  //       direction >= (-7 * Math.PI) / 8 &&
+  //       direction < (-5 * Math.PI) / 8
+  //     ) {
+  //       nextPos.x -= 1;
+  //       nextPos.y -= 1;
+  //     }
+  //     // Up
+  //     else if (
+  //       direction >= (-5 * Math.PI) / 8 &&
+  //       direction < (-3 * Math.PI) / 8
+  //     ) {
+  //       nextPos.y -= 1;
+  //     }
+  //     // Up-Right
+  //     else if (direction >= (-3 * Math.PI) / 8 && direction < -Math.PI / 8) {
+  //       nextPos.x += 1;
+  //       nextPos.y -= 1;
+  //     }
+
+  //     // Use the isOccupied function to check the next position
+  //     let check = isOccupied(nextPos.x, nextPos.y);
+  //     if (check) {
+  //       //   console.log("occupied");
+  //       return false;
+  //     } else {
+  //       //   console.log("not occupied");
+  //       return true;
+  //     }
+  //   }
+
+  //   moveIntoNextSpace() {
+  //     // Determine the direction based on the net force
+  //     const direction = this.netForce.heading(); // Assuming p5.Vector.heading()
+  //     const nextPos = createVector(this.pos.x, this.pos.y);
+
+  //     // Right
+  //     if (direction >= -Math.PI / 8 && direction < Math.PI / 8) {
+  //       nextPos.x += 1;
+  //     }
+  //     // Down-Right
+  //     else if (direction >= Math.PI / 8 && direction < (3 * Math.PI) / 8) {
+  //       nextPos.x += 1;
+  //       nextPos.y += 1;
+  //     }
+  //     // Down
+  //     else if (direction >= (3 * Math.PI) / 8 && direction < (5 * Math.PI) / 8) {
+  //       nextPos.y += 1;
+  //     }
+  //     // Down-Left
+  //     else if (direction >= (5 * Math.PI) / 8 && direction < (7 * Math.PI) / 8) {
+  //       nextPos.x -= 1;
+  //       nextPos.y += 1;
+  //     }
+  //     // Left
+  //     else if (direction >= (7 * Math.PI) / 8 || direction < (-7 * Math.PI) / 8) {
+  //       nextPos.x -= 1;
+  //     }
+  //     // Up-Left
+  //     else if (
+  //       direction >= (-7 * Math.PI) / 8 &&
+  //       direction < (-5 * Math.PI) / 8
+  //     ) {
+  //       nextPos.x -= 1;
+  //       nextPos.y -= 1;
+  //     }
+  //     // Up
+  //     else if (
+  //       direction >= (-5 * Math.PI) / 8 &&
+  //       direction < (-3 * Math.PI) / 8
+  //     ) {
+  //       nextPos.y -= 1;
+  //     }
+  //     // Up-Right
+  //     else if (direction >= (-3 * Math.PI) / 8 && direction < -Math.PI / 8) {
+  //       nextPos.x += 1;
+  //       nextPos.y -= 1;
+  //     }
+
+  //     // Move into the next position
+  //     this.pos = nextPos;
+  //   }
+
   update() {
-    this.interact();
-    this.move();
+    this.applyGravity();
+    this.resolveForces();
+    // if the next space is empty, move into the next space
+    this.moveIfNextSpaceEmpty();
+    // if (this.isNextSpaceEmpty()) {
+    //   this.moveIntoNextSpace();
+    // }
   }
 
   show() {
@@ -283,17 +444,17 @@ function getParticles(x, y, perceptionRadius = 2, perceptionCount = 27) {
   return itemsArray;
 }
 
-// shuffles array in place
-function shuffle(array) {
-  for (let i = array.length - 1; i > 0; i--) {
-    let j = Math.floor(Math.random() * (i + 1));
-    // swap elements array[i] and array[j]
-    let temp = array[i];
-    array[i] = array[j];
-    array[j] = temp;
-  }
-  return array;
-}
+// // shuffles array in place
+// function shuffle(array) {
+//   for (let i = array.length - 1; i > 0; i--) {
+//     let j = Math.floor(Math.random() * (i + 1));
+//     // swap elements array[i] and array[j]
+//     let temp = array[i];
+//     array[i] = array[j];
+//     array[j] = temp;
+//   }
+//   return array;
+// }
 
 // returns true if there's a particle that currently occupies this spot
 function isOccupied(x, y) {
