@@ -7,7 +7,7 @@ console.log(cols, rows);
 
 let fadeFactor = 100;
 let idCounter = 0;
-let numofStarterParticles = 3;
+let numofStarterParticles = 100;
 let perceptionRadius = 2;
 let perceptionCount = 27;
 
@@ -48,6 +48,7 @@ class Particle {
   constructor(x, y) {
     this.pos = createVector(x, y);
     this.allForces = [];
+    this.allForcesIDs = []; // To keep track of forces' sources
     this.netForce = createVector(0, 0);
     this.temp = 20;
     this.mass = 1;
@@ -60,7 +61,14 @@ class Particle {
 
   applyGravity() {
     let gravity = createVector(0, 0.1);
-    this.allForces.push(gravity);
+    this.addForce("gravity", gravity);
+  }
+
+  addForce(sourceId, force) {
+    if (!this.allForcesIDs.includes(sourceId)) {
+      this.allForces.push(force);
+      this.allForcesIDs.push(sourceId);
+    }
   }
 
   resolveForces() {
@@ -72,47 +80,77 @@ class Particle {
 
   moveIfNextSpaceEmpty() {
     const direction = this.netForce.heading();
-    const nextPos = createVector(this.pos.x, this.pos.y);
-    if (direction >= -Math.PI / 8 && direction < Math.PI / 8) {
-      nextPos.x += 1;
-    } else if (direction >= Math.PI / 8 && direction < (3 * Math.PI) / 8) {
-      nextPos.x += 1;
-      nextPos.y += 1;
-    } else if (
-      direction >= (3 * Math.PI) / 8 &&
-      direction < (5 * Math.PI) / 8
-    ) {
-      nextPos.y += 1;
-    } else if (
-      direction >= (5 * Math.PI) / 8 &&
-      direction < (7 * Math.PI) / 8
-    ) {
-      nextPos.x -= 1;
-      nextPos.y += 1;
-    } else if (
-      direction >= (7 * Math.PI) / 8 ||
-      direction < (-7 * Math.PI) / 8
-    ) {
-      nextPos.x -= 1;
-    } else if (
-      direction >= (-7 * Math.PI) / 8 &&
-      direction < (-5 * Math.PI) / 8
-    ) {
-      nextPos.x -= 1;
-      nextPos.y -= 1;
-    } else if (
-      direction >= (-5 * Math.PI) / 8 &&
-      direction < (-3 * Math.PI) / 8
-    ) {
-      nextPos.y -= 1;
-    } else if (direction >= (-3 * Math.PI) / 8 && direction < -Math.PI / 8) {
-      nextPos.x += 1;
-      nextPos.y -= 1;
-    }
+    const nextPos = this.calculateNextPosition(direction);
+
     if (!isOccupied(nextPos.x, nextPos.y)) {
-      this.pos = nextPos;
+      this.pos = nextPos; // Move into the next position if it's empty
+    } else {
+      // If next space is occupied, apply force to the neighbor and its side neighbors
+      this.applyForceToOccupiedSpace(nextPos, direction);
     }
   }
+
+  calculateNextPosition(direction) {
+    // Calculate the next position based on direction
+    // Returns a p5.Vector for the next position
+  }
+
+  applyForceToOccupiedSpace(occupiedPos, direction) {
+    // Identify the main occupied neighbor and the side neighbors based on direction
+    // Apply 50% force to the main occupied neighbor
+    // Apply 25% force to each of the side neighbors if they are occupied
+    // Example for applying force:
+    // let mainNeighbor = getParticleAt(occupiedPos.x, occupiedPos.y);
+    // if (mainNeighbor) {
+    //   let forceToApply = p5.Vector.mult(this.netForce, 0.5);
+    //   mainNeighbor.addForce(this.id, forceToApply);
+    // }
+    // Similar logic for side neighbors
+  }
+
+  // moveIfNextSpaceEmpty() {
+  //   const direction = this.netForce.heading();
+  //   const nextPos = createVector(this.pos.x, this.pos.y);
+  //   if (direction >= -Math.PI / 8 && direction < Math.PI / 8) {
+  //     nextPos.x += 1;
+  //   } else if (direction >= Math.PI / 8 && direction < (3 * Math.PI) / 8) {
+  //     nextPos.x += 1;
+  //     nextPos.y += 1;
+  //   } else if (
+  //     direction >= (3 * Math.PI) / 8 &&
+  //     direction < (5 * Math.PI) / 8
+  //   ) {
+  //     nextPos.y += 1;
+  //   } else if (
+  //     direction >= (5 * Math.PI) / 8 &&
+  //     direction < (7 * Math.PI) / 8
+  //   ) {
+  //     nextPos.x -= 1;
+  //     nextPos.y += 1;
+  //   } else if (
+  //     direction >= (7 * Math.PI) / 8 ||
+  //     direction < (-7 * Math.PI) / 8
+  //   ) {
+  //     nextPos.x -= 1;
+  //   } else if (
+  //     direction >= (-7 * Math.PI) / 8 &&
+  //     direction < (-5 * Math.PI) / 8
+  //   ) {
+  //     nextPos.x -= 1;
+  //     nextPos.y -= 1;
+  //   } else if (
+  //     direction >= (-5 * Math.PI) / 8 &&
+  //     direction < (-3 * Math.PI) / 8
+  //   ) {
+  //     nextPos.y -= 1;
+  //   } else if (direction >= (-3 * Math.PI) / 8 && direction < -Math.PI / 8) {
+  //     nextPos.x += 1;
+  //     nextPos.y -= 1;
+  //   }
+  //   if (!isOccupied(nextPos.x, nextPos.y)) {
+  //     this.pos = nextPos;
+  //   }
+  // }
 
   update() {
     this.applyGravity();
@@ -132,8 +170,11 @@ class Particle {
 }
 
 function isOccupied(x, y) {
-  x = (cols + x) % cols;
-  y = (rows + y) % rows;
+  // Check to ensure x and y coordinates are within grid bounds
+  if (x < 0 || x >= cols || y < 0 || y >= rows) {
+    return true; // Treat positions outside the grid as "occupied"
+  }
+
   let itemCount = 0;
   for (const other of quadTree.getItemsInRadius(
     x,
@@ -150,3 +191,4 @@ function isOccupied(x, y) {
 }
 
 // Additional global functions (if needed) go here
+// END
