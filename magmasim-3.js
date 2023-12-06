@@ -1,6 +1,6 @@
 let particles = [];
 
-let scaleSize = 10;
+let scaleSize = 20;
 let cols = Math.floor(window.innerWidth / scaleSize);
 let rows = Math.floor(window.innerHeight / scaleSize);
 console.log(cols, rows);
@@ -109,7 +109,7 @@ class Particle {
     // Display the magnitude of the net force in black for better readability
     let displayMagnitude = Math.min(forceMagnitude, 999);
     canvasContext.fillStyle = "black";
-    canvasContext.font = "7px Arial";
+    canvasContext.font = "8px Arial";
     canvasContext.textAlign = "center";
     canvasContext.fillText(
       displayMagnitude.toFixed(0),
@@ -313,6 +313,17 @@ function shuffle(array) {
   for (let i = array.length - 1; i > 0; i--) {
     const j = Math.floor(Math.random() * (i + 1));
     [array[i], array[j]] = [array[j], array[i]];
+  }
+}
+
+function mousePressed() {
+  // Have each particle console log its component forces and ids
+  for (const particle of particles) {
+    console.log(
+      `Particle ${particle.id} has forces: `,
+      particle.allForces,
+      particle.allForcesIDs
+    );
   }
 }
 
