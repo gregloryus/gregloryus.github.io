@@ -7,7 +7,7 @@ console.log(cols, rows);
 
 let fadeFactor = 100;
 let idCounter = 0;
-let numofStarterParticles = 2;
+let numofStarterParticles = 5;
 let perceptionRadius = 2;
 let perceptionCount = 27;
 let DIRECT_TRANSFER_PERCENT = 0.5;
@@ -83,78 +83,6 @@ class Particle {
     this.applyForce("gravity", this.gravity);
   }
 
-  // update() {
-  //   if (this.needsUpdate) {
-  //     // Store the previous position
-  //     this.previousPos = this.pos.copy();
-
-  //     // Resolve forces from the forceMap
-  //     this.resolveForces();
-  //     this.calculateNextPosition();
-
-  //     if (this.canMoveToNextPosition()) {
-  //       // Move the particles
-  //       this.pos.set(this.nextPos);
-
-  //       // // Distribute forces to neighbors at the new position
-  //       // this.distributeForcesToNeighbors();
-
-  //       // // Flag new neighbors for update
-  //       // this.flagNeighborsForUpdate();
-
-  //       // Update forceMap for old neighbors since the particle has moved
-  //       updateParticleForces(this);
-  //     } else {
-  //       // If the particle can't move, it has hit another particle
-  //       this.distributeForcesToNeighbors(); // Transfer force once
-
-  //       // The particle becomes static until further notice
-  //       this.needsUpdate = false;
-  //     }
-  //   }
-  // }
-
-  // update() {
-  //   if (this.needsUpdate) {
-  //     // Store the previous position
-  //     this.previousPos = this.pos.copy();
-
-  //     // Resolve forces and calculate next position
-  //     this.resolveForces();
-  //     this.calculateNextPosition();
-
-  //     if (this.canMoveToNextPosition()) {
-  //       // Move the particle and update forces
-  //       this.pos.set(this.nextPos);
-  //       updateParticleForces(this);
-  //     } else {
-  //       // Handle case where particle can't move (e.g., due to collision)
-  //       this.distributeForcesToNeighbors();
-  //       this.needsUpdate = false;
-  //     }
-  //   }
-  // }
-
-  // update() {
-  //   if (this.needsUpdate) {
-  //     // Resolve forces and calculate next position
-  //     this.resolveForces();
-  //     this.calculateNextPosition();
-
-  //     // Attempt to move the particle
-  //     if (this.canMoveToNextPosition()) {
-  //       this.pos.set(this.nextPos);
-  //     }
-
-  //     // Distribute forces to neighbors
-  //     // This is done every frame to maintain consistent interactions
-  //     this.distributeForcesToNeighbors();
-
-  //     // Flag for update in the next frame
-  //     this.needsUpdate = true;
-  //   }
-  // }
-
   update() {
     // Calculate the next position based on net force
     this.calculateNextPosition();
@@ -162,6 +90,9 @@ class Particle {
     // Attempt to move the particle
     if (this.canMoveToNextPosition()) {
       this.pos.set(this.nextPos);
+    } else {
+      // Distribute forces to neighbors
+      this.distributeForcesToNeighbors();
     }
   }
 
@@ -169,9 +100,6 @@ class Particle {
     // Resolve forces based on current state
     this.resolveForces();
     // console.log(`Particle ${this.id} resolved forces:`, this.netForce);
-
-    // Distribute forces to neighbors
-    this.distributeForcesToNeighbors();
   }
 
   show() {
@@ -202,7 +130,7 @@ class Particle {
     let displayMagnitude = Math.min(forceMagnitude, 999).toFixed(0);
     let textYOffset = this.pos.y * scaleSize + scaleSize / 2 - fontSize / 2;
     canvasContext.fillText(
-      displayMagnitude,
+      `f:${displayMagnitude}`,
       this.pos.x * scaleSize + scaleSize / 2,
       textYOffset
     );
@@ -210,7 +138,7 @@ class Particle {
     // Display the particle's ID
     let idYOffset = this.pos.y * scaleSize + scaleSize / 2 + fontSize;
     canvasContext.fillText(
-      this.id,
+      `i:${this.id}`,
       this.pos.x * scaleSize + scaleSize / 2,
       idYOffset
     );
@@ -321,46 +249,36 @@ class Particle {
     }
   }
 
-  // distributeForcesToNeighbors() {
-  //   let directForce = p5.Vector.mult(this.netForce, DIRECT_TRANSFER_PERCENT);
-  //   let indirectForce = p5.Vector.mult(
-  //     this.netForce,
-  //     INDIRECT_TRANSFER_PERCENT
-  //   );
-
-  //   let mainParticle = getParticleAt(this.nextPos.x, this.nextPos.y);
-  //   if (mainParticle && mainParticle.id !== this.id) {
-  //     mainParticle.applyForce(this.id, directForce);
-  //   }
-
-  //   let ccwParticle = getParticleAt(this.nextPosCCW.x, this.nextPosCCW.y);
-  //   let cwParticle = getParticleAt(this.nextPosCW.x, this.nextPosCW.y);
-  //   [ccwParticle, cwParticle].forEach((particle) => {
-  //     if (particle && particle.id !== this.id) {
-  //       particle.applyForce(this.id, indirectForce);
-  //     }
-  //   });
-  // }
-
   distributeForcesToNeighbors() {
-    this.getMooreNeighbors();
+    let directForce = p5.Vector.mult(this.netForce, DIRECT_TRANSFER_PERCENT);
+    let indirectForce = p5.Vector.mult(
+      this.netForce,
+      INDIRECT_TRANSFER_PERCENT
+    );
 
-    for (const neighbor of this.mooreNeighbors) {
-      if (neighbor.id !== this.id) {
-        let interactionForce = calculateInteractionForce(this, neighbor);
-        // Apply interaction force
-        this.forceMap.set(`${neighbor.id}Impacted`, interactionForce);
-        neighbor.forceMap.set(
-          `${this.id}Impacted`,
-          interactionForce.copy().mult(-1)
-        );
-
-        // Attraction force is currently disabled
-        // let attractionForce = calculateAttractionForce(this, neighbor);
-        // this.forceMap.set(`${neighbor.id}Attracted`, attractionForce);
-        // neighbor.forceMap.set(`${this.id}Attracted`, attractionForce.copy().mult(-1));
-      }
+    let mainParticle = getParticleAt(this.nextPos.x, this.nextPos.y);
+    if (mainParticle && mainParticle.id !== this.id) {
+      mainParticle.applyForce(this.id, directForce);
     }
+
+    let ccwParticle = getParticleAt(this.nextPosCCW.x, this.nextPosCCW.y);
+    let cwParticle = getParticleAt(this.nextPosCW.x, this.nextPosCW.y);
+    // Angles for rotation (45 degrees in radians)
+    const angleCCW = -PI / 4;
+    const angleCW = PI / 4;
+
+    [ccwParticle, cwParticle].forEach((particle, index) => {
+      if (particle && particle.id !== this.id) {
+        let indirectForce = p5.Vector.mult(
+          this.netForce,
+          INDIRECT_TRANSFER_PERCENT
+        );
+        // Apply rotation
+        let rotationAngle = index === 0 ? angleCCW : angleCW;
+        indirectForce.rotate(rotationAngle);
+        particle.applyForce(this.id, indirectForce);
+      }
+    });
   }
 
   flagNeighborsForUpdate() {
@@ -522,23 +440,4 @@ function mousePressed() {
       )}`
     );
   }
-}
-
-function calculateInteractionForce(particle1, particle2) {
-  let summedForce = p5.Vector.add(particle1.netForce, particle2.netForce);
-  console.log(
-    `Calculating interaction force between Particle ${particle1.id} and Particle ${particle2.id}:`,
-    summedForce
-  );
-  return summedForce.mult(INTERACTION_SCALE_FACTOR);
-}
-
-function calculateAttractionForce(particle1, particle2) {
-  let direction = p5.Vector.sub(particle2.pos, particle1.pos).normalize();
-  let attractionForce = direction.mult(ATTRACTION_FORCE_MAGNITUDE);
-  console.log(
-    `Calculating attraction force between Particle ${particle1.id} and Particle ${particle2.id}:`,
-    attractionForce
-  );
-  return attractionForce;
 }
