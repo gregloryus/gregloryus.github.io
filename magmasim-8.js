@@ -1,6 +1,6 @@
 let particles = [];
 
-let scaleSize = 10;
+let scaleSize = 8;
 let cols = Math.floor(window.innerWidth / scaleSize);
 let rows = Math.floor(window.innerHeight / scaleSize);
 console.log(cols, rows);
@@ -8,7 +8,7 @@ console.log(cols, rows);
 let fadeFactor = 100;
 let maxForce = 1;
 let idCounter = 0;
-let numofStarterParticles = 700;
+let numofStarterParticles = 1111;
 let perceptionRadius = 2;
 let perceptionCount = 27;
 let DIRECT_TRANSFER_PERCENT = 0.5;
