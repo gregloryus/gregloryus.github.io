@@ -1,6 +1,6 @@
 let particles = [];
 
-let scaleSize = 8;
+let scaleSize = 10;
 let cols = Math.floor(window.innerWidth / scaleSize);
 let rows = Math.floor(window.innerHeight / scaleSize);
 console.log(cols, rows);
@@ -8,7 +8,7 @@ console.log(cols, rows);
 let fadeFactor = 100;
 let maxForce = 1;
 let idCounter = 0;
-let numofStarterParticles = 1111;
+let numofStarterParticles = 777;
 let perceptionRadius = 2;
 let perceptionCount = 27;
 let DIRECT_TRANSFER_PERCENT = 0.5;
@@ -16,8 +16,8 @@ let INDIRECT_TRANSFER_PERCENT = 0.25;
 let INTERACTION_SCALE_FACTOR = 1; // Adjust this factor as needed
 let ATTRACTION_FORCE_MAGNITUDE = 0.0; // Adjust this factor as needed
 let frameRate = 60;
-let heatingRate = 0.1; // Adjust as needed, higher means faster heating
-let coolingRate = 0.15; // Adjust as needed, higher means faster cooling
+let heatingRate = 0.15; // Adjust as needed, higher means faster heating
+let coolingRate = 0.05; // Adjust as needed, higher means faster cooling
 let INTERACTION_FORCE_DECAY = 0.95; // Decay factor for interaction forces (e.g., 0.95 means 5% decay per frame)
 let FORCE_LINE_LENGTH = 10; // Adjust as needed
 
