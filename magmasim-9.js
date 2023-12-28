@@ -1,22 +1,48 @@
 let particles = [];
-let scaleSize = 10;
+let scaleSize = 4;
 let cols = Math.floor(window.innerWidth / scaleSize);
 let rows = Math.floor(window.innerHeight / scaleSize);
-let fadeFactor = 100,
-  maxForce = 1,
-  idCounter = 0;
-let numofStarterParticles = 1111,
-  perceptionRadius = 2,
-  perceptionCount = 27;
-let DIRECT_TRANSFER_PERCENT = 0.5,
-  INDIRECT_TRANSFER_PERCENT = 0.25;
-let heatingRate = 0.1,
-  coolingRate = 0.1;
-let INTERACTION_FORCE_DECAY = 0.5,
-  FORCE_LINE_LENGTH = 10;
-let TEMPERATURE_AVERAGING_FACTOR = 0.01; // Adjust as needed
-let ATTRACTION_FORCE_MAGNITUDE = 0.1; // Adjust as needed
-let heatingRangeHeight = Math.floor(rows / 2);
+
+// Canvas and Particle Settings
+const FADE_FACTOR = 100;
+const MAX_FORCE = 50;
+
+// Particle Initialization
+const NUM_OF_STARTER_PARTICLES = 1111;
+let idCounter = 0;
+
+// Perception Parameters
+const PERCEPTION_RADIUS = 2;
+const PERCEPTION_COUNT = 100;
+
+// Interaction Parameters
+const DIRECT_TRANSFER_PERCENT = 0.5;
+const INDIRECT_TRANSFER_PERCENT = 0.25;
+const INTERACTION_FORCE_DECAY = 0.75;
+const FORCE_LINE_LENGTH = 10;
+
+// Temperature Control
+let TEMPERATURE_FORCE_MAG = 10;
+const HEATING_RATE = 0.5;
+const COOLING_RATE = 0.5;
+const TEMPERATURE_AVERAGING_FACTOR = 0.0001;
+
+const bottomQuarter = rows * 0.51;
+const topQuarter = rows * 0.49;
+
+const TEMPERATURE_DIFFERENCE_THRESHOLD = 20; // Temperature difference threshold for changing attraction/repulsion behavior
+const TEMPERATURE_CLOSE_THRESHOLD = 5; // Temperature difference threshold for stronger attraction
+const TEMPERATURE_FAR_THRESHOLD = 10; // Temperature difference threshold for weaker attraction
+const STRONG_ATTRACTION_MULTIPLIER = 10; // Multiplier for strong attraction
+const WEAK_ATTRACTION_MULTIPLIER = 0.1; // Multiplier for weak attraction
+
+// Attraction Force
+const ATTRACTION_FORCE_MAGNITUDE = 1;
+let ATTRACTION_RADIUS = 3;
+
+// TWO NEW IDEAS:
+// 1. Attraction force amplified if temperatures are similar
+// 2. Attraction force is diminished at higher temperatures
 
 p5.disableFriendlyErrors = true;
 
@@ -28,7 +54,7 @@ function setup() {
   quadTree = new QuadTree(Infinity, 30, new Rect(0, 0, cols + 1, rows + 1));
   background(0);
 
-  for (let i = 0; i < numofStarterParticles; i++) {
+  for (let i = 0; i < NUM_OF_STARTER_PARTICLES; i++) {
     let x = Math.floor(Math.random() * cols),
       y = Math.floor(Math.random() * rows);
     if (!isOccupied(x, y, -1)) particles.push(new Particle(x, y));
@@ -40,7 +66,7 @@ function draw() {
   particles.forEach((particle) =>
     quadTree.addItem(particle.pos.x, particle.pos.y, particle)
   );
-  background(0, 0, 0, fadeFactor);
+  background(0, 0, 0, FADE_FACTOR);
   particles.forEach((particle) => particle.update());
   particles.forEach((particle) => particle.show());
 }
@@ -53,7 +79,7 @@ class Particle {
     this.nextPosCW = createVector(x, y);
     this.forceMap = new Map();
     this.netForce = createVector(0, 0);
-    (this.temp = 20), (this.mass = 1), (this.gravity = createVector(0, 0.1));
+    (this.temp = 50), (this.mass = 1), (this.gravity = createVector(0, 0.1));
     (this.id = idCounter++), (this.r = 255), (this.g = 0), (this.b = 0);
     this.color = `rgb(${this.r}, ${this.g}, ${this.b})`;
     this.applyForce("gravity", this.gravity);
@@ -68,7 +94,7 @@ class Particle {
     this.resolveForces();
     this.calculateNextPosition();
     if (
-      random() < min(1, this.netForce.mag() / maxForce) &&
+      random() < min(1, this.netForce.mag() / MAX_FORCE) &&
       this.canMoveToNextPosition()
     )
       this.pos.set(this.nextPos);
@@ -183,54 +209,62 @@ class Particle {
   }
 
   applyTemperatureForces() {
-    if (this.temp > 50) {
-      let upForceMagnitude = map(this.temp, 51, 100, 0.005, 1.0);
-      let upForce = createVector(0, -upForceMagnitude);
-      this.applyForce("temp", upForce);
-    }
+    // Map the temperature to a force range, where 50 is neutral
+    let tempForceMagnitude = map(
+      this.temp,
+      0,
+      100,
+      TEMPERATURE_FORCE_MAG,
+      -1 * TEMPERATURE_FORCE_MAG
+    );
+
+    // Create a force vector with the calculated magnitude
+    let tempForce = createVector(0, tempForceMagnitude);
+
+    // Apply the temperature force
+    this.applyForce("temp", tempForce);
   }
 
   updateTemperature() {
-    let heatingRangeBottom = rows - heatingRangeHeight,
-      heatingRangeTop = rows;
-    if (this.pos.y >= heatingRangeBottom && this.pos.y <= heatingRangeTop) {
-      let heatChance = map(
-        this.pos.y,
-        heatingRangeBottom,
-        heatingRangeTop,
-        0.2,
-        1.0
-      );
-      if (random() < heatChance * heatingRate)
+    // Determine if the particle is in the bottom quarter, top quarter, or the middle
+    if (this.pos.y >= bottomQuarter) {
+      // In the bottom quarter, apply heating
+      let heatFactor = map(this.pos.y, bottomQuarter, rows, 0, 1);
+      if (random() < HEATING_RATE * heatFactor) {
         this.temp = min(this.temp + 1, 100);
-    } else {
-      if (random() < coolingRate) this.temp = max(this.temp - 1, 0);
+      }
+    } else if (this.pos.y <= topQuarter) {
+      // In the top quarter, apply cooling
+      let coolFactor = map(this.pos.y, 0, topQuarter, 1, 0);
+      if (random() < COOLING_RATE * coolFactor) {
+        this.temp = max(this.temp - 1, 0);
+      }
     }
+    // No additional temperature change in the middle half
 
-    // Get neighbors within a 1px radius
+    // Average temperature with neighbors
     let neighbors = this.getNeighbors(1);
-
-    // Calculate average temperature with neighbors
     let totalTemp = this.temp;
     let count = 1; // Include this particle's temperature
-
     neighbors.forEach((neighbor) => {
       totalTemp += neighbor.temp;
       count++;
     });
-
     let averageTemp = totalTemp / count;
-
-    // Adjust this particle's temperature towards the average
     this.temp += (averageTemp - this.temp) * TEMPERATURE_AVERAGING_FACTOR;
     this.temp = constrain(this.temp, 0, 100);
   }
 
   show() {
-    let redValue = map(this.temp, 0, 100, 0, 255);
-    // let forceMagnitude = this.netForce.mag() * 1000,
-    let blueValue = 100;
-    let greenValue = 0;
+    // Red value is higher when colder
+    let redValue = map(this.temp, 0, 100, 150, 255);
+
+    // Green value is higher when warmer, creating a yellowish color when combined with red
+    let greenValue = map(this.temp, 0, 100, 0, 255);
+
+    // Blue value remains minimal or zero for red to yellow transition
+    let blueValue = 0;
+
     this.color = `rgb(${redValue}, ${greenValue}, ${blueValue})`;
     canvasContext.fillStyle = this.color;
     canvasContext.fillRect(
@@ -262,14 +296,30 @@ class Particle {
   }
 
   applyAttraction() {
-    let neighbors = this.getNeighbors(2); // Get neighbors within a 2px radius
+    let neighbors = this.getNeighbors(ATTRACTION_RADIUS); // Get neighbors within attraction radius
 
     neighbors.forEach((neighbor) => {
       let distance = p5.Vector.dist(this.pos, neighbor.pos);
-      if (distance > 0 && distance <= 2) {
+      if (distance > 0 && distance <= ATTRACTION_RADIUS) {
+        let tempDifference = Math.abs(this.temp - neighbor.temp);
         let forceDirection = p5.Vector.sub(neighbor.pos, this.pos);
-        let attractionForce = forceDirection.setMag(ATTRACTION_FORCE_MAGNITUDE);
-        this.applyForce("attraction" + neighbor.id, attractionForce);
+
+        // Determine force magnitude based on temperature difference
+        let forceMagnitude;
+        if (tempDifference <= TEMPERATURE_DIFFERENCE_THRESHOLD) {
+          // Gradually increase attraction with closer temperatures
+          forceMagnitude =
+            ATTRACTION_FORCE_MAGNITUDE *
+            (1 - tempDifference / TEMPERATURE_DIFFERENCE_THRESHOLD);
+        } else {
+          // Gradually increase repulsion with larger temperature differences
+          forceMagnitude =
+            -ATTRACTION_FORCE_MAGNITUDE *
+            (tempDifference / TEMPERATURE_DIFFERENCE_THRESHOLD - 1);
+        }
+
+        let attractionRepulsionForce = forceDirection.setMag(forceMagnitude);
+        this.applyForce("tempForce" + neighbor.id, attractionRepulsionForce);
       }
     });
   }
@@ -280,8 +330,8 @@ function isOccupied(x, y, excludingParticleId) {
   let items = quadTree.getItemsInRadius(
     x,
     y,
-    perceptionRadius,
-    perceptionCount
+    PERCEPTION_RADIUS,
+    PERCEPTION_COUNT
   );
   for (const item of items) {
     if (
@@ -300,8 +350,8 @@ function getParticleAt(x, y) {
   const items = quadTree.getItemsInRadius(
     x,
     y,
-    perceptionRadius,
-    perceptionCount
+    PERCEPTION_RADIUS,
+    PERCEPTION_COUNT
   );
   for (const item of items) {
     if (item.pos.x == x && item.pos.y == y) return item;
