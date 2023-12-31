@@ -1,5 +1,5 @@
 let particles = [];
-let scaleSize = 10;
+let scaleSize = 8;
 let cols = Math.floor(window.innerWidth / scaleSize);
 let rows = Math.floor(window.innerHeight / scaleSize);
 
@@ -25,19 +25,19 @@ const FORCE_LINE_LENGTH = 10;
 // Temperature Control
 let DEFAULT_TEMPERATURE = 0;
 let TEMPERATURE_FORCE_MAG = 100;
-const HEATING_RATE = 0.25;
+const HEATING_RATE = 0.5;
 const COOLING_RATE = 0.5;
 const TEMPERATURE_AVERAGING_FACTOR = 0.1;
 
 // Heating and Cooling Areas
 
 const TOP_SECTION_START = 0; // Start of the top cooling section
-const TOP_SECTION_END = rows * 0.25; // End of the top cooling section
+const TOP_SECTION_END = rows * 0.5; // End of the top cooling section
 
-const BOTTOM_SECTION_START = rows * 0.7; // Start of the bottom heating section
+const BOTTOM_SECTION_START = rows * 0.5; // Start of the bottom heating section
 const BOTTOM_SECTION_END = rows; // End of the bottom heating section
-const CENTRAL_AREA_START = cols * 0.1; // Start of the central heating area horizontally
-const CENTRAL_AREA_END = cols * 0.9; // End of the central heating area horizontally
+const CENTRAL_AREA_START = cols * 0.0; // Start of the central heating area horizontally
+const CENTRAL_AREA_END = cols * 1.0; // End of the central heating area horizontally
 
 const TEMPERATURE_DIFFERENCE_THRESHOLD = 5; // Temperature difference threshold for changing attraction/repulsion behavior
 const TEMPERATURE_CLOSE_THRESHOLD = 2; // Temperature difference threshold for stronger attraction
@@ -46,7 +46,7 @@ const STRONG_ATTRACTION_MULTIPLIER = 10; // Multiplier for strong attraction
 const WEAK_ATTRACTION_MULTIPLIER = 0.1; // Multiplier for weak attraction
 
 // Attraction Force
-const ATTRACTION_FORCE_MAGNITUDE = 10;
+const ATTRACTION_FORCE_MAGNITUDE = 2;
 let ATTRACTION_RADIUS = 5;
 
 // TWO NEW IDEAS:
