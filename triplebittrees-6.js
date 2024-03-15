@@ -1,11 +1,11 @@
 let particles = [];
-let scaleSize = 16;
+let scaleSize = 4;
 let cols = Math.floor(window.innerWidth / scaleSize);
 let rows = Math.floor(window.innerHeight / scaleSize);
 let allowGrowth = false; // Flag to control growth on each click
 let idCounter = 1;
 
-let currentRecord = 7; // Assume this is the highest number of particles reached by any tree
+let currentRecord = 100; // Assume this is the highest number of particles reached by any tree
 let previousParticleCount = 0; // Number of particles in the last frame
 let isWinner = false; // Flag to indicate if the current tree is a winner
 
@@ -23,17 +23,17 @@ function setup() {
   console.log("Initializing with a single particle in the center.");
   addParticle(Math.floor(cols / 2), Math.floor(rows / 2), "north", true);
 
-  // autoAdvanceInterval = setInterval(() => {
-  //   checkAndProcessTree(); // Perform checks and process the tree
+  autoAdvanceInterval = setInterval(() => {
+    checkAndProcessTree(); // Perform checks and process the tree
 
-  //   if (!isWinner && particles.length > 0) {
-  //     // Ensure there's at least one particle to grow from
-  //     allowGrowth = true; // Explicitly allow growth for the next cycle
-  //     console.log("Auto-advancing simulation.");
-  //   } else {
-  //     console.log("Auto-advancement paused."); // This might be because isWinner is true or no particles exist
-  //   }
-  // }, 50); // Adjust timing as needed
+    if (!isWinner && particles.length > 0) {
+      // Ensure there's at least one particle to grow from
+      allowGrowth = true; // Explicitly allow growth for the next cycle
+      console.log("Auto-advancing simulation.");
+    } else {
+      console.log("Auto-advancement paused."); // This might be because isWinner is true or no particles exist
+    }
+  }, 50); // Adjust timing as needed
 }
 
 function draw() {
