@@ -4,23 +4,18 @@
  * Stores it's position within the QuadTree domain.
  */
 class QuadTreeItem {
-
   constructor(x, y, data) {
     this.x = x;
     this.y = y;
     this.data = data;
   }
-
 }
-
-
 
 /*
  * Private class.
  * A spatial region of a QuadTree containing 0 or more `QuadTreeItem` instances and 0 or more other `QuadTreeBin` instances.
  */
 class QuadTreeBin {
-
   /*
    * @param maxDepth The maximum number of permitted subdivisions.
    * @param maxItemsPerBin The maximum number of items in a single bin before it is subdivided.
@@ -42,8 +37,12 @@ class QuadTreeBin {
    * @param range Used to check if a point is within a radius of the extent border.
    */
   checkWithinExtent(x, y, range = 0) {
-    return x >= this.rect.x - range && x < this.rect.x + this.rect.width + range &&
-           y >= this.rect.y - range && y < this.rect.y + this.rect.height + range;
+    return (
+      x >= this.rect.x - range &&
+      x < this.rect.x + this.rect.width + range &&
+      y >= this.rect.y - range &&
+      y < this.rect.y + this.rect.height + range
+    );
   }
 
   /*
@@ -53,12 +52,15 @@ class QuadTreeBin {
   addItem(item) {
     if (this.bins === null) {
       this.items.push(item);
-      if (this.depth < this.maxDepth && this.items !== null && this.items.length > this.maxItemsPerBin)
+      if (
+        this.depth < this.maxDepth &&
+        this.items !== null &&
+        this.items.length > this.maxItemsPerBin
+      )
         this.subDivide();
     } else {
       const binIndex = this._getBinIndex(item.x, item.y);
-      if (binIndex != -1)
-        this.bins[binIndex].addItem(item);
+      if (binIndex != -1) this.bins[binIndex].addItem(item);
     }
   }
 
@@ -91,14 +93,26 @@ class QuadTreeBin {
   subDivide() {
     if (this.bins !== null) return;
     this.bins = [];
-    let w = this.rect.width * 0.5, h = this.rect.height * 0.5;
+    let w = this.rect.width * 0.5,
+      h = this.rect.height * 0.5;
     for (let i = 0; i < 4; ++i)
-      this.bins.push(new QuadTreeBin(this.maxDepth, this.maxItemsPerBin, new Rect(this.rect.x + i % 2 * w, this.rect.y + Math.floor(i * 0.5) * h, w, h), this.depth + 1));
+      this.bins.push(
+        new QuadTreeBin(
+          this.maxDepth,
+          this.maxItemsPerBin,
+          new Rect(
+            this.rect.x + (i % 2) * w,
+            this.rect.y + Math.floor(i * 0.5) * h,
+            w,
+            h
+          ),
+          this.depth + 1
+        )
+      );
 
     for (let item of this.items) {
       const binIndex = this._getBinIndex(item.x, item.y);
-      if (binIndex != -1)
-        this.bins[binIndex].addItem(item);
+      if (binIndex != -1) this.bins[binIndex].addItem(item);
     }
 
     this.items = null;
@@ -110,12 +124,10 @@ class QuadTreeBin {
    */
   debugRender(renderingContext) {
     noFill();
-    stroke('#aaa');
+    stroke("#aaa");
     strokeWeight(1);
     rect(this.rect.x, this.rect.y, this.rect.width, this.rect.height);
-    if (this.bins)
-      for (let b of this.bins)
-        b.debugRender(renderingContext);
+    if (this.bins) for (let b of this.bins) b.debugRender(renderingContext);
   }
 
   /*
@@ -123,21 +135,18 @@ class QuadTreeBin {
    */
   _getBinIndex(x, y, range = 0) {
     if (!this.checkWithinExtent(x, y)) return -1;
-    let w = this.rect.width * 0.5, h = this.rect.height * 0.5;
+    let w = this.rect.width * 0.5,
+      h = this.rect.height * 0.5;
     let xx = Math.floor((x - this.rect.x) / w);
     let yy = Math.floor((y - this.rect.y) / h);
     return xx + yy * 2;
   }
-
 }
-
-
 
 /*
  * A public class representing a QuadTree structure.
  */
 class QuadTree {
-
   /*
    * @param maxDepth The maximum number of permitted subdivisions.
    * @param maxItemsPerBin The maximum number of items in a single bin before it is subdivided.
@@ -154,7 +163,11 @@ class QuadTree {
    * Remove all `QuadTreeItem`s and `QuadTreeBin`s from the QuadTree leaving it completely empty.
    */
   clear() {
-    this.rootBin = new QuadTreeBin(this.maxDepth, this.maxItemsPerBin, new Rect(0, 0, this.extent.width, this.extent.height));
+    this.rootBin = new QuadTreeBin(
+      this.maxDepth,
+      this.maxItemsPerBin,
+      new Rect(0, 0, this.extent.width, this.extent.height)
+    );
   }
 
   /*
@@ -174,11 +187,12 @@ class QuadTree {
     if (maxItems === undefined) {
       return this.rootBin.getItemsInRadius(x, y, radius);
     } else {
-      return this.rootBin.getItemsInRadius(x, y, radius)
+      return this.rootBin
+        .getItemsInRadius(x, y, radius)
         .sort((a, b) => a.distSqrd - b.distSqrd)
         .slice(0, maxItems)
-        .map(v => v.data);
-   }
+        .map((v) => v.data);
+    }
   }
 
   /*
@@ -188,5 +202,4 @@ class QuadTree {
   debugRender(renderingContext) {
     this.rootBin.debugRender(renderingContext);
   }
-
 }

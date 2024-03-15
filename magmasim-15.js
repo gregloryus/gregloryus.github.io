@@ -1,5 +1,5 @@
 let particles = [];
-let scaleSize = 8;
+let scaleSize = 4;
 let cols = Math.floor(window.innerWidth / scaleSize);
 let rows = Math.floor(window.innerHeight / scaleSize);
 
@@ -8,26 +8,26 @@ const FADE_FACTOR = 100;
 const MAX_FORCE = 50;
 
 // Particle Initialization
-const NUM_OF_STARTER_PARTICLES = 1111;
+const NUM_OF_STARTER_PARTICLES = 444;
 let idCounter = 0;
-let DEFAULT_GRAVITY = 0.5;
+let DEFAULT_GRAVITY = 0.6;
 
 // Perception Parameters
 const PERCEPTION_RADIUS = 2;
 const PERCEPTION_COUNT = 10;
 
 // Interaction Parameters
-const DIRECT_TRANSFER_PERCENT = 0.5;
-const INDIRECT_TRANSFER_PERCENT = 0.25;
+const DIRECT_TRANSFER_PERCENT = 0.6;
+const INDIRECT_TRANSFER_PERCENT = 0.3;
 const INTERACTION_FORCE_DECAY = 0.75;
 const FORCE_LINE_LENGTH = 10;
 
 // Temperature Control
 let DEFAULT_TEMPERATURE = 0;
-let TEMPERATURE_FORCE_MAG = 100;
-const HEATING_RATE = 1.5;
-const COOLING_RATE = 1.5;
-const TEMPERATURE_AVERAGING_FACTOR = 0.1;
+let TEMPERATURE_FORCE_MAG = 15;
+const HEATING_RATE = 2;
+const COOLING_RATE = 2;
+const TEMPERATURE_AVERAGING_FACTOR = 0.2;
 
 // Heating and Cooling Areas
 
