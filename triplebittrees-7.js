@@ -1,9 +1,11 @@
 let particles = [];
-let scaleSize = 2;
+let scaleSize = 4;
 let cols = Math.floor(window.innerWidth / scaleSize);
 let rows = Math.floor(window.innerHeight / scaleSize);
 let allowGrowth = false; // Flag to control growth on each click
 let idCounter = 1;
+
+let treeSizes = []; // Stores the number of particles for each fully matured tree
 
 let currentRecord = 1000; // Assume this is the highest number of particles reached by any tree
 let previousParticleCount = 0; // Number of particles in the last frame
@@ -20,7 +22,7 @@ function setup() {
   background(0);
 
   // Initialize with a single particle in the center and make it visible
-  console.log("Initializing with a single particle in the center.");
+  // console.log("Initializing with a single particle in the center.");
   addParticle(Math.floor(cols / 2), Math.floor(rows / 2), "north", true);
 
   autoAdvanceInterval = setInterval(() => {
@@ -29,15 +31,15 @@ function setup() {
     if (!isWinner && particles.length > 0) {
       // Ensure there's at least one particle to grow from
       allowGrowth = true; // Explicitly allow growth for the next cycle
-      console.log("Auto-advancing simulation.");
+      // console.log("Auto-advancing simulation.");
     } else {
-      console.log("Auto-advancement paused."); // This might be because isWinner is true or no particles exist
+      // console.log("Auto-advancement paused."); // This might be because isWinner is true or no particles exist
     }
   }, 20); // Adjust timing as needed
 }
 
 function draw() {
-  background(0); // Clear the screen at the start of every draw call
+  background(0, 0, 0, 4); // Clear the screen at the start of every draw call
 
   quadTree.clear();
   particles.forEach((particle) =>
@@ -45,16 +47,27 @@ function draw() {
   );
 
   if (allowGrowth) {
-    console.log("Growth allowed, updating particles...");
+    // console.log("Growth allowed, updating particles...");
     particles.forEach((particle) => particle.update());
     allowGrowth = false; // Reset flag after processing growth
   }
 
   particles.forEach((particle) => particle.show());
+  // At the end of the draw function
+  if (treeSizes.length > 0) {
+    const longestTreeSize = Math.max(...treeSizes); // Find the longest tree size
+    const averageTreeSize =
+      treeSizes.reduce((a, b) => a + b, 0) / treeSizes.length; // Calculate average tree size
+    fill(255); // White color for text
+    textSize(16);
+    text(`Current tree size: ${particles.length}`, 10, height - 60);
+    text(`Average tree size: ${averageTreeSize.toFixed(0)}`, 10, height - 40);
+    text(`Longest tree size: ${longestTreeSize}`, 10, height - 20);
+  }
 }
 
 function mousePressed() {
-  console.log("Mouse pressed, allowing growth.");
+  // console.log("Mouse pressed, allowing growth.");
   allowGrowth = true; // Enable growth processing on the next draw cycle
 }
 
@@ -78,9 +91,9 @@ class Particle {
     this.facing = facing;
     this.isLiveEdge = isLiveEdge;
     // Log the facing direction when a new particle is created
-    console.log(
-      `New particle created at (${x}, ${y}) with facing: ${facing}, ID: ${this.id}`
-    );
+    // console.log(
+    //   `New particle created at (${x}, ${y}) with facing: ${facing}, ID: ${this.id}`
+    // );
     this.color = this.isLiveEdge ? "rgb(0, 255, 0)" : "rgb(0, 128, 0)";
   }
 
@@ -115,9 +128,9 @@ class Particle {
   }
 
   tryGrow() {
-    console.log(
-      `Attempting to grow particle from (${this.pos.x}, ${this.pos.y}) facing ${this.facing}.`
-    );
+    // console.log(
+    //   `Attempting to grow particle from (${this.pos.x}, ${this.pos.y}) facing ${this.facing}.`
+    // );
     const directions = getDirectionsByFacing(this.facing);
 
     // Correct the destructuring to match the object structure returned by getDirectionsByFacing
@@ -128,19 +141,19 @@ class Particle {
       if (Math.random() < 0.5) {
         let newX = this.pos.x + dx;
         let newY = this.pos.y + dy;
-        console.log(
-          `Checking if new location (${newX}, ${newY}) is available for growth with facing: ${newFacing}.`
-        );
+        // console.log(
+        //   `Checking if new location (${newX}, ${newY}) is available for growth with facing: ${newFacing}.`
+        // );
         let occupied = isOccupied(newX, newY, this.id, newFacing); // Use newFacing here
         if (!occupied) {
-          console.log(
-            `Location (${newX}, ${newY}) is not occupied. Adding new particle facing ${newFacing}.`
-          );
+          // console.log(
+          //   `Location (${newX}, ${newY}) is not occupied. Adding new particle facing ${newFacing}.`
+          // );
           let particle = new Particle(newX, newY, newFacing, true); // Ensure the newFacing is correctly passed
           quadTree.addItem(newX, newY, particle);
           particles.push(particle);
         } else {
-          console.log(`Location (${newX}, ${newY}) is occupied. No growth.`);
+          // console.log(`Location (${newX}, ${newY}) is occupied. No growth.`);
         }
       }
     });
@@ -193,7 +206,7 @@ function isOccupied(x, y, excludingParticleId, facing) {
       ];
       break;
     default:
-      console.log(`Unknown facing direction: ${facing}`);
+      // console.log(`Unknown facing direction: ${facing}`);
       return true;
   }
 
@@ -205,15 +218,15 @@ function isOccupied(x, y, excludingParticleId, facing) {
     let items = quadTree.getItemsInRadius(checkX, checkY, 0.5, 10);
     for (const item of items) {
       if (item.id !== excludingParticleId) {
-        console.log(
-          `Occupied by another particle at (${checkX}, ${checkY}) excluding ID: ${excludingParticleId}`
-        );
+        // console.log(
+        //   `Occupied by another particle at (${checkX}, ${checkY}) excluding ID: ${excludingParticleId}`
+        // );
         return true;
       }
     }
   }
 
-  console.log(`Location (${x}, ${y}) with facing ${facing} is not occupied.`);
+  // console.log(`Location (${x}, ${y}) with facing ${facing} is not occupied.`);
   return false;
 }
 
@@ -287,22 +300,22 @@ function getDirectionsByFacing(facing) {
 // }
 
 function keyPressed() {
-  console.log("Key pressed, restarting simulatino.");
+  // console.log("Key pressed, restarting simulatino.");
   restartSimulation(); // Use a function to restart the simulation
 }
 
 function toggleAutoAdvance() {
   if (autoAdvanceInterval) {
-    console.log("Pausing auto-advancement.");
+    // console.log("Pausing auto-advancement.");
     clearInterval(autoAdvanceInterval); // Pause the auto-advancement
     autoAdvanceInterval = null;
   } else {
-    console.log("Resuming auto-advancement.");
+    // console.log("Resuming auto-advancement.");
     autoAdvanceInterval = setInterval(() => {
       if (allowGrowth) {
-        console.log("Auto-advancing paused due to ongoing growth.");
+        // console.log("Auto-advancing paused due to ongoing growth.");
       } else {
-        console.log("Auto-advancing simulation.");
+        // console.log("Auto-advancing simulation.");
         allowGrowth = true;
       }
     }, 200); // Resume auto-advancement
@@ -310,8 +323,8 @@ function toggleAutoAdvance() {
 }
 
 function restartSimulation() {
-  console.clear(); // Clear the console for a fresh start
-  console.log("Restarting the simulation.");
+  // console.clear(); // Clear the console for a fresh start
+  // console.log("Restarting the simulation.");
   particles = []; // Clear the existing particles
   quadTree.clear(); // Reset the QuadTree
   idCounter = 1; // Reset the ID counter
@@ -327,21 +340,35 @@ function checkAndProcessTree() {
     // No growth since last check, assume the tree is mature
     const isMature = !particles.some((p) => p.isLiveEdge);
     if (isMature) {
-      // Tree is mature, check if it meets or exceeds the current record
+      // Log the current tree size
+      treeSizes.push(currentParticleCount);
+
+      // Calculate the average tree size
+      const averageTreeSize =
+        treeSizes.reduce((a, b) => a + b, 0) / treeSizes.length;
+
+      // Display the current tree size and average tree size
+      // console.log(
+      //   `Current tree size: ${currentParticleCount}, Average tree size: ${averageTreeSize.toFixed(
+      //     2
+      //   )}`
+      // );
+
+      // Check if it meets or exceeds the current record
       if (currentParticleCount >= currentRecord) {
         // New record or equals, update currentRecord and mark as winner
         currentRecord = currentParticleCount;
-        isWinner = true; // Update global flag indicating the tree is a winner
-        console.log(
-          "New record or equal to current record. Pausing auto-advancement."
-        );
+        isWinner = true;
+        // console.log(
+        //   "New record or equal to current record. Pausing auto-advancement."
+        // );
         // Implement any logic for winners here
       } else {
         // Not a record, not a winner
-        isWinner = false; // Ensure isWinner is correctly reset
-        console.log(
-          "Mature tree does not meet the record. Continuing auto-advancement."
-        );
+        isWinner = false;
+        // console.log(
+        //   "Mature tree does not meet the record. Continuing auto-advancement."
+        // );
         restartSimulation(); // Restart if not using a manual trigger
       }
     }
