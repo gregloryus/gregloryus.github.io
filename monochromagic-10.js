@@ -64,6 +64,7 @@ function setup() {
   // Randomly place walls in groups of wallGroupSize horizontally, within the center 2/3 of the canvas
 
   for (let i = 0; i < numOfWalls; i++) {
+  
     let x = Math.floor(Math.random() * (cols / 2)) + Math.floor(cols / 6);
     let y = Math.floor(Math.random() * rows);
     for (let j = 0; j < wallGroupSize; j++) {

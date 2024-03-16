@@ -5,7 +5,7 @@ let rows = Math.floor(window.innerHeight / scaleSize);
 let allowGrowth = false; // Flag to control growth on each click
 let idCounter = 1;
 
-let currentRecord = 100; // Assume this is the highest number of particles reached by any tree
+let currentRecord = 1000; // Assume this is the highest number of particles reached by any tree
 let previousParticleCount = 0; // Number of particles in the last frame
 let isWinner = false; // Flag to indicate if the current tree is a winner
 
