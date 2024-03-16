@@ -1,5 +1,5 @@
 let particles = [];
-let scaleSize = 4;
+let scaleSize = 1;
 let cols = Math.floor(window.innerWidth / scaleSize);
 let rows = Math.floor(window.innerHeight / scaleSize);
 let allowGrowth = false; // Flag to control growth on each click
@@ -33,7 +33,7 @@ function setup() {
     } else {
       console.log("Auto-advancement paused."); // This might be because isWinner is true or no particles exist
     }
-  }, 50); // Adjust timing as needed
+  }, 20); // Adjust timing as needed
 }
 
 function draw() {
