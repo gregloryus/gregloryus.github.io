@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>pixiching</title>
+  <style>
+    html, body {
+      overflow: hidden;
+      height: 100%;
+      margin: 0;
+      padding: 0;
+      background-color: black;
+    }
+    #canvas-div {
+      width: 100%;
+      height: 100%;
+    }
+  </style>
+  <!-- Include PixiJS -->
+  <script src="https://pixijs.download/release/pixi.js"></script>
+  <!-- Include additional scripts if needed -->
+  <script src="rect.js"></script>
+  <script src="quadtree.js"></script>
+</head>
+<body>
+  <div id="canvas-div"></div>
+  <!-- Load the main script as a module -->
+  <script type="module" src="pixiching-3.js"></script>
+</body>
+</html>
