@@ -1,5 +1,5 @@
 let particles = [];
-let scaleSize = 4;
+let scaleSize = 1;
 let cols = Math.floor(window.innerWidth / scaleSize);
 let rows = Math.floor(window.innerHeight / scaleSize);
 let allowGrowth = false; // Flag to control growth on each click
@@ -12,10 +12,13 @@ function setup() {
   canvasContext = canvas.getContext("2d");
   quadTree = new QuadTree(Infinity, 30, new Rect(0, 0, cols + 1, rows + 1));
   background(0);
+  for (let i = 0; i < 50000; i++) {
+    addParticle(floor(random(cols)), floor(random(rows)));
+  }
 }
 
 function draw() {
-  background(0, 0, 0, 5); // Clear the screen at the start of every draw call
+  background(0, 0, 0, 100); // Clear the screen at the start of every draw call
 
   quadTree.clear();
   particles.forEach((particle) =>
@@ -24,6 +27,10 @@ function draw() {
 
   particles.forEach((particle) => particle.update());
   particles.forEach((particle) => particle.show());
+
+  fill(255, 0, 0);
+  textSize(16);
+  text("FPS: " + frameRate().toFixed(2), 10, height - 10);
 }
 
 function addParticle(x, y) {
@@ -36,11 +43,16 @@ class Particle {
   constructor(x, y) {
     this.id = idCounter++;
     this.pos = { x, y };
-    this.color = "rgb(255, 255, 255)";
+    this.color = "rgb(255, 255, 0)"; // Yellow
   }
 
   update() {
-    // particle movement and changes happen here
+    // Random movement within bounds
+    // Random movement logic
+    this.pos.x += Math.floor(Math.random() * 3) - 1;
+    this.pos.y += Math.floor(Math.random() * 3) - 1;
+    this.pos.x = Math.min(Math.max(this.pos.x, 0), cols - 1);
+    this.pos.y = Math.min(Math.max(this.pos.y, 0), rows - 1);
   }
 
   show() {
