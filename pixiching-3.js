@@ -15,7 +15,7 @@ document.addEventListener("DOMContentLoaded", async () => {
 
   // The rest of your PixiJS logic here
   let particles = [];
-  let scaleSize = 4;
+  let scaleSize = 1;
   let cols = Math.floor(window.innerWidth / scaleSize);
   let rows = Math.floor(window.innerHeight / scaleSize);
   let idCounter = 1;
@@ -63,6 +63,14 @@ document.addEventListener("DOMContentLoaded", async () => {
     particles.push(particle);
   }
 
+  // Setup FPS counter using the updated PixiJS v8 syntax
+  let elapsed = 0;
+  const fpsText = new PIXI.Text({
+    text: "FPS: 0",
+    style: { fontFamily: "Arial", fontSize: 24, fill: 0xffffff },
+  });
+  app.stage.addChild(fpsText);
+
   // Update and render loop
   app.ticker.add(() => {
     quadTree.clear();
@@ -70,8 +78,19 @@ document.addEventListener("DOMContentLoaded", async () => {
       quadTree.addItem(particle.pos.x, particle.pos.y, particle);
       particle.update();
     });
+
+    // Update FPS counter every second
+    elapsed += app.ticker.deltaMS;
+    if (elapsed >= 1000) {
+      fpsText.text = `FPS: ${Math.round(app.ticker.FPS)}`;
+      elapsed = 0;
+    }
   });
 
-  // Initial particle for demonstration
-  addParticle(50, 50);
+  // Generate 100 particles in random positions
+  for (let i = 0; i < 1000; i++) {
+    const x = Math.random() * window.innerWidth;
+    const y = Math.random() * window.innerHeight;
+    addParticle(x / scaleSize, y / scaleSize);
+  }
 });
