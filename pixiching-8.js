@@ -19,10 +19,11 @@ document.addEventListener("DOMContentLoaded", async () => {
 
   // The rest of your PixiJS logic here
   let particles = [];
-  let NUM_OF_STARTER_PARTICLES = 10000;
+
   let scaleSize = 1;
   let cols = Math.floor(window.innerWidth / scaleSize);
   let rows = Math.floor(window.innerHeight / scaleSize);
+  let NUM_OF_STARTER_PARTICLES = Math.floor((cols * rows) / 10);
   let elapsed = 0;
   let idCounter = 1;
   let quadTree = new QuadTree(Infinity, 30, new Rect(0, 0, cols + 1, rows + 1));
@@ -91,6 +92,15 @@ document.addEventListener("DOMContentLoaded", async () => {
   let centerParticle = new Particle(Math.floor(cols / 2), Math.floor(rows / 2));
   centerParticle.static = true;
   particles.push(centerParticle);
+
+  // Generate four static particles randomly placed
+  for (let i = 0; i < 4; i++) {
+    let x = Math.floor(Math.random() * cols);
+    let y = Math.floor(Math.random() * rows);
+    let staticParticle = new Particle(x, y);
+    staticParticle.static = true;
+    particles.push(staticParticle);
+  }
 
   // Generate 1000 particles in random positions
   for (let i = 0; i < NUM_OF_STARTER_PARTICLES; i++) {
