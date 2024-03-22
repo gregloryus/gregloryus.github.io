@@ -62,6 +62,12 @@ document.addEventListener("DOMContentLoaded", async () => {
       let dx = Math.floor(Math.random() * 3) - 1; // Results in -1, 0, or 1
       let dy = Math.floor(Math.random() * 3) - 1; // Results in -1, 0, or 1
 
+  // Check for edge cells
+  if (this.pos.x <= 0 || this.pos.x >= cols - 1 || this.pos.y <= 0 || this.pos.y >= rows - 1) {
+    this.static = true; // Particle becomes static if it touches any edge
+  } 
+
+
       this.pos.x = Math.min(Math.max(this.pos.x + dx, 0), cols - 1);
       this.pos.y = Math.min(Math.max(this.pos.y + dy, 0), rows - 1);
 
