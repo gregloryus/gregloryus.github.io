@@ -12,7 +12,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     fontSize: 24,
     fill: "white",
   });
-  const fpsText = new PIXI.Text({ text: "FPS: 0", fpsTextStyle });
+  const fpsText = new PIXI.Text("FPS: 0", fpsTextStyle);
   fpsText.x = 10;
   fpsText.y = 10;
   app.stage.addChild(fpsText);
@@ -20,19 +20,10 @@ document.addEventListener("DOMContentLoaded", async () => {
   // The rest of your PixiJS logic here
   let particles = [];
 
-  const Mode = {
-    MIST: "MIST",
-    LIFE: "LIFE",
-    FUEL: "FUEL",
-    FIRE: "FIRE",
-    SOIL: "SOIL",
-    RAIN: "RAIN",
-  };
-
   let scaleSize = 1;
   let cols = Math.floor(window.innerWidth / scaleSize);
   let rows = Math.floor(window.innerHeight / scaleSize);
-  let NUM_OF_STARTER_PARTICLES = Math.floor((cols * rows) / 100);
+  let NUM_OF_STARTER_PARTICLES = Math.floor((cols * rows) / 15);
   let elapsed = 0;
   let idCounter = 1;
   let quadTree = new QuadTree(Infinity, 30, new Rect(0, 0, cols + 1, rows + 1));
@@ -56,40 +47,26 @@ document.addEventListener("DOMContentLoaded", async () => {
     constructor(x, y) {
       this.pos = { x, y };
       this.id = idCounter++;
-      this.mode = Mode.MIST;
-      this.sprite = new PIXI.Sprite(texture); // Need to create a texture with 6 colors
+      this.static = false; // Add static flag
+      this.sprite = new PIXI.Sprite(texture);
       this.sprite.x = x * scaleSize;
       this.sprite.y = y * scaleSize;
       app.stage.addChild(this.sprite);
     }
 
     update() {
-      switch (this.mode) {
-        case Mode.MIST:
-          this.updateMist();
-          break;
-        case Mode.LIFE:
-          this.updateLife();
-          break;
-        case Mode.FUEL:
-          this.updateFuel();
-          break;
-        case Mode.FIRE:
-          this.updateFire();
-          break;
-        case Mode.SOIL:
-          this.updateSoil();
-          break;
-        case Mode.RAIN:
-          this.updateRain();
-          break;
+      if (this.static == true) {
+        return;
       }
-    }
 
-    updateMist() {
-      // Movement and interaction logic for MIST
       let dx = Math.floor(Math.random() * 3) - 1; // Results in -1, 0, or 1
       let dy = Math.floor(Math.random() * 3) - 1; // Results in -1, 0, or 1
+
+  // Check for edge cells
+  if (this.pos.x <= 0 || this.pos.x >= cols - 1 || this.pos.y <= 0 || this.pos.y >= rows - 1) {
+    this.static = true; // Particle becomes static if it touches any edge
+  } 
+
 
       this.pos.x = Math.min(Math.max(this.pos.x + dx, 0), cols - 1);
       this.pos.y = Math.min(Math.max(this.pos.y + dy, 0), rows - 1);
@@ -106,34 +83,29 @@ document.addEventListener("DOMContentLoaded", async () => {
       );
       for (const item of items) {
         if (
+          item.static == true && // Ensure it's a static particle
           item.id !== this.id && // Ensure it's not the same particle
           Math.abs(item.pos.x - this.pos.x) <= 1 && // Check x within +/- 1
           Math.abs(item.pos.y - this.pos.y) <= 1 // Check y within +/- 1
         ) {
-          // Interaction logic for MIST
+          this.static = true;
         }
       }
     }
+  }
 
-    updateLife() {
-      // Movement and interaction logic for LIFE
-    }
+  // Generate 1 particle placed in the center
+  let centerParticle = new Particle(Math.floor(cols / 2), Math.floor(rows / 2));
+  centerParticle.static = true;
+  particles.push(centerParticle);
 
-    updateFuel() {
-      // Movement and interaction logic for FUEL
-    }
-
-    updateFire() {
-      // Movement and interaction logic for FIRE
-    }
-
-    updateSoil() {
-      // Movement and interaction logic for SOIL
-    }
-
-    updateRain() {
-      // Movement and interaction logic for RAIN
-    }
+  // Generate four static particles randomly placed
+  for (let i = 0; i < 4; i++) {
+    let x = Math.floor(Math.random() * cols);
+    let y = Math.floor(Math.random() * rows);
+    let staticParticle = new Particle(x, y);
+    staticParticle.static = true;
+    particles.push(staticParticle);
   }
 
   // Generate 1000 particles in random positions
