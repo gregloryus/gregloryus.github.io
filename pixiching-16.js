@@ -57,10 +57,10 @@ document.addEventListener("DOMContentLoaded", async () => {
 
   // let verticalWindChance = 0.5; // % chance of vertical wind
 
-  let scaleSize = 10;
+  let scaleSize = 20;
   let cols = Math.floor(window.innerWidth / scaleSize);
   let rows = Math.floor(window.innerHeight / scaleSize);
-  let NUM_OF_STARTER_PARTICLES = 3333;
+  let NUM_OF_STARTER_PARTICLES = 40;
   // let NUM_OF_STARTER_PARTICLES = Math.floor((cols * rows) / 10);
   let elapsed = 0;
   let idCounter = 1;
@@ -111,13 +111,33 @@ document.addEventListener("DOMContentLoaded", async () => {
       app.stage.addChild(this.sprite);
     }
 
+    updateQuadTree() {
+      // Add new position to quadtree; let old position remain, as the entire quadtree is cleared each frame.
+      quadTree.addItem(this.pos.x, this.pos.y, this);
+    }
+
     moveRel(x, y) {
       let newX = this.pos.x + x;
       let newY = this.pos.y + y;
 
-      // Prevent movement off the canvas edges
-      if (newX >= 0 && newX < cols) this.pos.x = newX;
-      if (newY >= 0 && newY < rows) this.pos.y = newY;
+      // let newX = (cols + this.pos.x + x) % cols;
+      // let newY = (rows + this.pos.y + y) % rows;
+
+      // Check if new position is within bounds and not occupied
+      if (
+        newX >= 0 &&
+        newX < cols &&
+        newY >= 0 &&
+        newY < rows &&
+        !isOccupied(newX, newY)
+      ) {
+        // Update position
+        this.pos.x = newX;
+        this.pos.y = newY;
+
+        // Update position in quadtree immediately
+        this.updateQuadTree();
+      }
     }
 
     moveUp() {
@@ -128,9 +148,19 @@ document.addEventListener("DOMContentLoaded", async () => {
     }
 
     moveDownLeft() {
+      if (this.pos.y >= rows - 1 && this.pos.x <= 0) {
+        console.log(`Bottom left corner reached by particle ${this.id}`);
+        // Handle corner case
+        return;
+      }
       this.moveRel(-1, 1);
     }
     moveDownRight() {
+      if (this.pos.y >= rows - 1 && this.pos.x >= cols - 1) {
+        console.log(`Bottom right corner reached by particle ${this.id}`);
+        // Handle corner case
+        return;
+      }
       this.moveRel(1, 1);
     }
 
@@ -374,55 +404,59 @@ document.addEventListener("DOMContentLoaded", async () => {
     }
 
     updateRain() {
-      // If water cannot fall straight down, it will try to fall/move in the current falling direction
-      // If it cannot move in the current falling direction, it will switch direction
-      if (this.isFalling == true && this.pos.y < rows) {
-        if (this.downOccupied() == false) {
-          this.moveDown();
-          this.fallingDirection = null; // reset the falling direction when moving down
-        } else {
-          if (this.fallingDirection === null) {
-            // randomly choose a falling direction if none has been set
-            this.fallingDirection = Math.random() < 0.5 ? "left" : "right";
-          }
-
-          if (this.fallingDirection === "left") {
-            if (this.downLeftOccupied() == false) {
-              this.moveDownLeft();
-            } else if (this.leftOccupied() == false) {
-              this.moveLeft();
-            } else {
-              // switch direction if it cannot move left
-              this.fallingDirection = "right";
-            }
+      // Before trying to move down, check if we're at the bottom
+      if (this.pos.y >= rows - 1) {
+        this.isFalling = false; // Stop falling
+        // Optional: Handle lateral movement or spreading here
+      } else {
+        // If water cannot fall straight down, it will try to fall/move in the current falling direction
+        // If it cannot move in the current falling direction, it will switch direction
+        if (this.isFalling == true && this.pos.y < rows) {
+          if (this.downOccupied() == false) {
+            this.moveDown();
+            this.fallingDirection = null; // reset the falling direction when moving down
           } else {
-            // fallingDirection === 'right'
-            if (this.downRightOccupied() == false) {
-              this.moveDownRight();
-            } else if (this.rightOccupied() == false) {
-              this.moveRight();
+            if (this.fallingDirection === null) {
+              // randomly choose a falling direction if none has been set
+              this.fallingDirection = Math.random() < 0.5 ? "left" : "right";
+            }
+
+            if (this.fallingDirection === "left") {
+              if (this.downLeftOccupied() == false) {
+                this.moveDownLeft();
+              } else if (this.leftOccupied() == false) {
+                this.moveLeft();
+              } else {
+                // switch direction if it cannot move left
+                this.fallingDirection = "right";
+              }
             } else {
-              // switch direction if it cannot move right
-              this.fallingDirection = "left";
+              // fallingDirection === 'right'
+              if (this.downRightOccupied() == false) {
+                this.moveDownRight();
+              } else if (this.rightOccupied() == false) {
+                this.moveRight();
+              } else {
+                // switch direction if it cannot move right
+                this.fallingDirection = "left";
+              }
             }
           }
         }
-      } else {
-        this.isFalling = false; // Stop falling if it reaches the bottom
-      }
 
-      // Update sprite position accordingly
-      this.sprite.x = Math.floor(this.pos.x * scaleSize);
-      this.sprite.y = Math.floor(this.pos.y * scaleSize);
+        // Update sprite position accordingly
+        this.sprite.x = Math.floor(this.pos.x * scaleSize);
+        this.sprite.y = Math.floor(this.pos.y * scaleSize);
 
-      // let heightFactor = 1 - this.pos.y / rows; // Inversely correlates with height: 1 at top, 0 at bottom
-      // let adjustedRAINtoMIST = RAINtoMIST * heightFactor * 10; // Increases transformation chance the higher the particle is
+        // let heightFactor = 1 - this.pos.y / rows; // Inversely correlates with height: 1 at top, 0 at bottom
+        // let adjustedRAINtoMIST = RAINtoMIST * heightFactor * 10; // Increases transformation chance the higher the particle is
 
-      // First, check if the space directly above is empty
-      if (!this.upOccupied()) {
-        // Then, apply the gate logic for possible transformation
-        if (Math.random() < RAINtoMIST) {
-          this.setMode(Mode.MIST);
+        // First, check if the space directly above is empty
+        if (!this.upOccupied()) {
+          // Then, apply the gate logic for possible transformation
+          if (Math.random() < RAINtoMIST) {
+            this.setMode(Mode.MIST);
+          }
         }
       }
     }
@@ -435,29 +469,28 @@ document.addEventListener("DOMContentLoaded", async () => {
   const mistXEnd = Math.floor(mistXStart + cols / 3);
 
   // Generate MIST particles in the chosen third
-  for (let i = 0; i < NUM_OF_STARTER_PARTICLES / 3; i++) {
+  for (let i = 0; i < NUM_OF_STARTER_PARTICLES; i++) {
     let x = Math.floor(Math.random() * (mistXEnd - mistXStart)) + mistXStart;
     let y = Math.floor(Math.random() * (rows / 3)); // Upper third for y
     let particle = new Particle(x, y);
-    particle.setMode(Mode.MIST);
+    particle.setMode(Mode.RAIN);
     particles.push(particle);
   }
 
-  // Determine the horizontal zone for SOIL
-  const soilZone = Math.floor(Math.random() * 3); // 0: left, 1: middle, 2: right
-  const soilXStart = Math.floor(soilZone * (cols / 3));
-  const soilXEnd = Math.floor(soilXStart + cols / 3);
+  // // Determine the horizontal zone for SOIL
+  // const soilZone = Math.floor(Math.random() * 3); // 0: left, 1: middle, 2: right
+  // const soilXStart = Math.floor(soilZone * (cols / 3));
+  // const soilXEnd = Math.floor(soilXStart + cols / 3);
 
-  // Generate SOIL particles in the chosen third
-  for (let i = 0; i < NUM_OF_STARTER_PARTICLES / 3; i++) {
-    let x = Math.floor(Math.random() * (soilXEnd - soilXStart)) + soilXStart;
-    let y = Math.floor(Math.random() * (rows / 3)) + 2 * (rows / 3); // Bottom third for y
-    let particle = new Particle(x, y);
-    particle.setMode(Mode.SOIL);
-    particles.push(particle);
-  }
+  // // Generate SOIL particles in the chosen third
+  // for (let i = 0; i < NUM_OF_STARTER_PARTICLES / 3; i++) {
+  //   let x = Math.floor(Math.random() * (soilXEnd - soilXStart)) + soilXStart;
+  //   let y = Math.floor(Math.random() * (rows / 3)) + 2 * (rows / 3); // Bottom third for y
+  //   let particle = new Particle(x, y);
+  //   particle.setMode(Mode.SOIL);
+  //   particles.push(particle);
+  // }
 
-  // Update and render loop
   app.ticker.add(() => {
     quadTree.clear();
     particles.forEach((particle) => {
