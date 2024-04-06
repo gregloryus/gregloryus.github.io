@@ -20,7 +20,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     DECAY: 0xffff00, // Yellow
     FLAME: 0xff4500, // Red
     EARTH: 0x80461b, // Russet
-    WATER: "Blue",
+    WATER: "Aqua",
   };
 
   const modeTextures = Object.entries(colors).reduce((acc, [mode, color]) => {
