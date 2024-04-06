@@ -586,7 +586,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   const centerSeventhEndX = Math.floor((cols / 7) * 4);
 
   // Generate VAPOR particles within this center seventh, placed in the upper third of the canvas
-  for (let i = 0; i < NUM_OF_STARTER_PARTICLES / 2; i++) {
+  for (let i = 0; i < NUM_OF_STARTER_PARTICLES; i++) {
     let x =
       Math.floor(Math.random() * (centerSeventhEndX - centerSeventhStartX)) +
       centerSeventhStartX;
