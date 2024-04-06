@@ -15,12 +15,12 @@ document.addEventListener("DOMContentLoaded", async () => {
 
   // Define colors for each mode
   const colors = {
-    VAPOR: "White",
+    VAPOR: "Aqua",
     PLANT: 0x008000, // Green
     DECAY: 0xffff00, // Yellow
     FLAME: 0xff4500, // Red
     EARTH: 0x80461b, // Russet
-    WATER: "Aqua",
+    WATER: "Blue",
   };
 
   const modeTextures = Object.entries(colors).reduce((acc, [mode, color]) => {
