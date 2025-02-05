@@ -554,7 +554,7 @@ PlantCell.prototype.updateVisuals = function () {
   if (this.isExtra()) {
     if (!this.extraOverlay) {
       const overlay = new PIXI.Graphics();
-      overlay.beginFill(0xffff00, 0.2);
+      overlay.beginFill(0xffff00, 0.16);
       overlay.drawRect(0, 0, scaleSize * 3, scaleSize * 3);
       overlay.endFill();
       overlay.x = this.sprite.x - scaleSize;
