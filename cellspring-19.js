@@ -3,14 +3,16 @@ const CONSTANTS = {
   // Core energy parameters
   ENERGY: {
     DEFAULT_CAPACITY: 10,
-    SEED_ENERGY: 100,
-    SEED_CAPACITY: 100,
+    SEED_ENERGY: 10,
+    SEED_CAPACITY: 10,
     SPROUT_THRESHOLD: 5,
     GROWTH_COST: 3,
     MAINTENANCE_INTERVAL: 60,
     MAINTENANCE_COST: 1,
-    COLLECTION_CHANCE: 0.01, // 1/100 chance per empty cardinal direction
+    COLLECTION_CHANCE: 0.03, // Approximately 1/33.7
     LEAF_MULTIPLIER: 1.5,
+    AIRBORNE_STEPS: 16, // New constant for seed dispersal
+    DEFAULT_LIFESPAN: 1000, // Default lifespan in frames
   },
 
   // Growth parameters
@@ -32,6 +34,7 @@ const CONSTANTS = {
   PERFORMANCE: {
     FAST_FORWARD_FACTOR: 10,
     FPS_TEXT_SIZE: 24,
+    SLOW_MOTION_FPS: 6, // New constant for slow motion
   },
 };
 
@@ -40,6 +43,9 @@ let app, cellTextures, cells, occupancyGrid, scaleSize, idCounter;
 let rows, cols, frame;
 let fastForward, fastForwardFactor, lastRenderTime;
 let fpsText, countText;
+let paused = false;
+let slowMotion = false;
+let lastUpdateTime = performance.now();
 
 // Initialize global variables
 idCounter = 1;
@@ -112,84 +118,11 @@ document.addEventListener("DOMContentLoaded", async () => {
   occupancyGrid = new OccupancyGrid(cols, rows);
   lastRenderTime = performance.now();
 
-  // Initialize the desired number of seeds evenly spaced out.
-  addInitialSeeds(NUM_STARTER_SEEDS);
-
-  // Add UI controls
-  const controls = document.createElement("div");
-  controls.style.position = "fixed";
-  controls.style.top = "100px";
-  controls.style.left = "10px";
-  controls.style.backgroundColor = "rgba(0,0,0,0.7)";
-  controls.style.padding = "10px";
-  controls.style.color = "white";
-  controls.innerHTML = `
-    <h3>Plant Genes</h3>
-    <div>
-      <label>Internode Spacing: <input type="range" id="internodeSpacing" min="2" max="10" value="5"></label>
-      <span id="internodeValue">5</span>
-    </div>
-    <div>
-      <label>Bud Growth Limit: <input type="range" id="budGrowthLimit" min="5" max="30" value="16"></label>
-      <span id="budValue">16</span>
-    </div>
-    <button id="newSeed">New Seed</button>
-  `;
-  document.body.appendChild(controls);
-
-  // Add event listeners for controls
-  function updateGenes() {
-    const internodeSpacing = parseInt(
-      document.getElementById("internodeSpacing").value
-    );
-    const budGrowthLimit = parseInt(
-      document.getElementById("budGrowthLimit").value
-    );
-    document.getElementById("internodeValue").textContent = internodeSpacing;
-    document.getElementById("budValue").textContent = budGrowthLimit;
-
-    // Update all seeds
-    cells.forEach((cell) => {
-      if (cell instanceof Seed) {
-        cell.updateGenes({ internodeSpacing, budGrowthLimit });
-      }
-    });
-  }
-
-  document
-    .getElementById("internodeSpacing")
-    .addEventListener("input", updateGenes);
-  document
-    .getElementById("budGrowthLimit")
-    .addEventListener("input", updateGenes);
-  document.getElementById("newSeed").addEventListener("click", () => {
-    // Clear existing cells
-    cells.forEach((cell) => {
-      app.stage.removeChild(cell.sprite);
-      app.stage.removeChild(cell.energyText);
-      if (cell.geneText) {
-        app.stage.removeChild(cell.geneText);
-      }
-      if (cell.extraOverlay) {
-        app.stage.removeChild(cell.extraOverlay);
-      }
-    });
-
-    // Reset arrays and grid
-    cells = [];
-    occupancyGrid = new OccupancyGrid(cols, rows);
-
-    // Create new seed
-    const seed = new Seed(Math.floor(cols / 2), 0);
-    seed.createGeneDisplay();
-    seed.updateGenes({
-      internodeSpacing: parseInt(
-        document.getElementById("internodeSpacing").value
-      ),
-      budGrowthLimit: parseInt(document.getElementById("budGrowthLimit").value),
-    });
-    cells.push(seed);
-  });
+  // Keep the center seed setup:
+  cells = [];
+  occupancyGrid = new OccupancyGrid(cols, rows);
+  const seed = new Seed(Math.floor(cols / 2), Math.floor(rows / 2));
+  cells.push(seed);
 
   mainLoop();
 
@@ -198,6 +131,51 @@ document.addEventListener("DOMContentLoaded", async () => {
     if (e.key === "f") {
       fastForward = !fastForward;
     }
+    if (e.key === "s") {
+      slowMotion = !slowMotion;
+      paused = false; // Unpause when toggling slow motion
+    }
+    if (e.key === " ") {
+      // Spacebar
+      if (paused) {
+        // Advance one frame when paused
+        frame++;
+        cells.forEach((cell) => cell.update());
+      }
+      paused = !paused;
+      e.preventDefault(); // Prevent page scrolling
+    }
+  });
+
+  // Add click handler for cell inspection
+  app.view.addEventListener("click", (e) => {
+    // Get all unique seeds (plants)
+    const seeds = [...new Set(cells.map((cell) => cell.getPlantSeed()))];
+
+    seeds.forEach((seed) => {
+      const plantCells = cells.filter((cell) => cell.getPlantSeed() === seed);
+
+      console.log("\n=== Plant Report ===");
+      console.log("Plant Details:", {
+        seedAge: seed.age,
+        maturityAge: seed.maturityAge,
+        maturitySize: seed.maturitySize,
+        currentSize: plantCells.length,
+        position: { x: seed.pos.x, y: seed.pos.y },
+        genes: seed.genes,
+      });
+
+      console.log("Cell Details:");
+      plantCells.forEach((cell) => {
+        console.log(`- ${cell.type}:`, {
+          position: cell.pos,
+          energy: cell.currentEnergy,
+          isExtra: cell.isExtra(),
+          children: cell.children.length,
+          parent: cell.parent ? cell.parent.type : "none",
+        });
+      });
+    });
   });
 });
 
@@ -286,14 +264,8 @@ class PlantCell {
     occupancyGrid.set(x, y, this);
 
     // Energy system
-    this.energyCapacity =
-      type === "SEED"
-        ? CONSTANTS.ENERGY.SEED_CAPACITY
-        : CONSTANTS.ENERGY.DEFAULT_CAPACITY;
-    this.currentEnergy =
-      type === "SEED"
-        ? CONSTANTS.ENERGY.SEED_ENERGY
-        : Math.floor(this.energyCapacity / 2);
+    this.energyCapacity = CONSTANTS.ENERGY.DEFAULT_CAPACITY;
+    this.currentEnergy = 1; // Start with 1 energy instead of half capacity
     this.lastMaintenanceTick = frame;
 
     // Energy text display
@@ -311,6 +283,14 @@ class PlantCell {
     app.stage.addChild(this.energyText);
 
     this.extraOverlay = null;
+    this.dead = false;
+
+    this.age = 0; // Add age tracking
+
+    // Get lifespan from genes if parent exists
+    this.lifespan = parent
+      ? parent.getPlantSeed().genes.cellLifespan
+      : CONSTANTS.ENERGY.DEFAULT_LIFESPAN;
   }
 
   getPlantSeed() {
@@ -334,14 +314,23 @@ class PlantCell {
       this.pos.y
     );
 
+    // Add debug logging for a specific cell
+    if (this.pos.x === 14 && this.pos.y === 10) {
+      // adjust coordinates as needed
+      console.log(
+        `Frame ${frame}: Cell at (14,10) checking ${emptySpaces} empty spaces`
+      );
+    }
+
     // Each empty space has base collection chance
     for (let i = 0; i < emptySpaces; i++) {
-      if (
-        Math.random() <
-        CONSTANTS.ENERGY.COLLECTION_CHANCE *
-          (this.type === "LEAF" ? CONSTANTS.ENERGY.LEAF_MULTIPLIER : 1)
-      ) {
+      if (Math.random() < CONSTANTS.ENERGY.COLLECTION_CHANCE) {
         this.currentEnergy++;
+        if (this.pos.x === 14 && this.pos.y === 10) {
+          console.log(
+            `Frame ${frame}: Energy collected! New energy: ${this.currentEnergy}`
+          );
+        }
       }
     }
   }
@@ -361,13 +350,18 @@ class PlantCell {
       (cell) => cell !== null
     );
 
-    // First handle excess energy
+    // First handle excess energy - distribute ALL excess
     if (this.isExtra()) {
-      for (const neighbor of connections) {
-        if (!neighbor.isExtra()) {
+      const excess = this.currentEnergy - this.energyCapacity;
+      for (let i = 0; i < excess; i++) {
+        const needyNeighbors = connections.filter((n) => !n.isExtra());
+        if (needyNeighbors.length > 0) {
+          const neighbor =
+            needyNeighbors[Math.floor(Math.random() * needyNeighbors.length)];
           this.currentEnergy--;
           neighbor.currentEnergy++;
-          return;
+        } else {
+          break; // No needy neighbors left
         }
       }
     }
@@ -382,96 +376,191 @@ class PlantCell {
       }
     }
   }
+
+  die() {
+    if (this.dead) return; // Prevent multiple deaths
+    this.dead = true;
+
+    // Remove from occupancy grid
+    occupancyGrid.remove(this.pos.x, this.pos.y);
+
+    // Remove visual elements
+    app.stage.removeChild(this.sprite);
+    app.stage.removeChild(this.energyText);
+    if (this.extraOverlay) {
+      app.stage.removeChild(this.extraOverlay);
+    }
+
+    // Remove from parent's children
+    if (this.parent) {
+      this.parent.children = this.parent.children.filter(
+        (child) => child !== this
+      );
+    }
+
+    // Kill all children (they're now disconnected)
+    this.children.forEach((child) => child.die());
+
+    // Remove from cells array
+    cells = cells.filter((cell) => cell !== this);
+
+    // If this is a seed, check if all cells are dead
+    if (this.type === "SEED") {
+      const plantCells = cells.filter((cell) => cell.getPlantSeed() === this);
+      if (plantCells.length === 0) {
+        console.log("Plant has died completely");
+      }
+    }
+  }
+
+  checkDeath() {
+    if (
+      this.currentEnergy <= 0 ||
+      (this.type !== "SEED" && this.age >= this.lifespan)
+    ) {
+      this.die();
+    }
+  }
+
+  update() {
+    // Add age check to all cell updates
+    this.checkDeath();
+    this.collectEnergy();
+    this.payMaintenanceCost();
+    this.distributeEnergy();
+    this.updateVisuals();
+
+    if (this.type !== "SEED") {
+      // Don't age seeds
+      this.age++;
+    }
+  }
 }
 
 class Seed extends PlantCell {
   constructor(x, y) {
     super(x, y, null, "SEED");
-    // Add genes object
+    this.airborne = true;
+    this.stepsTaken = 0;
+    this.age = 0;
+    this.maturityAge = null;
+    this.maturitySize = null;
     this.genes = {
-      internodeSpacing: 5, // Default value
-      budGrowthLimit: 16, // Default value
+      internodeSpacing: 8,
+      budGrowthLimit: 4,
+      cellLifespan: CONSTANTS.ENERGY.DEFAULT_LIFESPAN, // Add lifespan to genes
     };
-    this.landed = false;
-    this.growing = false;
-    this.energyCapacity = 1;
-    this.currentEnergy = 35;
+
+    // Remove energy-related properties entirely
+    this.energyCapacity = 0;
+    this.currentEnergy = 0;
+
+    // Remove the energy text for seeds
+    app.stage.removeChild(this.energyText);
+    this.energyText = null;
   }
 
-  // Add method to update genes
-  updateGenes(newGenes) {
-    this.genes = { ...this.genes, ...newGenes };
-    // Trigger UI update if needed
-    this.updateGeneDisplay();
+  // Override the visual update for seeds
+  updateVisuals() {
+    // Just update position and alpha, no energy display
+    this.sprite.alpha = this.airborne ? 0.8 : 0.6; // Make airborne seeds slightly more visible
   }
 
-  // Add method to create gene display
-  createGeneDisplay() {
-    const style = new PIXI.TextStyle({
-      fontFamily: "Arial",
-      fontSize: 12,
-      fill: "white",
-    });
-
-    this.geneText = new PIXI.Text("", style);
-    this.geneText.x = this.sprite.x;
-    this.geneText.y = this.sprite.y - 20;
-    app.stage.addChild(this.geneText);
-    this.updateGeneDisplay();
-  }
-
-  updateGeneDisplay() {
-    if (this.geneText) {
-      this.geneText.text = `IS:${this.genes.internodeSpacing} BL:${this.genes.budGrowthLimit}`;
-    }
-  }
-
-  // Modify existing methods to pass genes to children
-  startGrowing() {
-    if (this.currentEnergy >= CONSTANTS.ENERGY.SPROUT_THRESHOLD) {
-      this.growing = true;
-      const budPos = { x: this.pos.x, y: this.pos.y - 1 };
-      if (!occupancyGrid.get(budPos.x, budPos.y)) {
-        const bud = new BudCell(budPos.x, budPos.y, this);
-        bud.inheritGenes(this.genes); // Pass genes to bud
-        this.children.push(bud);
-        cells.push(bud);
-      }
-    }
+  // Override all energy-related methods to do nothing
+  collectEnergy() {}
+  payMaintenanceCost() {}
+  distributeEnergy() {}
+  isExtra() {
+    return false;
   }
 
   update() {
-    if (!this.landed) {
-      const newY = Math.floor(this.pos.y) + 1;
-      if (newY >= rows - 1) {
-        this.pos.y = rows - 1;
-        this.landed = true;
-        this.sprite.y = this.pos.y * scaleSize;
-      } else {
-        this.pos.y = newY;
-        this.sprite.y = newY * scaleSize;
+    this.age++;
+
+    // Check for reproduction if not airborne
+    if (!this.airborne && this.canReproduce()) {
+      // Get all non-seed cells belonging to this plant
+      const plantCells = cells.filter(
+        (cell) => cell.getPlantSeed() === this && cell.type !== "SEED"
+      );
+      const plantSize = plantCells.length;
+
+      // Record maturity stats if this is the first reproduction
+      if (this.maturityAge === null) {
+        this.maturityAge = this.age;
+        this.maturitySize = plantSize;
       }
-    } else if (
-      !this.growing &&
-      this.currentEnergy >= CONSTANTS.ENERGY.SPROUT_THRESHOLD
-    ) {
-      this.startGrowing();
+
+      // Create new seed
+      const newSeed = new Seed(this.pos.x, this.pos.y);
+      newSeed.genes = { ...this.genes }; // Inherit genes
+      cells.push(newSeed);
+
+      console.log("New seed produced!", {
+        parentAge: this.age,
+        parentMaturityAge: this.maturityAge,
+        parentMaturitySize: this.maturitySize,
+        plantSize: plantSize,
+        position: { x: this.pos.x, y: this.pos.y },
+      });
+
+      // Drain energy from existing plant
+      plantCells.forEach((cell) => {
+        cell.currentEnergy = 1;
+      });
     }
 
-    // If the seed has sprouted (has children), gradually transfer energy.
-    if (this.landed && this.children.length > 0) {
-      this.distributeEnergy();
+    // Continue with normal seed update
+    if (this.airborne) {
+      if (this.stepsTaken >= CONSTANTS.ENERGY.AIRBORNE_STEPS) {
+        this.airborne = false;
+        this.startGrowing();
+        return;
+      }
+
+      // Random walk
+      const directions = [
+        { dx: 0, dy: -1 },
+        { dx: 1, dy: 0 },
+        { dx: 0, dy: 1 },
+        { dx: -1, dy: 0 },
+      ];
+      const dir = directions[Math.floor(Math.random() * directions.length)];
+
+      const newX = Math.min(Math.max(0, this.pos.x + dir.dx), cols - 1);
+      const newY = Math.min(Math.max(0, this.pos.y + dir.dy), rows - 1);
+
+      // Update position
+      occupancyGrid.remove(this.pos.x, this.pos.y);
+      this.pos.x = newX;
+      this.pos.y = newY;
+      this.sprite.x = newX * scaleSize;
+      this.sprite.y = newY * scaleSize;
+      occupancyGrid.set(newX, newY, this);
+
+      this.stepsTaken++;
     }
 
     this.updateVisuals();
   }
 
-  updateVisuals() {
-    this.energyText.text = String(Math.floor(this.currentEnergy));
-    this.energyText.x = this.sprite.x + scaleSize / 2;
-    this.energyText.y = this.sprite.y + scaleSize / 2;
-    const energyRatio = this.currentEnergy / this.energyCapacity;
-    this.sprite.alpha = 0.6 + Math.min(energyRatio, 1) * 0.4;
+  canReproduce() {
+    // Get all non-seed cells belonging to this plant
+    const plantCells = cells.filter(
+      (cell) => cell.getPlantSeed() === this && cell.type !== "SEED"
+    );
+    // Check if ALL cells are extra energized
+    return plantCells.length > 1 && plantCells.every((cell) => cell.isExtra());
+  }
+
+  startGrowing() {
+    const budPos = { x: this.pos.x, y: this.pos.y - 1 };
+    if (!occupancyGrid.get(budPos.x, budPos.y)) {
+      const bud = new BudCell(budPos.x, budPos.y, this);
+      bud.inheritGenes(this.genes);
+      this.children.push(bud);
+      cells.push(bud);
+    }
   }
 }
 
@@ -533,7 +622,18 @@ class BudCell extends PlantCell {
     this.payMaintenanceCost();
     this.distributeEnergy();
 
-    if (this.currentEnergy >= CONSTANTS.GROWTH.MIN_ENERGY_TO_GROW) {
+    // Change growth condition to require full energy
+    if (this.currentEnergy >= this.energyCapacity) {
+      // Check if growth is possible in any direction
+      const canGrowUp =
+        this.pos.y > 0 && !occupancyGrid.get(this.pos.x, this.pos.y - 1);
+
+      if (!canGrowUp && this.growthCount > 0) {
+        console.log("Bud blocked, plant dying");
+        this.getPlantSeed().die();
+        return;
+      }
+
       this.grow();
     }
 
@@ -556,37 +656,37 @@ class BudCell extends PlantCell {
 
     this.growthCount++;
 
+    // Create new cell (either node or stem)
+    let newCell;
     if (
       this.growthCount > 0 &&
       this.growthCount % this.genes.internodeSpacing === 0
     ) {
-      const node = new NodeCell(this.pos.x, this.pos.y, this.parent);
-      node.inheritGenes(this.genes);
-      this.parent.children = this.parent.children.filter(
-        (child) => child !== this
-      );
-      this.parent.children.push(node);
-      cells.push(node);
-      node.createLeafBuds();
+      newCell = new NodeCell(this.pos.x, this.pos.y, this.parent);
+      newCell.inheritGenes(this.genes);
+      newCell.createLeafBuds();
     } else {
-      const stem = new StemCell(this.pos.x, this.pos.y, this.parent);
-      this.parent.children = this.parent.children.filter(
-        (child) => child !== this
-      );
-      this.parent.children.push(stem);
-      cells.push(stem);
+      newCell = new StemCell(this.pos.x, this.pos.y, this.parent);
     }
 
+    // Update parent relationships
+    if (this.parent) {
+      this.parent.children = this.parent.children.filter(
+        (child) => child !== this
+      );
+      this.parent.children.push(newCell);
+    }
+    newCell.children.push(this);
+    this.parent = newCell;
+
+    // Add to cells array
+    cells.push(newCell);
+
+    // Move bud up
     occupancyGrid.remove(this.pos.x, this.pos.y);
     this.pos.y = newY;
     this.sprite.y = this.pos.y * scaleSize;
     occupancyGrid.set(this.pos.x, this.pos.y, this);
-
-    const newParent = occupancyGrid.get(this.pos.x, this.pos.y + 1);
-    if (newParent) {
-      this.parent = newParent;
-      newParent.children.push(this);
-    }
 
     this.currentEnergy -= CONSTANTS.ENERGY.GROWTH_COST;
   }
@@ -675,14 +775,34 @@ PlantCell.prototype.updateVisuals = function () {
 };
 
 function mainLoop() {
-  const updatesThisFrame = fastForward ? fastForwardFactor : 1;
+  const now = performance.now();
+  const timeSinceLastUpdate = now - lastUpdateTime;
 
-  for (let i = 0; i < updatesThisFrame; i++) {
-    frame++;
-    cells.forEach((cell) => cell.update());
+  // Determine if we should update this frame
+  let shouldUpdate = false;
+  if (!paused) {
+    if (slowMotion) {
+      // In slow motion, update at 6 FPS
+      shouldUpdate =
+        timeSinceLastUpdate >= 1000 / CONSTANTS.PERFORMANCE.SLOW_MOTION_FPS;
+    } else {
+      // Normal speed, update every frame
+      shouldUpdate = true;
+    }
   }
 
-  const now = performance.now();
+  if (shouldUpdate) {
+    const updatesThisFrame = fastForward ? fastForwardFactor : 1;
+
+    for (let i = 0; i < updatesThisFrame; i++) {
+      frame++;
+      cells.forEach((cell) => cell.update());
+    }
+
+    lastUpdateTime = now;
+  }
+
+  // Always update FPS counter and render
   const fps = 1000 / (now - lastRenderTime);
   lastRenderTime = now;
 
