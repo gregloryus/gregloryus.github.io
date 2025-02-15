@@ -11,8 +11,10 @@ const CONSTANTS = {
     MAINTENANCE_COST: 1,
     COLLECTION_CHANCE: 0.03, // Approximately 1/33.7
     LEAF_MULTIPLIER: 3,
-    AIRBORNE_STEPS: 34, // New constant for seed dispersal
-    DEFAULT_LIFESPAN: 3333, // Default lifespan in frames
+    AIRBORNE_STEPS: 100, // New constant for seed dispersal
+    DEFAULT_LIFESPAN: 1000, // Default lifespan in frames
+    REPRODUCTION_ENERGY_KEEP_RATIO: 0.3, // Keep 30% of energy after reproduction
+    REPRODUCTION_ENERGY_MINIMUM: 3, // Minimum energy to keep after reproduction
   },
 
   // Growth parameters
@@ -111,7 +113,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   app.stage.addChild(countText);
 
   // Core simulation parameters
-  scaleSize = 8;
+  scaleSize = 2;
   cols = Math.floor(window.innerWidth / scaleSize);
   rows = Math.floor(window.innerHeight / scaleSize);
   cells = [];
@@ -408,6 +410,13 @@ class PlantCell {
       this.currentEnergy <= 0 ||
       (this.type !== "SEED" && this.age >= this.lifespan)
     ) {
+      const seed = this.getPlantSeed();
+      if (seed) {
+        seed.deathReason =
+          this.currentEnergy <= 0
+            ? "energy depletion"
+            : `cell age limit (${this.age} frames)`;
+      }
       this.die();
     }
   }
@@ -495,6 +504,7 @@ class Seed {
     this.maturityAge = null;
     this.maturitySize = null;
     this.dead = false;
+    this.deathReason = null; // Add this to track death reason
 
     // Setup sprite (but don't register in occupancy grid yet)
     this.sprite = new PIXI.Sprite(cellTextures[this.type]);
@@ -633,17 +643,15 @@ class Seed {
       newSeed.genes = { ...this.genes }; // Inherit genes
       cells.push(newSeed);
 
-      // console.log("New seed produced!", {
-      //   parentAge: this.age,
-      //   parentMaturityAge: this.maturityAge,
-      //   parentMaturitySize: this.maturitySize,
-      //   plantSize: plantSize,
-      //   position: { x: this.pos.x, y: this.pos.y },
-      // });
-
-      // Drain energy from existing plant
+      // Drain energy from existing plant more gradually
       plantCells.forEach((cell) => {
-        cell.currentEnergy = 1;
+        const energyToKeep = Math.max(
+          Math.ceil(
+            cell.currentEnergy * CONSTANTS.ENERGY.REPRODUCTION_ENERGY_KEEP_RATIO
+          ),
+          CONSTANTS.ENERGY.REPRODUCTION_ENERGY_MINIMUM
+        );
+        cell.currentEnergy = energyToKeep;
       });
     }
 
@@ -660,14 +668,36 @@ class Seed {
   die() {
     if (this.dead) return;
 
-    // console.log(
-    //   `Plant dying at (${this.pos.x}, ${this.pos.y}). Stack trace:`,
-    //   new Error().stack
-    // );
+    // If death reason wasn't set, determine it from state
+    if (!this.deathReason) {
+      if (this.airborne) {
+        this.deathReason = "died while airborne";
+      } else if (this.children.length === 0) {
+        this.deathReason = "failed to grow";
+      } else {
+        const plantCells = cells.filter((cell) => cell.getPlantSeed() === this);
+        const dyingCell = plantCells.find(
+          (cell) => cell.currentEnergy <= 0 || cell.age >= cell.lifespan
+        );
+        if (dyingCell) {
+          this.deathReason =
+            dyingCell.currentEnergy <= 0
+              ? "energy depletion"
+              : `cell age limit (${dyingCell.age} frames)`;
+        } else {
+          this.deathReason = "unknown cause";
+        }
+      }
+    }
+
+    console.log(
+      `Seed at (${this.pos.x}, ${this.pos.y}) ${this.deathReason} with ${
+        cells.filter((cell) => cell.getPlantSeed() === this).length
+      } cells`
+    );
 
     // Immediately mark all plant cells as dead to prevent further updates
     const allPlantCells = cells.filter((cell) => cell.getPlantSeed() === this);
-    // console.log(`Found ${allPlantCells.length} cells to clean up`);
 
     allPlantCells.forEach((cell) => (cell.dead = true));
 

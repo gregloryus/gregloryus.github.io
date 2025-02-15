@@ -11,8 +11,10 @@ const CONSTANTS = {
     MAINTENANCE_COST: 1,
     COLLECTION_CHANCE: 0.03, // Approximately 1/33.7
     LEAF_MULTIPLIER: 3,
-    AIRBORNE_STEPS: 34, // New constant for seed dispersal
-    DEFAULT_LIFESPAN: 3333, // Default lifespan in frames
+    AIRBORNE_STEPS: 100, // New constant for seed dispersal
+    DEFAULT_LIFESPAN: 1000, // Default lifespan in frames
+    REPRODUCTION_ENERGY_KEEP_RATIO: 0.3, // Keep 30% of energy after reproduction
+    REPRODUCTION_ENERGY_MINIMUM: 3, // Minimum energy to keep after reproduction
   },
 
   // Growth parameters
@@ -30,12 +32,21 @@ const CONSTANTS = {
     LEAF: { r: 0, g: 240, b: 0, alpha: 1.0 },
     LEAF_BUD: { r: 0, g: 200, b: 0, alpha: 1.0 },
     DYING_FLASH: { r: 255, g: 0, b: 0, alpha: 1.0 }, // New color for death flash
+    SUN: { r: 255, g: 255, b: 0, alpha: 1.0 }, // Ensure this exists
   },
 
   PERFORMANCE: {
     FAST_FORWARD_FACTOR: 10,
     FPS_TEXT_SIZE: 24,
     SLOW_MOTION_FPS: 6, // New constant for slow motion
+  },
+
+  SUN: {
+    MOVEMENT_MODES: {
+      SNAKE: "snake",
+      SWEEP: "sweep",
+    },
+    DEFAULT_MODE: "sweep", // Change this to switch default
   },
 };
 
@@ -47,7 +58,13 @@ let fpsText, countText;
 let paused = false;
 let slowMotion = false;
 let lastUpdateTime = performance.now();
-let showEnergyText = false; // New global setting
+let showEnergyText = true; // New global setting
+let sun; // Add sun reference
+let sunConfig = {
+  mode: "sweep", // 'snake' or 'sweep'
+  axis: "vertical", // 'vertical' or 'horizontal'
+  direction: 1, // 1 or -1
+};
 
 // Initialize global variables
 idCounter = 1;
@@ -111,7 +128,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   app.stage.addChild(countText);
 
   // Core simulation parameters
-  scaleSize = 8;
+  scaleSize = 16;
   cols = Math.floor(window.innerWidth / scaleSize);
   rows = Math.floor(window.innerHeight / scaleSize);
   cells = [];
@@ -120,9 +137,26 @@ document.addEventListener("DOMContentLoaded", async () => {
   occupancyGrid = new OccupancyGrid(cols, rows);
   lastRenderTime = performance.now();
 
-  // Keep the center seed setup:
-  cells = [];
-  occupancyGrid = new OccupancyGrid(cols, rows);
+  // Calculate grid dimensions
+  cols = Math.floor(window.innerWidth / scaleSize);
+  rows = Math.floor(window.innerHeight / scaleSize);
+
+  // Log world details
+  const ticksPerYear = cols * rows;
+  const totalSeconds = ticksPerYear / 60; // Assuming 60 ticks/second
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = Math.round(totalSeconds % 60);
+
+  console.log(`World initialized:
+  - Dimensions: ${cols}x${rows} cells
+  - Year length: ${ticksPerYear} ticks (${minutes}m ${seconds}s)
+  - Cell size: ${scaleSize}px`);
+
+  // Create sun first (now starts at 0,0)
+  sun = new Sun(sunConfig);
+  sun.updatePosition(0, 0); // Force initial position
+
+  // Create seed (now second particle)
   const seed = new Seed(Math.floor(cols / 2), Math.floor(rows / 2));
   cells.push(seed);
 
@@ -156,6 +190,24 @@ document.addEventListener("DOMContentLoaded", async () => {
           cell.energyText.visible = showEnergyText;
         }
       });
+    }
+    if (e.key === "m") {
+      // Press M to toggle movement mode
+      sun.toggleMovementMode();
+    }
+    if (e.key === "w") {
+      sunConfig.mode = sunConfig.mode === "snake" ? "sweep" : "snake";
+      resetSimulation();
+    }
+    if (e.key === "v") {
+      sunConfig.axis =
+        sunConfig.axis === "vertical" ? "horizontal" : "vertical";
+      resetSimulation();
+    }
+    if (e.key === "r") {
+      // Reverse direction
+      sunConfig.direction *= -1;
+      resetSimulation();
     }
   });
 
@@ -259,22 +311,43 @@ class OccupancyGrid {
   }
 }
 
-class PlantCell {
-  constructor(x, y, parent = null, type) {
+// New base class
+class Particle {
+  constructor(x, y, textureKey) {
     this.pos = { x, y };
-    this.parent = parent;
-    this.children = [];
-    this.type = type;
 
-    // Setup sprite
-    this.sprite = new PIXI.Sprite(cellTextures[this.type]);
-    this.sprite.x = Math.floor(x * scaleSize);
-    this.sprite.y = Math.floor(y * scaleSize);
+    // Visual setup
+    this.sprite = new PIXI.Sprite(cellTextures[textureKey]);
+    this.sprite.x = x * scaleSize;
+    this.sprite.y = y * scaleSize;
     this.sprite.scale.set(scaleSize, scaleSize);
     app.stage.addChild(this.sprite);
+  }
 
-    // Always register non-seed cells in the occupancy grid
-    occupancyGrid.set(x, y, this);
+  // Common interface methods
+  getPosition() {
+    return this.pos;
+  }
+
+  updatePosition(newX, newY) {
+    this.pos.x = newX;
+    this.pos.y = newY;
+    this.sprite.x = newX * scaleSize;
+    this.sprite.y = newY * scaleSize;
+  }
+
+  // To be overridden by subclasses
+  update() {
+    throw new Error("Update method must be implemented by subclass");
+  }
+}
+
+// Modified PlantCell to extend Particle
+class PlantCell extends Particle {
+  constructor(x, y, parent = null, type) {
+    super(x, y, type);
+    this.parent = parent;
+    this.children = [];
 
     // Energy system
     this.energyCapacity = CONSTANTS.ENERGY.DEFAULT_CAPACITY;
@@ -408,6 +481,13 @@ class PlantCell {
       this.currentEnergy <= 0 ||
       (this.type !== "SEED" && this.age >= this.lifespan)
     ) {
+      const seed = this.getPlantSeed();
+      if (seed) {
+        seed.deathReason =
+          this.currentEnergy <= 0
+            ? "energy depletion"
+            : `cell age limit (${this.age} frames)`;
+      }
       this.die();
     }
   }
@@ -483,25 +563,18 @@ class PlantCell {
   }
 }
 
-class Seed {
+class Seed extends PlantCell {
   constructor(x, y) {
-    this.pos = { x, y };
-    this.parent = null;
-    this.children = [];
-    this.type = "SEED";
+    super(x, y, null, "SEED");
     this.airborne = true;
     this.stepsTaken = 0;
     this.age = 0;
     this.maturityAge = null;
     this.maturitySize = null;
     this.dead = false;
-
-    // Setup sprite (but don't register in occupancy grid yet)
-    this.sprite = new PIXI.Sprite(cellTextures[this.type]);
-    this.sprite.x = Math.floor(x * scaleSize);
-    this.sprite.y = Math.floor(y * scaleSize);
-    this.sprite.scale.set(scaleSize, scaleSize);
-    app.stage.addChild(this.sprite);
+    this.deathReason = null;
+    this.currentEnergy = 0; // Start with 0 energy
+    this.hasTriggeredGrowth = false; // Add this flag
 
     this.genes = {
       internodeSpacing: 3,
@@ -510,67 +583,17 @@ class Seed {
     };
   }
 
-  getPlantSeed() {
-    return this; // Seeds always return themselves
-  }
-
-  canReproduce() {
-    // Get all non-seed cells belonging to this plant
-    const plantCells = cells.filter(
-      (cell) => cell.getPlantSeed() === this && cell.type !== "SEED"
-    );
-
-    // Check if there are any buds and if they've all reached their limits
-    const buds = plantCells.filter(
-      (cell) => cell instanceof BudCell || cell instanceof LeafBudCell
-    );
-
-    // Plant must have at least one bud and all buds must be fully grown
-    const isFullyGrown =
-      buds.length > 0 && buds.every((bud) => bud.growthLimitReached);
-
-    // Check if ALL cells are extra energized AND plant is fully grown
-    return isFullyGrown && plantCells.every((cell) => cell.isExtra());
-  }
-
   startGrowing() {
-    const budPos = { x: this.pos.x, y: this.pos.y - 1 };
-    if (!occupancyGrid.get(budPos.x, budPos.y)) {
-      const bud = new BudCell(budPos.x, budPos.y, this);
-      bud.inheritGenes(this.genes);
-      this.children.push(bud);
-      cells.push(bud);
-
-      // console.log(
-      //   `Seed at (${this.pos.x}, ${this.pos.y}) creating bud at (${budPos.x}, ${budPos.y})`
-      // );
-    } else {
-      // If blocked from growing, the seed should die
-      this.die();
+    if (!this.hasTriggeredGrowth) {
+      console.log("Seed has reached 10 energy and would grow now!");
+      this.hasTriggeredGrowth = true;
     }
-  }
-
-  checkNeighborsForLanding() {
-    // Check all 8 surrounding positions (Moore neighborhood)
-    for (let dx = -1; dx <= 1; dx++) {
-      for (let dy = -1; dy <= 1; dy++) {
-        if (dx === 0 && dy === 0) continue;
-        const nx = this.pos.x + dx;
-        const ny = this.pos.y + dy;
-        if (occupancyGrid.get(nx, ny)) {
-          return false; // Found a neighbor
-        }
-      }
-    }
-    return true; // No neighbors found
   }
 
   update() {
     if (this.dead) return;
-
     this.age++;
 
-    // Handle airborne movement
     if (this.airborne) {
       if (this.stepsTaken >= CONSTANTS.ENERGY.AIRBORNE_STEPS) {
         this.airborne = false;
@@ -607,103 +630,54 @@ class Seed {
 
       this.stepsTaken++;
     } else {
-      // If not airborne and has no children (failed to grow), die
-      if (this.children.length === 0) {
-        this.die();
-        return; // Stop processing immediately
+      // Grounded seed only distributes energy
+      this.distributeEnergy();
+
+      // Check if we should start growing
+      if (
+        this.currentEnergy >= CONSTANTS.ENERGY.SEED_CAPACITY &&
+        !this.hasTriggeredGrowth
+      ) {
+        this.startGrowing();
       }
-    }
-
-    // Check for reproduction if not airborne
-    if (!this.airborne && this.canReproduce()) {
-      // Get all non-seed cells belonging to this plant
-      const plantCells = cells.filter(
-        (cell) => cell.getPlantSeed() === this && cell.type !== "SEED"
-      );
-      const plantSize = plantCells.length;
-
-      // Record maturity stats if this is the first reproduction
-      if (this.maturityAge === null) {
-        this.maturityAge = this.age;
-        this.maturitySize = plantSize;
-      }
-
-      // Create new seed
-      const newSeed = new Seed(this.pos.x, this.pos.y);
-      newSeed.genes = { ...this.genes }; // Inherit genes
-      cells.push(newSeed);
-
-      // console.log("New seed produced!", {
-      //   parentAge: this.age,
-      //   parentMaturityAge: this.maturityAge,
-      //   parentMaturitySize: this.maturitySize,
-      //   plantSize: plantSize,
-      //   position: { x: this.pos.x, y: this.pos.y },
-      // });
-
-      // Drain energy from existing plant
-      plantCells.forEach((cell) => {
-        cell.currentEnergy = 1;
-      });
     }
 
     if (!this.dead) {
-      // Only update visuals if still alive
       this.updateVisuals();
     }
   }
 
-  updateVisuals() {
-    this.sprite.alpha = this.airborne ? 0.8 : 0.6;
+  checkNeighborsForLanding() {
+    // Check 8 surrounding cells for any existing plant material
+    for (let dx = -1; dx <= 1; dx++) {
+      for (let dy = -1; dy <= 1; dy++) {
+        if (dx === 0 && dy === 0) continue; // Skip self
+        const neighbor = occupancyGrid.get(this.pos.x + dx, this.pos.y + dy);
+        if (neighbor instanceof PlantCell) {
+          return false; // Found existing plant cell nearby
+        }
+      }
+    }
+    return true; // Safe to land
   }
 
-  die() {
-    if (this.dead) return;
-
-    // console.log(
-    //   `Plant dying at (${this.pos.x}, ${this.pos.y}). Stack trace:`,
-    //   new Error().stack
-    // );
-
-    // Immediately mark all plant cells as dead to prevent further updates
-    const allPlantCells = cells.filter((cell) => cell.getPlantSeed() === this);
-    // console.log(`Found ${allPlantCells.length} cells to clean up`);
-
-    allPlantCells.forEach((cell) => (cell.dead = true));
-
-    // Remove from occupancy grid if landed
-    if (!this.airborne) {
-      occupancyGrid.remove(this.pos.x, this.pos.y);
+  updateVisuals() {
+    if (this.dead) {
+      super.updateVisuals(); // Use normal behavior when dead
+      return;
     }
 
-    // Remove visual elements
-    app.stage.removeChild(this.sprite);
+    // Maintain seed color regardless of energy
+    this.sprite.texture = cellTextures.SEED;
+    this.sprite.alpha = 1.0;
 
-    // Clean up all cells belonging to this plant
-    allPlantCells.forEach((cell) => {
-      if (cell !== this) {
-        // Skip seed since we're already handling it
-        // Remove from occupancy grid
-        occupancyGrid.remove(cell.pos.x, cell.pos.y);
-
-        // Remove all visual elements
-        app.stage.removeChild(cell.sprite);
-        app.stage.removeChild(cell.energyText);
-        if (cell.extraOverlay) {
-          app.stage.removeChild(cell.extraOverlay);
-          cell.extraOverlay = null;
-        }
-
-        // Clear references
-        cell.children = [];
-        cell.parent = null;
-      }
-    });
-
-    // Remove all cells from the global cells array in one operation
-    cells = cells.filter((cell) => !allPlantCells.includes(cell));
-
-    this.dead = true;
+    // Update energy text but keep color consistent
+    const percentage = (this.currentEnergy / this.energyCapacity) * 100;
+    this.energyText.text =
+      percentage >= 100 ? "*" : Math.floor(percentage / 10).toString();
+    this.energyText.x = this.sprite.x + scaleSize / 2;
+    this.energyText.y = this.sprite.y + scaleSize / 2;
+    this.energyText.visible = showEnergyText;
   }
 }
 
@@ -945,6 +919,106 @@ class Leaf extends PlantCell {
   }
 }
 
+// Modified Sun class
+class Sun extends Particle {
+  constructor(config) {
+    super(config.x || 0, config.y || 0, "SUN");
+    this.sprite.tint = 0xffff00;
+    this.sprite.alpha = 0.9;
+
+    // Add aura overlay
+    this.aura = new PIXI.Graphics();
+    this.aura.beginFill(0xffff00, 0.5); // Yellow with 50% alpha
+    this.aura.drawRect(0, 0, 3 * scaleSize, 3 * scaleSize);
+    this.aura.endFill();
+    this.aura.x = this.sprite.x - scaleSize;
+    this.aura.y = this.sprite.y - scaleSize;
+    app.stage.addChild(this.aura);
+
+    // Apply config
+    this.mode = config.mode;
+    this.axis = config.axis;
+    this.direction = config.direction;
+  }
+
+  distributeSunEnergy() {
+    const { x: sunX, y: sunY } = this.getPosition();
+
+    // Check 3x3 grid with wrapping
+    for (let dx = -1; dx <= 1; dx++) {
+      for (let dy = -1; dy <= 1; dy++) {
+        const checkX = (sunX + dx + cols) % cols;
+        const checkY = (sunY + dy + rows) % rows;
+
+        const cell = occupancyGrid.get(checkX, checkY);
+        if (cell instanceof PlantCell) {
+          const energy = dx === 0 && dy === 0 ? 2 : 1;
+          cell.currentEnergy = Math.min(
+            cell.currentEnergy + energy,
+            cell.energyCapacity
+          );
+        }
+      }
+    }
+  }
+
+  updatePosition(newX, newY) {
+    super.updatePosition(newX, newY);
+    // Update aura position to stay centered on sun
+    this.aura.x = newX * scaleSize - scaleSize;
+    this.aura.y = newY * scaleSize - scaleSize;
+  }
+
+  update() {
+    let { x, y } = this.getPosition();
+
+    // Apply basic movement
+    if (this.axis === "vertical") {
+      y += this.direction;
+    } else {
+      x += this.direction;
+    }
+
+    // Handle boundaries
+    if (this.mode === "snake") {
+      if (this.axis === "vertical") {
+        if (y >= rows || y < 0) {
+          this.direction *= -1; // Reverse direction
+          x = (x + 1) % cols; // Move to next column
+          y = y >= rows ? rows - 1 : 0; // Keep within bounds
+        }
+      } else {
+        // horizontal
+        if (x >= cols || x < 0) {
+          this.direction *= -1; // Reverse direction
+          y = (y + 1) % rows; // Move to next row
+          x = x >= cols ? cols - 1 : 0; // Keep within bounds
+        }
+      }
+    } else {
+      // SWEEP MODE
+      if (this.axis === "vertical") {
+        if (y >= rows || y < 0) {
+          x = (x + 1) % cols;
+          y = this.direction === 1 ? 0 : rows - 1;
+        }
+      } else {
+        if (x >= cols || x < 0) {
+          y = (y + 1) % rows;
+          x = this.direction === 1 ? 0 : cols - 1;
+        }
+      }
+    }
+
+    // Final position clamping
+    x = Math.max(0, Math.min(x, cols - 1));
+    y = Math.max(0, Math.min(y, rows - 1));
+
+    this.updatePosition(x, y);
+    this.distributeSunEnergy();
+  }
+}
+
 function mainLoop() {
   const now = performance.now();
   const timeSinceLastUpdate = now - lastUpdateTime;
@@ -979,19 +1053,14 @@ function mainLoop() {
 
     for (let i = 0; i < updatesThisFrame; i++) {
       frame++;
-
-      // Create a snapshot of living cells before updates
+      sun.update();
       const livingCells = cells.filter((cell) => !cell.dead);
-
-      // Update only those cells that were alive at start of frame
       livingCells.forEach((cell) => {
         if (!cell.dead) {
-          // Double-check in case cell died during this frame
           cell.update();
         }
       });
     }
-
     lastUpdateTime = now;
   }
 
@@ -1000,8 +1069,50 @@ function mainLoop() {
   lastRenderTime = now;
 
   fpsText.text = `FPS: ${Math.round(fps)}`;
-  countText.text = `Cells: ${cells.length}`;
+  countText.text = `Particles: ${cells.length + 1}`; // +1 for sun (fixed position)
 
   app.renderer.render(app.stage);
   requestAnimationFrame(mainLoop);
+}
+
+// Modified reset function
+function resetSimulation() {
+  // Clear existing cells
+  cells.forEach((cell) => {
+    app.stage.removeChild(cell.sprite);
+    if (cell.energyText) app.stage.removeChild(cell.energyText);
+  });
+  cells = [];
+  occupancyGrid = new OccupancyGrid(cols, rows);
+
+  // Recreate sun with proper initial position
+  if (sun) {
+    app.stage.removeChild(sun.sprite);
+    app.stage.removeChild(sun.aura); // Remove old aura
+  }
+
+  // Calculate initial position based on direction and axis
+  let initialX = 0;
+  let initialY = 0;
+
+  if (sunConfig.mode === "snake") {
+    if (sunConfig.axis === "vertical") {
+      initialY = sunConfig.direction === 1 ? 0 : rows - 1;
+    } else {
+      initialX = sunConfig.direction === 1 ? 0 : cols - 1;
+    }
+  }
+
+  sun = new Sun({
+    ...sunConfig,
+    x: initialX,
+    y: initialY,
+  });
+
+  // Create new seed
+  const seed = new Seed(Math.floor(cols / 2), Math.floor(rows / 2));
+  cells.push(seed);
+
+  // Reset frame counter
+  frame = 0;
 }
