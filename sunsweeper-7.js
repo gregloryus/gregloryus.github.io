@@ -66,7 +66,7 @@ let showEnergyText = true; // New global setting
 let sun, moon; // Add moon to global variables
 let sunConfig = {
   mode: "sweep", // 'snake' or 'sweep'
-  axis: "vertical", // 'vertical' or 'horizontal'
+  axis: "horizontal", // 'vertical' or 'horizontal'
   direction: 1, // 1 or -1
 };
 
