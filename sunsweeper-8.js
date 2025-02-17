@@ -54,6 +54,9 @@ const CONSTANTS = {
   },
 };
 
+// New constant: number of ticks a dying cell lingers before removal.
+const DEATH_COUNTDOWN_TICKS = 100;
+
 // Global variables
 let app, cellTextures, cells, occupancyGrid, scaleSize, idCounter, fadeOverlay;
 let rows, cols, frame;
@@ -66,7 +69,7 @@ let showEnergyText = true; // New global setting
 let sun, moon; // Add moon to global variables
 let sunConfig = {
   mode: "sweep", // 'snake' or 'sweep'
-  axis: "vertical", // 'vertical' or 'horizontal'
+  axis: "horizontal", // 'vertical' or 'horizontal'
   direction: 1, // 1 or -1
 };
 
@@ -265,37 +268,6 @@ document.addEventListener("DOMContentLoaded", async () => {
       resetSimulation();
     }
   });
-
-  // Add click handler for cell inspection
-  app.view.addEventListener("click", (e) => {
-    // Get all unique seeds (plants)
-    const seeds = [...new Set(cells.map((cell) => cell.getPlantSeed()))];
-
-    seeds.forEach((seed) => {
-      const plantCells = cells.filter((cell) => cell.getPlantSeed() === seed);
-
-      console.log("\n=== Plant Report ===");
-      console.log("Plant Details:", {
-        seedAge: seed.age,
-        maturityAge: seed.maturityAge,
-        maturitySize: seed.maturitySize,
-        currentSize: plantCells.length,
-        position: { x: seed.pos.x, y: seed.pos.y },
-        genes: seed.genes,
-      });
-
-      console.log("Cell Details:");
-      plantCells.forEach((cell) => {
-        console.log(`- ${cell.type}:`, {
-          position: cell.pos,
-          energy: cell.currentEnergy,
-          isExtra: cell.isExtra ? cell.isExtra() : "N/A",
-          children: cell.children.length,
-          parent: cell.parent ? cell.parent.type : "none",
-        });
-      });
-    });
-  });
 });
 
 class OccupancyGrid {
@@ -399,16 +371,29 @@ class Particle {
 
 // Modified PlantCell to extend Particle
 class PlantCell extends Particle {
-  constructor(x, y, parent, type) {
+  constructor(x, y, productionParent, type) {
     super(x, y, type);
-    this.parent = parent;
     this.children = [];
-    // All energy-related properties removed
-    this.dead = false;
+    this.isDying = false;
+    this.dyingTicks = 0;
     this.age = 0;
-    this.lifespan = parent
-      ? parent.getPlantSeed().genes.cellLifespan
-      : CONSTANTS.ENERGY.DEFAULT_LIFESPAN;
+
+    // --- NEW: Relationship fields ---
+    // productionParent: the cell that directly produced this cell
+    // physicalParent: the cell directly attached below this cell
+    // seed: the root seed for this entire plant; a seed cell is its own seed.
+    this.productionParent = productionParent;
+    if (productionParent) {
+      // Inherit the seed from the productionParent.
+      this.seed = productionParent.seed;
+      // Initially, set physicalParent to be the productionParent (this can be updated later).
+      this.physicalParent = productionParent;
+    } else {
+      // For a seed cell (or if no production parent was provided), the seed is the cell itself.
+      this.seed = this;
+      this.physicalParent = null;
+    }
+    // -------------------------------
 
     // Energy text display
     const style = new PIXI.TextStyle({
@@ -426,13 +411,10 @@ class PlantCell extends Particle {
     app.stage.addChild(this.energyText);
 
     this.extraOverlay = null;
-
-    // Add tracking for last empty spaces count
     this.lastEmptySpacesCount = null;
   }
 
   updateVisuals() {
-    // Always set full opacity and hide any energy text.
     this.sprite.alpha = 1.0;
     if (this.energyText) {
       this.energyText.visible = false;
@@ -455,46 +437,66 @@ class PlantCell extends Particle {
   }
 
   getPlantSeed() {
-    let cell = this;
-    while (cell.parent) {
-      cell = cell.parent;
-    }
-    return cell;
+    return this.seed;
   }
 
-  // Centralized die() method that now defers child propagation.
+  /**
+   * Marks this cell as dying.
+   * Immediately switches its texture to the dedicated DEAD (red) texture.
+   */
   die() {
-    if (this.dead) return;
-    console.log(`🌑 Moon killed plant at (${this.pos.x},${this.pos.y})`);
-    this.sprite.tint = 0xff0000;
+    if (this.isDying) return;
+    this.sprite.texture = cellTextures.DYING;
     this.sprite.alpha = 1.0;
-    this.dead = true;
+    this.isDying = true;
+    this.dyingFrame = frame;
+    this.dyingTicks = DEATH_COUNTDOWN_TICKS;
+    this.hasPropagatedDeath = false;
+  }
 
-    // Defer the propagation of death to children to allow red tint rendering.
-    setTimeout(() => {
-      this.children.forEach((child) => {
-        if (child && typeof child.die === "function" && !child.dead) {
-          child.die();
-        } else {
-          console.log("Child", child, "does not have die() method");
+  // Updated processDeath() to delay neighbor propagation by one tick.
+  processDeath() {
+    if (
+      !this.hasPropagatedDeath &&
+      this.dyingTicks === DEATH_COUNTDOWN_TICKS - 1
+    ) {
+      this.hasPropagatedDeath = true;
+      const neighbors = occupancyGrid.getMooreNeighbors(this.pos.x, this.pos.y);
+      neighbors.forEach((neighbor) => {
+        if (
+          neighbor &&
+          neighbor.getPlantSeed() === this.getPlantSeed() &&
+          !neighbor.isDying
+        ) {
+          neighbor.die();
         }
       });
-    }, 0);
-
-    // Schedule removal after a short delay so the red tint is visible.
-    setTimeout(() => {
+    }
+    this.dyingTicks--;
+    if (this.dyingTicks <= 0) {
       occupancyGrid.remove(this.pos.x, this.pos.y);
-      if (this.sprite.parent) {
-        app.stage.removeChild(this.sprite);
-      }
+      if (this.sprite.parent) app.stage.removeChild(this.sprite);
       if (this.energyText && this.energyText.parent) {
         app.stage.removeChild(this.energyText);
       }
+      if (this.extraOverlay && this.extraOverlay.parent) {
+        app.stage.removeChild(this.extraOverlay);
+        this.extraOverlay = null;
+      }
       cells = cells.filter((cell) => cell !== this);
-      console.log(
-        `Plant at (${this.pos.x},${this.pos.y}) has been removed after death.`
-      );
-    }, 100);
+    }
+  }
+
+  update() {
+    if (this.isDying) {
+      if (frame === this.dyingFrame) {
+        return;
+      }
+      this.processDeath();
+      return;
+    }
+    this.age++;
+    this.updateVisuals();
   }
 }
 
@@ -507,12 +509,9 @@ class Seed extends PlantCell {
     this.mature = false;
     this.hasReproduced = false;
 
-    // For landed seeds, add to the occupancy grid immediately.
     if (!this.airborne) {
       occupancyGrid.set(x, y, this);
-      console.log(`📍 Seed registered in grid at (${x},${y})`);
     }
-    console.log(`🌰 Seed created at (${x},${y}) - Landed: ${!this.airborne}`);
 
     this.genes = {
       internodeSpacing: 3,
@@ -523,7 +522,6 @@ class Seed extends PlantCell {
 
   startGrowing() {
     if (!this.hasTriggeredGrowth) {
-      // Check immediate Moore neighborhood (without excluding any neighbors).
       let canGerminate = true;
       for (let dx = -1; dx <= 1; dx++) {
         for (let dy = -1; dy <= 1; dy++) {
@@ -532,9 +530,6 @@ class Seed extends PlantCell {
             ny = this.pos.y + dy;
           if (occupancyGrid.get(nx, ny)) {
             canGerminate = false;
-            console.log(
-              `Seed at (${this.pos.x},${this.pos.y}) found neighbor at (${nx},${ny}) and cannot germinate.`
-            );
             break;
           }
         }
@@ -544,14 +539,8 @@ class Seed extends PlantCell {
         this.die();
         return;
       }
-
-      console.log(`🌿 Seed at (${this.pos.x},${this.pos.y}) started growing`);
       this.hasTriggeredGrowth = true;
       this.tryCreateFirstBud();
-    } else {
-      console.log(
-        `Seed at (${this.pos.x},${this.pos.y}) already triggered growth`
-      );
     }
   }
 
@@ -567,40 +556,33 @@ class Seed extends PlantCell {
       const newX = this.pos.x + dir.dx;
       const newY = this.pos.y + dir.dy;
       if (!occupancyGrid.get(newX, newY)) {
-        console.log(`🌱 Creating first bud at (${newX},${newY})`);
         const bud = new BudCell(newX, newY, this);
-        // Inherit the seed's genes so that later growth uses the correct internode and bud limits.
         bud.inheritGenes(this.genes);
         this.children.push(bud);
         cells.push(bud);
         occupancyGrid.set(newX, newY, bud);
         budCreated = true;
         break;
-      } else {
-        console.log(
-          `Cannot create bud at (${newX}, ${newY}); blocked by:`,
-          occupancyGrid.get(newX, newY)
-        );
       }
     }
     if (!budCreated) {
-      console.log(
-        `Seed at (${this.pos.x},${this.pos.y}) could not create a bud in any direction.`
-      );
+      // No bud could be created.
     }
   }
 
   reproduce() {
     if (!this.hasReproduced) {
       this.hasReproduced = true;
-      console.log(`Seed at (${this.pos.x},${this.pos.y}) reproduced.`);
       const newSeed = new Seed(this.pos.x, this.pos.y, true);
       cells.push(newSeed);
     }
   }
 
   update() {
-    if (this.dead) return;
+    if (this.isDying) {
+      this.processDeath();
+      return;
+    }
     this.age++;
 
     if (this.airborne) {
@@ -654,26 +636,11 @@ class Seed extends PlantCell {
   }
 
   die() {
-    if (this.dead) return;
-    console.log(`🌑 Moon killed plant at (${this.pos.x},${this.pos.y})`);
+    if (this.isDying) return;
     this.sprite.tint = 0xff0000;
     this.sprite.alpha = 1.0;
-    this.dead = true;
-    // Instruct all children to die as well.
-    this.children.forEach((child) => {
-      if (child && !child.dead) {
-        child.die();
-      }
-    });
-    setTimeout(() => {
-      occupancyGrid.remove(this.pos.x, this.pos.y);
-      app.stage.removeChild(this.sprite);
-      if (this.energyText) app.stage.removeChild(this.energyText);
-      cells = cells.filter((cell) => cell !== this);
-      console.log(
-        `Plant at (${this.pos.x},${this.pos.y}) has been removed after death.`
-      );
-    }, 100);
+    this.isDying = true;
+    this.dyingTicks = DEATH_COUNTDOWN_TICKS;
   }
 }
 
@@ -682,7 +649,15 @@ class StemCell extends PlantCell {
     super(x, y, parent, "STEM");
   }
 
+  die() {
+    super.die();
+  }
+
   update() {
+    if (this.isDying) {
+      this.processDeath();
+      return;
+    }
     this.age++;
     this.updateVisuals();
   }
@@ -693,25 +668,29 @@ class NodeCell extends PlantCell {
     super(x, y, parent, "NODE");
   }
 
-  update() {
-    this.age++;
-    this.updateVisuals();
-  }
-
   createLeafBuds() {
     [-1, 1].forEach((dir) => {
       const newX = this.pos.x + dir;
       if (!occupancyGrid.get(newX, this.pos.y)) {
-        console.log(`🌿 Creating leaf bud at (${newX},${this.pos.y})`);
         const bud = new LeafBudCell(newX, this.pos.y, this);
         this.children.push(bud);
         cells.push(bud);
+        occupancyGrid.set(newX, this.pos.y, bud);
       }
     });
   }
 
   inheritGenes(parentGenes) {
     this.genes = { ...parentGenes };
+  }
+
+  update() {
+    if (this.isDying) {
+      this.processDeath();
+      return;
+    }
+    this.age++;
+    this.updateVisuals();
   }
 }
 
@@ -720,7 +699,7 @@ class BudCell extends PlantCell {
     super(x, y, parent, "BUD");
     this.growthCount = 0;
     this.growthLimitReached = false;
-    this.genes = {}; // Will be set via inheritGenes.
+    this.genes = {};
     this.restCounter = 0;
   }
 
@@ -728,22 +707,19 @@ class BudCell extends PlantCell {
     this.genes = { ...parentGenes };
   }
 
-  // Helper method modified to include boundary checks
   checkEmptyMooreNeighborhoodExcludingParent(x, y) {
     for (let dx = -1; dx <= 1; dx++) {
       for (let dy = -1; dy <= 1; dy++) {
         if (dx === 0 && dy === 0) continue;
-
         const nx = x + dx,
           ny = y + dy;
-
-        // Check boundaries. If out-of-bound, skip the check.
         if (nx < 0 || ny < 0 || nx >= cols || ny >= rows) continue;
-
-        // Skip checking the parent's position.
-        if (this.parent && this.parent.pos.x === nx && this.parent.pos.y === ny)
+        if (
+          this.productionParent &&
+          this.productionParent.pos.x === nx &&
+          this.productionParent.pos.y === ny
+        )
           continue;
-
         const neighbor = occupancyGrid.get(nx, ny);
         if (neighbor && neighbor.getPlantSeed() !== this.getPlantSeed()) {
           return false;
@@ -753,13 +729,20 @@ class BudCell extends PlantCell {
     return true;
   }
 
+  die() {
+    super.die();
+  }
+
   update() {
-    if (this.dead) return;
+    if (this.isDying) {
+      this.processDeath();
+      return;
+    }
     this.age++;
     if (!this.growthLimitReached) {
       this.grow();
     }
-    if (!this.dead) {
+    if (!this.isDying) {
       this.updateVisuals();
     }
   }
@@ -767,7 +750,6 @@ class BudCell extends PlantCell {
   grow() {
     if (this.growthCount >= this.genes.budGrowthLimit) {
       if (!this.growthLimitReached) {
-        console.log(`🛑 Growth limit reached at (${this.pos.x},${this.pos.y})`);
         this.growthLimitReached = true;
       }
       return;
@@ -780,30 +762,30 @@ class BudCell extends PlantCell {
         this.growthCount++;
         const oldX = this.pos.x,
           oldY = this.pos.y;
-        // Move bud upward.
         occupancyGrid.remove(this.pos.x, this.pos.y);
         this.pos.y = newY;
         this.sprite.y = this.pos.y * scaleSize;
         occupancyGrid.set(this.pos.x, this.pos.y, this);
+
         let newCell;
-        // Every internodeSpacing steps, create a NodeCell that also spawns leaf buds.
         if (this.growthCount % this.genes.internodeSpacing === 0) {
-          newCell = new NodeCell(this.pos.x, oldY, this.parent);
+          newCell = new NodeCell(oldX, oldY, this);
           newCell.inheritGenes(this.genes);
           newCell.createLeafBuds();
         } else {
-          newCell = new StemCell(oldX, oldY, this.parent);
+          newCell = new StemCell(oldX, oldY, this);
         }
-        if (this.parent) {
-          this.parent.children = this.parent.children.filter(
-            (child) => child !== this
-          );
-          this.parent.children.push(newCell);
+        newCell.productionParent = this;
+        newCell.seed = this.seed;
+        newCell.physicalParent = this.physicalParent;
+        this.physicalParent = newCell;
+        if (newCell.physicalParent) {
+          newCell.physicalParent.children.push(newCell);
         }
-        newCell.parent = this.parent;
-        this.parent = newCell;
-        newCell.children.push(this);
+        this.children.push(newCell);
+
         cells.push(newCell);
+        occupancyGrid.set(newCell.pos.x, newCell.pos.y, newCell);
       }
     }
   }
@@ -817,24 +799,20 @@ class LeafBudCell extends PlantCell {
     this.growthLimitReached = false;
   }
 
-  // Helper: Check empty Moore neighborhood (with boundaries) excluding the parent's cell.
   checkEmptyMooreNeighborhoodExcludingParent(x, y) {
     for (let dx = -1; dx <= 1; dx++) {
       for (let dy = -1; dy <= 1; dy++) {
         if (dx === 0 && dy === 0) continue;
-
         const nx = x + dx,
           ny = y + dy;
-
-        // Boundary checks: only check if (nx, ny) is within the grid.
         if (nx < 0 || ny < 0 || nx >= cols || ny >= rows) continue;
-
-        // Skip checking the parent's position.
-        if (this.parent && this.parent.pos.x === nx && this.parent.pos.y === ny)
+        if (
+          this.physicalParent &&
+          this.physicalParent.pos.x === nx &&
+          this.physicalParent.pos.y === ny
+        )
           continue;
-
         const neighbor = occupancyGrid.get(nx, ny);
-        // Allow neighboring cells as long as they share the same seed.
         if (neighbor && neighbor.getPlantSeed() !== this.getPlantSeed()) {
           return false;
         }
@@ -844,25 +822,21 @@ class LeafBudCell extends PlantCell {
   }
 
   growLeafPattern() {
-    const direction = Math.sign(this.pos.x - this.parent.pos.x);
-    // The intended positions for leaves relative to the leaf bud.
+    const direction = this.physicalParent
+      ? Math.sign(this.pos.x - this.physicalParent.pos.x)
+      : 1;
     const positions = [
       { x: this.pos.x, y: this.pos.y - 1 },
       { x: this.pos.x + direction, y: this.pos.y },
       { x: this.pos.x + direction, y: this.pos.y - 1 },
     ];
-
-    // Check that every target position is empty and that each target's Moore neighborhood is clear (excluding parent's cell).
     const allPositionsValid = positions.every(
       (pos) =>
         !occupancyGrid.get(pos.x, pos.y) &&
         this.checkEmptyMooreNeighborhoodExcludingParent(pos.x, pos.y)
     );
-
     if (allPositionsValid) {
       positions.forEach((pos) => {
-        console.log(`🌿 Creating leaf at (${pos.x},${pos.y})`);
-        // IMPORTANT: Create a Leaf particle, not a LeafBudCell.
         const leaf = new Leaf(pos.x, pos.y, this);
         this.children.push(leaf);
         cells.push(leaf);
@@ -873,12 +847,20 @@ class LeafBudCell extends PlantCell {
     } else {
       this.restCounter++;
       if (this.restCounter >= 10) {
-        this.restCounter = 0; // Reset counter after the rest period.
+        this.restCounter = 0;
       }
     }
   }
 
+  die() {
+    super.die();
+  }
+
   update() {
+    if (this.isDying) {
+      this.processDeath();
+      return;
+    }
     this.age++;
     if (!this.hasGrown && this.restCounter === 0) {
       this.growLeafPattern();
@@ -892,7 +874,15 @@ class Leaf extends PlantCell {
     super(x, y, parent, "LEAF");
   }
 
+  die() {
+    super.die();
+  }
+
   update() {
+    if (this.isDying) {
+      this.processDeath();
+      return;
+    }
     this.age++;
     this.updateVisuals();
   }
@@ -905,7 +895,6 @@ class Sun extends Particle {
     this.sprite.tint = 0xffff00;
     this.sprite.alpha = 0.9;
 
-    // Create aura overlay (using the sun aura constant if desired)
     this.aura = new PIXI.Graphics();
     this.aura.beginFill(0xffff00, CONSTANTS.PERFORMANCE.SUN_AURA_ALPHA);
     this.aura.drawRect(0, 0, 3 * scaleSize, 3 * scaleSize);
@@ -922,7 +911,6 @@ class Sun extends Particle {
 
   updatePosition(newX, newY) {
     super.updatePosition(newX, newY);
-    // Keep aura in sync
     this.aura.x = newX * scaleSize - scaleSize;
     this.aura.y = newY * scaleSize - scaleSize;
   }
@@ -930,8 +918,6 @@ class Sun extends Particle {
   update() {
     let { x, y } = this.getPosition();
     this.stepCount++;
-
-    // Basic movement logic (same as before)
     if (this.axis === "vertical") {
       y += this.direction;
     } else {
@@ -952,7 +938,6 @@ class Sun extends Particle {
         }
       }
     } else {
-      // SWEEP mode
       if (this.axis === "vertical") {
         if (y >= rows || y < 0) {
           x = (x + 1) % cols;
@@ -969,14 +954,11 @@ class Sun extends Particle {
     y = Math.max(0, Math.min(y, rows - 1));
     this.updatePosition(x, y);
 
-    // NEW: Instead of distributing energy, check for a landed seed.
     const cell = occupancyGrid.get(x, y);
     if (cell instanceof Seed && !cell.airborne) {
-      // If seed has already sprouted then the Sun promotes maturation.
       if (cell.hasTriggeredGrowth && !cell.mature) {
         cell.mature = true;
-        cell.reproduce(); // Trigger seed reproduction (spawns a new airborne seed)
-        console.log(`☀️ Sun matured seed at (${x},${y})`);
+        cell.reproduce();
       }
     }
   }
@@ -988,7 +970,6 @@ class Moon extends Particle {
     this.sprite.tint = 0xffffff;
     this.sprite.alpha = 0.9;
 
-    // Add aura overlay
     this.aura = new PIXI.Graphics();
     this.aura.beginFill(0xffffff, CONSTANTS.PERFORMANCE.CELESTIAL_AURA_ALPHA);
     this.aura.drawRect(0, 0, 3 * scaleSize, 3 * scaleSize);
@@ -997,11 +978,10 @@ class Moon extends Particle {
     this.aura.y = this.sprite.y - scaleSize;
     app.stage.addChild(this.aura);
 
-    // Apply config
     this.mode = config.mode;
     this.axis = config.axis;
     this.direction = config.direction;
-    this.stepCount = config.initialSteps || 0; // Track total steps
+    this.stepCount = config.initialSteps || 0;
   }
 
   updatePosition(newX, newY) {
@@ -1013,15 +993,11 @@ class Moon extends Particle {
   update() {
     let { x, y } = this.getPosition();
     this.stepCount++;
-
-    // Apply basic movement
     if (this.axis === "vertical") {
       y += this.direction;
     } else {
       x += this.direction;
     }
-
-    // Handle boundaries
     if (this.mode === "snake") {
       if (this.axis === "vertical") {
         if (y >= rows || y < 0) {
@@ -1037,7 +1013,6 @@ class Moon extends Particle {
         }
       }
     } else {
-      // SWEEP MODE
       if (this.axis === "vertical") {
         if (y >= rows || y < 0) {
           x = (x + 1) % cols;
@@ -1050,10 +1025,8 @@ class Moon extends Particle {
         }
       }
     }
-
     x = Math.max(0, Math.min(x, cols - 1));
     y = Math.max(0, Math.min(y, rows - 1));
-
     this.updatePosition(x, y);
     this.checkGermination();
   }
@@ -1063,16 +1036,12 @@ class Moon extends Particle {
     if (
       currentCell instanceof Seed &&
       !currentCell.airborne &&
-      !currentCell.dead
+      !currentCell.isDying
     ) {
       if (!currentCell.hasTriggeredGrowth) {
-        console.log(`🌱 Moon germinated seed at (${this.pos.x},${this.pos.y})`);
-        currentCell.mature = false; // Initialize mature flag
+        currentCell.mature = false;
         currentCell.startGrowing();
       } else if (currentCell.mature) {
-        console.log(
-          `☠️ Moon killing MATURE plant at (${this.pos.x},${this.pos.y})`
-        );
         currentCell.die();
       }
     }
@@ -1083,21 +1052,14 @@ function mainLoop() {
   const now = performance.now();
   const timeSinceLastUpdate = now - lastUpdateTime;
 
-  // Check if all cells are gone and restart if needed
   if (cells.length === 0) {
-    console.log("\n=== Scene Reset ===\nCreating new seed in center of grid");
-
-    // Reset core simulation parameters
     cells = [];
     occupancyGrid = new OccupancyGrid(cols, rows);
     frame = 0;
-
-    // Create new seed in center
     const seed = new Seed(Math.floor(cols / 2), Math.floor(rows / 2));
     cells.push(seed);
   }
 
-  // Determine if we should update this frame
   let shouldUpdate = false;
   if (!paused) {
     if (slowMotion) {
@@ -1110,46 +1072,35 @@ function mainLoop() {
 
   if (shouldUpdate) {
     const updatesThisFrame = fastForward ? fastForwardFactor : 1;
-
     for (let i = 0; i < updatesThisFrame; i++) {
       frame++;
       sun.update();
-      moon.update(); // Add moon update
-      const livingCells = cells.filter((cell) => !cell.dead);
-      livingCells.forEach((cell) => {
-        if (!cell.dead) {
-          cell.update();
-        }
+      moon.update();
+      cells.forEach((cell) => {
+        cell.update();
       });
     }
     lastUpdateTime = now;
   }
 
-  // Always update FPS counter and render
   const fps = 1000 / (now - lastRenderTime);
   lastRenderTime = now;
 
   fpsText.text = `FPS: ${Math.round(fps)}`;
-  countText.text = `Particles: ${cells.length + 1}`; // +1 for sun (fixed position)
+  countText.text = `Particles: ${cells.length + 1}`;
 
-  // --- FADE OVERLAY CODE ---
   fadeOverlay.clear();
   fadeOverlay.beginFill(0x000000, CONSTANTS.PERFORMANCE.FADE_OVERLAY_ALPHA);
   fadeOverlay.drawRect(0, 0, app.screen.width, app.screen.height);
   fadeOverlay.endFill();
-  // Ensure the overlay is at the bottom of the display list:
   if (!app.stage.children.includes(fadeOverlay)) {
     app.stage.addChildAt(fadeOverlay, 0);
   }
-  // --- END FADE OVERLAY CODE ---
-
   app.renderer.render(app.stage);
   requestAnimationFrame(mainLoop);
 }
 
-// Modified reset function
 function resetSimulation() {
-  // Clear existing cells
   cells.forEach((cell) => {
     app.stage.removeChild(cell.sprite);
     if (cell.energyText) app.stage.removeChild(cell.energyText);
@@ -1157,13 +1108,11 @@ function resetSimulation() {
   cells = [];
   occupancyGrid = new OccupancyGrid(cols, rows);
 
-  // Recreate sun with proper initial position
   if (sun) {
     app.stage.removeChild(sun.sprite);
-    app.stage.removeChild(sun.aura); // Remove old aura
+    app.stage.removeChild(sun.aura);
   }
 
-  // Calculate initial position based on direction and axis
   let initialX = 0;
   let initialY = 0;
 
@@ -1181,16 +1130,13 @@ function resetSimulation() {
     y: initialY,
   });
 
-  // Calculate total path length and moon offset
   const totalCells = cols * rows;
   const moonOffset = Math.floor(totalCells / 2);
 
-  // Calculate moon's initial position by simulating sun movement
   let moonX = initialX;
   let moonY = initialY;
   let moonDirection = sunConfig.direction;
 
-  // Simulate movement for moonOffset steps
   for (let i = 0; i < moonOffset; i++) {
     if (sunConfig.axis === "vertical") {
       moonY += moonDirection;
@@ -1226,10 +1172,8 @@ function resetSimulation() {
     initialSteps: moonOffset,
   });
 
-  // Create new seed
   const seed = new Seed(Math.floor(cols / 2), Math.floor(rows / 2));
   cells.push(seed);
 
-  // Reset frame counter
   frame = 0;
 }
