@@ -284,11 +284,19 @@ async function loadTreeData() {
   showLoading("Loading tree data...");
   console.log("Attempting to load tree data...");
 
+  // Check if we're running on github.io or locally
+  const isGitHubPages = window.location.hostname.includes("github.io");
+  const baseUrl = isGitHubPages
+    ? "https://raw.githubusercontent.com/gregloryus/gregloryus.github.io/master/"
+    : "";
+
   try {
     // Try to load GeoJSON with .geojson extension first
     try {
-      console.log("Trying to load trees.geojson...");
-      const response = await fetch("trees.geojson");
+      const geojsonUrl = baseUrl + "trees.geojson";
+      console.log("Trying to load from:", geojsonUrl);
+
+      const response = await fetch(geojsonUrl);
       if (!response.ok)
         throw new Error(`HTTP error! Status: ${response.status}`);
 
