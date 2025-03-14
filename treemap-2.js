@@ -176,19 +176,26 @@ function toggleNameDisplay() {
 
 // Setup clustering layers for tree visualization
 function setupClusterLayers() {
-  // Add empty source for tree data
-  map.addSource("trees", {
-    type: "geojson",
-    data: {
-      type: "FeatureCollection",
-      features: [],
-    },
-    cluster: true,
-    clusterMaxZoom: 14, // Lower this value from 17 to 14 to disable clustering sooner
-    clusterRadius: 40, // Slightly reduced from 50 to make clusters require more proximity
-  });
+  console.log("Setting up cluster layers...");
 
-  clusterSourceAdded = true;
+  try {
+    // Add empty source for tree data
+    map.addSource("trees", {
+      type: "geojson",
+      data: {
+        type: "FeatureCollection",
+        features: [],
+      },
+      cluster: true,
+      clusterMaxZoom: 14,
+      clusterRadius: 40,
+    });
+    console.log("✅ Tree source added successfully");
+    clusterSourceAdded = true;
+  } catch (error) {
+    console.error("❌ Error adding tree source:", error);
+    return; // Exit if we can't add the source
+  }
 
   // Add layers for clustered and unclustered points
 
@@ -345,6 +352,8 @@ function setupClusterLayers() {
   map.on("mouseleave", "clusters", function () {
     map.getCanvas().style.cursor = "";
   });
+
+  console.log("✅ All cluster layers added successfully");
 }
 
 // Show popup for a tree
@@ -389,15 +398,17 @@ async function loadTreeData() {
 
     // Process the data to add required properties for display
     processTreeData(data);
+    console.log("✅ Tree data processed");
 
     // Store full data
     window.fullTreeData = data;
 
     // Display initial subset
+    console.log("Calling displayInitialTrees...");
     displayInitialTrees(data);
   } catch (error) {
     hideLoading();
-    console.error("Error in loadTreeData:", error);
+    console.error("❌ Error in loadTreeData:", error);
     alert(`Error loading tree data: ${error.message}`);
   }
 }
@@ -447,11 +458,24 @@ function processTreeData(data) {
 
 // Display initial subset of trees
 function displayInitialTrees(data) {
-  console.log("Displaying initial trees...");
+  console.log("Starting displayInitialTrees...");
+
   if (!data || !data.features) {
-    console.error("Invalid data format:", data);
+    console.error("❌ Invalid data format:", data);
     hideLoading();
     return;
+  }
+
+  // Check if the source is ready
+  if (!map.getSource("trees")) {
+    console.error("❌ Tree source not found! Re-initializing source...");
+    try {
+      setupClusterLayers();
+    } catch (e) {
+      console.error("❌ Failed to set up cluster layers:", e);
+      hideLoading();
+      return;
+    }
   }
 
   // Get current map bounds
@@ -475,7 +499,7 @@ function displayInitialTrees(data) {
       );
     });
   } else {
-    // If no bounds yet, just use a subset
+    console.log("Map bounds not available, using subset");
     visibleFeatures = data.features.slice(0, 500);
   }
 
@@ -488,11 +512,19 @@ function displayInitialTrees(data) {
   showLoading(`Loading ${limitedFeatures.length} trees...`);
 
   // Update the data in the source
-  if (map.getSource("trees")) {
-    map.getSource("trees").setData({
-      type: "FeatureCollection",
-      features: limitedFeatures,
-    });
+  try {
+    if (map.getSource("trees")) {
+      console.log("Updating source data with trees...");
+      map.getSource("trees").setData({
+        type: "FeatureCollection",
+        features: limitedFeatures,
+      });
+      console.log("✅ Source data updated successfully");
+    } else {
+      console.error("❌ Tree source still not available after setup attempt");
+    }
+  } catch (error) {
+    console.error("❌ Error updating source data:", error);
   }
 
   hideLoading();
@@ -929,4 +961,12 @@ function getTreeColor(properties) {
 document.addEventListener("DOMContentLoaded", function () {
   console.log("DOM loaded, initializing map...");
   initMap();
+
+  // Add a safety check to verify tree data loading
+  setTimeout(function () {
+    if (!window.fullTreeData) {
+      console.log("⚠️ No tree data loaded after 5 seconds, retrying...");
+      loadTreeData();
+    }
+  }, 5000);
 });
