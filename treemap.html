@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Evanston Tree Map</title>
     
     <!-- Mapbox GL JS CSS -->
@@ -18,11 +18,13 @@
             height: 100%;
             width: 100%;
             font-family: Arial, sans-serif;
+            overflow: hidden; /* Prevent scrolling of the page */
         }
         
         #map {
             height: 100vh;
             width: 100%;
+            touch-action: none; /* Disable browser's default touch actions */
         }
         
         .info-panel {
@@ -82,6 +84,18 @@
         .location-button button:hover,
         .name-toggle-button button:hover {
             background-color: #f0f0f0;
+        }
+        
+        /* Ensure controls are always visible regardless of orientation */
+        .mapboxgl-ctrl-bottom-right {
+            bottom: 20px !important;
+            right: 10px !important;
+        }
+        
+        /* Custom styles for our buttons */
+        .mapboxgl-ctrl-group {
+            background-color: rgba(255, 255, 255, 0.9) !important;
+            box-shadow: 0 0 10px rgba(0, 0, 0, 0.3) !important;
         }
     </style>
 </head>

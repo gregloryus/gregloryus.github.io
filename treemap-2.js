@@ -19,7 +19,16 @@ const mapboxAccessToken =
 function initMap() {
   console.log("Initializing map with Mapbox...");
 
-  // Initialize Mapbox map
+  // Remove any existing handlers that might interfere with touch
+  document.body.addEventListener(
+    "touchmove",
+    function (e) {
+      // Don't prevent default touch behavior
+    },
+    { passive: true }
+  );
+
+  // Initialize Mapbox map with better mobile settings
   mapboxgl.accessToken = mapboxAccessToken;
 
   map = new mapboxgl.Map({
@@ -31,11 +40,8 @@ function initMap() {
     bearing: 0, // Initial rotation - will be updated based on user's heading
     pitchWithRotate: false,
     dragRotate: false, // Disable manual rotation via mouse/touch
-    touchZoomRotate: true, // Explicitly enable touch zoom and rotate
-    dragPan: true, // Explicitly enable drag to pan
-    scrollZoom: true, // Explicitly enable scroll to zoom
-    doubleClickZoom: true, // Explicitly enable double click to zoom
-    touchPitch: false, // Disable touch pitch as we don't need 3D tilting
+    interactive: true, // Ensure the map is interactive
+    maxTileCacheSize: 50, // Add reasonable tile cache for performance
   });
 
   // Add custom controls once map loads
@@ -85,15 +91,41 @@ function initMap() {
 
     // Setup device orientation with iOS focus
     setupDeviceOrientation();
+
+    // Make sure all gesture behaviors are enabled
+    enableTouchGestures();
   });
 
-  // Add navigation control (zoom buttons)
+  // Add navigation control (zoom buttons) - positioned for visibility on all screen sizes
   map.addControl(
     new mapboxgl.NavigationControl({
       showCompass: false, // Hide the compass since we'll use our own heading indicator
+      visualizePitch: false, // Don't visualize pitch since we're in 2D mode
     }),
-    "bottom-right"
+    "top-right"
   );
+}
+
+// Function to specifically enable touch gestures
+function enableTouchGestures() {
+  const mapContainer = document.getElementById("map");
+
+  // Ensure the map container doesn't have any CSS that might interfere
+  mapContainer.style.touchAction = "none";
+
+  // Add handlers to prevent default behavior for touch events that might interfere
+  mapContainer.addEventListener(
+    "touchstart",
+    function (e) {
+      if (e.touches.length > 1) {
+        e.preventDefault(); // Prevent browser zoom on pinch
+      }
+    },
+    { passive: false }
+  );
+
+  // Log touch events for debugging
+  console.log("Touch gestures enabled for map");
 }
 
 // Add location button to map
@@ -114,7 +146,7 @@ function addLocationButton() {
   document.getElementById("map").appendChild(locationButton);
 }
 
-// Add name toggle button to map
+// Add name toggle button to map - repositioned for better visibility
 function addNameToggleButton() {
   // Create a custom HTML element for the button
   const nameToggleButton = document.createElement("div");
@@ -124,11 +156,14 @@ function addNameToggleButton() {
     '<button id="name-toggle" type="button" title="Toggle Scientific/Common Names" style="font-weight: bold; text-decoration: none; color: black; display: block; text-align: center; padding: 5px; background-color: white; width: auto;">Scientific Names</button>';
   nameToggleButton.addEventListener("click", toggleNameDisplay);
 
-  // Add the custom control directly to the DOM - moved to top-right for better mobile visibility
+  // Add the custom control directly to the DOM - positioned for better visibility
   nameToggleButton.style.position = "absolute";
-  nameToggleButton.style.top = "10px";
+  nameToggleButton.style.top = "60px"; // Positioned below the zoom controls
   nameToggleButton.style.right = "10px";
-  nameToggleButton.style.zIndex = "1";
+  nameToggleButton.style.zIndex = "10"; // Higher z-index to ensure visibility
+  nameToggleButton.style.backgroundColor = "white";
+  nameToggleButton.style.boxShadow = "0 0 10px rgba(0, 0, 0, 0.3)";
+  nameToggleButton.style.borderRadius = "4px";
   document.getElementById("map").appendChild(nameToggleButton);
 }
 
