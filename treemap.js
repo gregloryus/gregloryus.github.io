@@ -13,7 +13,7 @@ function initMap() {
   console.log("Initializing map...");
   // Create a map centered on Evanston, IL
   map = L.map("map", {
-    maxZoom: Infinity, // Try to remove upper limit completely
+    maxZoom: 25, // Very high but finite number
     zoomSnap: 0, // Disable zoom snapping
     zoomDelta: 0.1, // Allow for very fine zoom control
     wheelPxPerZoomLevel: 150, // Make scroll wheel zooming very gradual
@@ -24,7 +24,7 @@ function initMap() {
     attribution:
       '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>',
     subdomains: "abcd",
-    maxZoom: Infinity, // Try to remove tile provider limit
+    maxZoom: 25, // Match the map's maxZoom
   }).addTo(map);
 
   // Initialize marker cluster group with improved settings for precision
@@ -34,12 +34,22 @@ function initMap() {
     chunkDelay: 50,
     maxClusterRadius: function (zoom) {
       // Reduce clustering radius as zoom level increases
-      return zoom >= 18 ? 5 : zoom >= 16 ? 20 : zoom >= 14 ? 40 : 60;
+      return zoom >= 22
+        ? 3
+        : zoom >= 20
+        ? 5
+        : zoom >= 18
+        ? 10
+        : zoom >= 16
+        ? 20
+        : zoom >= 14
+        ? 40
+        : 60;
     },
-    disableClusteringAtZoom: 19, // Disable clustering at max zoom
-    spiderfyOnMaxZoom: false, // Don't use radial menu at max zoom
-    showCoverageOnHover: true, // Show cluster boundaries
-    zoomToBoundsOnClick: true, // Zoom to bounds when clicking cluster
+    disableClusteringAtZoom: 22, // Disable clustering at very high zoom
+    spiderfyOnMaxZoom: false,
+    showCoverageOnHover: true,
+    zoomToBoundsOnClick: true,
   });
 
   map.addLayer(markerClusterGroup);
@@ -311,9 +321,9 @@ async function loadTreeData() {
   const isGitHubPages = window.location.hostname.includes("github.io");
 
   try {
-    // Set the URL based on environment
+    // Set the URL based on environment - UPDATED for regular Git storage
     const url = isGitHubPages
-      ? "https://media.githubusercontent.com/media/gregloryus/gregloryus.github.io/master/trees.geojson"
+      ? "https://raw.githubusercontent.com/gregloryus/gregloryus.github.io/master/trees.geojson"
       : "trees.geojson";
 
     console.log("Trying to load from:", url);
