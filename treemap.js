@@ -221,20 +221,42 @@ function updateHeadingIndicator(heading) {
     map.removeLayer(headingMarker);
   }
 
-  // Create a line showing the direction
-  const headingLine = [
-    [pos.lat, pos.lng],
-    [
-      pos.lat + 0.0003 * Math.cos((heading * Math.PI) / 180),
-      pos.lng + 0.0003 * Math.sin((heading * Math.PI) / 180),
-    ],
+  // Calculate starting point exactly at the edge of the user marker circle
+  // User marker has a 15px diameter, so we need to start at that radius
+  // Convert pixels to lat/lng at current zoom level
+  const currentZoom = map.getZoom();
+  const lat = pos.lat;
+  // Get approximate meters per pixel at this latitude and zoom level
+  const metersPerPixel =
+    (156543.03 * Math.cos((lat * Math.PI) / 180)) / Math.pow(2, currentZoom);
+  // User circle radius is 7.5px (15px diameter / 2)
+  const circleRadiusInMeters = 7.5 * metersPerPixel;
+  // Convert meters to approximate lat/lng offset
+  const latOffset = circleRadiusInMeters / 111320; // 1 degree lat ≈ 111320 meters
+  const lngOffset =
+    circleRadiusInMeters / (111320 * Math.cos((lat * Math.PI) / 180)); // adjust for longitude
+
+  // Calculate the starting point at edge of user marker circle
+  const startPoint = [
+    pos.lat + latOffset * Math.cos((heading * Math.PI) / 180),
+    pos.lng + lngOffset * Math.sin((heading * Math.PI) / 180),
   ];
+
+  // Calculate the end point (further away)
+  const endPoint = [
+    pos.lat + 0.0003 * Math.cos((heading * Math.PI) / 180),
+    pos.lng + 0.0003 * Math.sin((heading * Math.PI) / 180),
+  ];
+
+  // Create the heading line from edge of circle
+  const headingLine = [startPoint, endPoint];
 
   // Add the heading indicator
   headingMarker = L.polyline(headingLine, {
     color: "#4285F4",
     weight: 5,
-    opacity: 0.7,
+    opacity: 0.9,
+    lineCap: "round",
   }).addTo(map);
 }
 
