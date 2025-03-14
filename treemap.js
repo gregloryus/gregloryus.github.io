@@ -28,12 +28,11 @@ function initMap() {
       closeOnZeroBearing: false,
       position: "topleft",
     },
+    attributionControl: false, // Remove the attribution control
   }).setView([42.0451, -87.6877], 14);
 
-  // Add OpenStreetMap tile layer
+  // Add OpenStreetMap tile layer without attribution
   L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png", {
-    attribution:
-      '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>',
     subdomains: "abcd",
     maxZoom: 50,
   }).addTo(map);
@@ -87,16 +86,6 @@ function initMap() {
     return div;
   };
   loadingIndicator.addTo(map);
-
-  // Add count display
-  const treeCountDisplay = L.control({ position: "topright" });
-  treeCountDisplay.onAdd = function (map) {
-    const div = L.DomUtil.create("div", "info-panel");
-    div.id = "tree-count";
-    div.innerHTML = "Loading trees...";
-    return div;
-  };
-  treeCountDisplay.addTo(map);
 
   // Add name toggle button
   const nameToggleButton = L.control({ position: "bottomright" });
@@ -175,9 +164,6 @@ function initMap() {
     },
     { passive: false }
   );
-
-  // Make sure map supports rotation
-  enableMapRotation();
 }
 
 // Setup device orientation to get compass heading with iOS priority
@@ -220,7 +206,6 @@ function handleiOSOrientation(event) {
   // iOS provides webkitCompassHeading which is already calibrated
   if (event.webkitCompassHeading !== undefined) {
     // webkitCompassHeading is measured clockwise from north in degrees (0-359)
-    // Leaflet.Rotate expects bearing in degrees clockwise from north
     const heading = event.webkitCompassHeading;
 
     // Only rotate if auto-rotation is enabled
@@ -506,10 +491,8 @@ function hideLoading() {
 
 // Update tree count display
 function updateTreeCount(visible, total) {
-  const countDisplay = document.getElementById("tree-count");
-  if (countDisplay) {
-    countDisplay.innerHTML = `Showing ${visible} of ${total} trees`;
-  }
+  // Function intentionally left empty as we no longer show the count
+  return;
 }
 
 // Load tree data from file
@@ -1013,52 +996,7 @@ function updateVisibleTrees() {
   hideLoading();
 }
 
-// Function to enable map rotation capabilities
-function enableMapRotation() {
-  // Check if Leaflet has already been extended with rotation capabilities
-  if (!L.Map.prototype.setBearing) {
-    // Add rotation capabilities to Leaflet map
-    L.Map.include({
-      setBearing: function (bearing) {
-        // Only rotate the map content, not the controls
-        rotateMapContent(bearing);
-
-        // Fire a rotation event
-        this.fire("rotate");
-
-        return this;
-      },
-
-      getBearing: function () {
-        return this._bearing || 0;
-      },
-
-      resetBearing: function () {
-        // Reset map pane rotation
-        const mapPane =
-          this._mapPane || document.querySelector(".leaflet-map-pane");
-        if (mapPane) {
-          mapPane.style.transform = "";
-        }
-
-        // Reset all text labels
-        const textLabels = document.querySelectorAll(".tree-text-label");
-        textLabels.forEach((label) => {
-          label.style.transform = "";
-        });
-
-        this._bearing = 0;
-
-        // Trigger a moveend to refresh the view
-        this.fire("moveend");
-
-        return this;
-      },
-    });
-  }
-}
-
-// Update toggle rotation function
+// Simplified toggleMapRotation function
 function toggleMapRotation() {
   autoRotateMap = !autoRotateMap;
 
@@ -1069,16 +1007,16 @@ function toggleMapRotation() {
       toggleButton.style.backgroundColor = "#4285F4";
       toggleButton.style.color = "white";
 
-      // If we have orientation permission, reapply the current heading
-      if (window.hasOrientationPermission) {
-        // We'll let the orientation events update the bearing
+      // Reset heading marker if we have user location
+      if (userMarker && map.getBearing) {
+        updateHeadingIndicator(map.getBearing());
       }
     } else {
       toggleButton.style.backgroundColor = "white";
       toggleButton.style.color = "black";
 
       // Reset to north up
-      if (map && map.setBearing) {
+      if (map) {
         map.setBearing(0);
       }
     }
