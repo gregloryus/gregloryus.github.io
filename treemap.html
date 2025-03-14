@@ -20,6 +20,7 @@
             font-family: Arial, sans-serif;
             position: fixed; /* Prevent scrolling on mobile */
             overflow: hidden;
+            touch-action: none; /* Disable browser's touch handling */
         }
         
         #map {
@@ -28,7 +29,6 @@
             bottom: 0;
             width: 100%;
             height: 100%;
-            touch-action: manipulation; /* Improve touch handling */
         }
         
         .custom-button {
@@ -52,13 +52,51 @@
         .mapboxgl-popup-content {
             padding: 15px;
             border-radius: 8px;
+            font-size: 16px;
+        }
+        
+        .mapboxgl-popup-close-button {
+            font-size: 20px;
+            padding: 5px;
+            right: 5px;
+            top: 5px;
         }
         
         /* Make loading indicator more visible */
         #loading-indicator {
+            position: absolute;
+            bottom: 10px;
+            left: 10px;
+            z-index: 999;
+            background-color: rgba(255, 255, 255, 0.9);
             padding: 10px 15px;
+            border-radius: 5px;
+            font-weight: bold;
             font-size: 16px;
-            z-index: 9999;
+            box-shadow: 0 0 10px rgba(0,0,0,0.2);
+            display: none;
+        }
+        
+        /* Tree popup container */
+        .tree-popup-container {
+            max-width: 300px;
+        }
+        
+        /* User marker pulse animation */
+        .user-marker {
+            animation: pulse 2s infinite;
+        }
+        
+        @keyframes pulse {
+            0% {
+                box-shadow: 0 0 0 0 rgba(66, 133, 244, 0.7);
+            }
+            70% {
+                box-shadow: 0 0 0 10px rgba(66, 133, 244, 0);
+            }
+            100% {
+                box-shadow: 0 0 0 0 rgba(66, 133, 244, 0);
+            }
         }
     </style>
 </head>

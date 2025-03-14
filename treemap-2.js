@@ -10,6 +10,7 @@ let displayScientificNames = false; // Default to common names
 let clusterSourceAdded = false;
 let userHeading = 0;
 let initialLoad = true;
+let permissionRequested = false; // Track if we've already asked for permissions
 
 // Mapbox access token - REPLACE WITH YOUR OWN TOKEN
 const mapboxAccessToken =
@@ -33,11 +34,11 @@ function hideLoading() {
   }
 }
 
-// Initialize the map with touch controls
+// Initialize the map with improved touch controls
 function initMap() {
   console.log("Initializing map with Mapbox...");
 
-  // Initialize Mapbox map
+  // Initialize Mapbox map with better touch handling
   mapboxgl.accessToken = mapboxAccessToken;
 
   map = new mapboxgl.Map({
@@ -49,13 +50,14 @@ function initMap() {
     bearing: 0,
     pitchWithRotate: false,
     dragRotate: false,
-    // Add these explicit touch-friendly settings
+    // Enhanced touch settings for mobile
     boxZoom: true,
     doubleClickZoom: true,
-    touchZoomRotate: {
-      around: "center",
-      pinch: true,
+    touchZoomRotate: true, // Enable touch zoom/rotate
+    dragPan: {
+      enableTouch: true, // Explicitly enable touch dragging
     },
+    interactive: true, // Ensure the map is interactive
   });
 
   // Add navigation control (zoom buttons)
@@ -119,11 +121,8 @@ function initMap() {
 
     // Automatically request user location after map is initialized
     setTimeout(function () {
-      getUserLocation();
+      getUserLocation(true); // true = initial load, less intrusive
     }, 1000);
-
-    // Setup device orientation with iOS focus
-    setupDeviceOrientation();
   });
 }
 
@@ -144,33 +143,44 @@ function addLocationButton() {
     locationButton.style.left = "10px";
     locationButton.style.zIndex = "10";
     locationButton.style.backgroundColor = "white";
-    locationButton.style.padding = "5px 10px";
+    locationButton.style.padding = "10px";
     locationButton.style.borderRadius = "4px";
     locationButton.style.boxShadow = "0 0 10px rgba(0, 0, 0, 0.3)";
     locationButton.style.cursor = "pointer";
+    locationButton.style.width = "44px";
+    locationButton.style.height = "44px";
+    locationButton.style.display = "flex";
+    locationButton.style.alignItems = "center";
+    locationButton.style.justifyContent = "center";
+    locationButton.style.fontSize = "20px";
     document.getElementById("map").appendChild(locationButton);
   }
 
   // Add event listener (remove any existing ones first)
-  locationButton.removeEventListener("click", getUserLocation);
-  locationButton.addEventListener("click", getUserLocation);
+  locationButton.removeEventListener("click", locationButtonClicked);
+  locationButton.addEventListener("click", locationButtonClicked);
+}
+
+// Location button click handler
+function locationButtonClicked() {
+  // Call getUserLocation with false to indicate this was a manual request
+  getUserLocation(false);
 }
 
 // Add name toggle button
 function addNameToggleButton() {
   // Create a custom HTML element for the button
   const nameToggleButton = document.createElement("div");
-  nameToggleButton.className =
-    "mapboxgl-ctrl mapboxgl-ctrl-group name-toggle-button";
-  nameToggleButton.innerHTML =
-    '<button id="name-toggle" type="button" title="Toggle Scientific/Common Names" style="font-weight: bold; text-decoration: none; color: black; display: block; text-align: center; padding: 5px; background-color: white; width: auto;">Scientific Names</button>';
-  nameToggleButton.addEventListener("click", toggleNameDisplay);
-
-  // Add the custom control directly to the DOM
+  nameToggleButton.id = "name-toggle-button";
+  nameToggleButton.className = "custom-button";
   nameToggleButton.style.position = "absolute";
   nameToggleButton.style.bottom = "10px"; // Ensure it's visible in portrait mode
   nameToggleButton.style.right = "10px";
   nameToggleButton.style.zIndex = "10"; // Higher than default controls
+  nameToggleButton.style.minWidth = "auto";
+  nameToggleButton.style.padding = "10px 15px";
+  nameToggleButton.innerHTML = "Scientific Names";
+  nameToggleButton.addEventListener("click", toggleNameDisplay);
   document.getElementById("map").appendChild(nameToggleButton);
 }
 
@@ -179,7 +189,7 @@ function toggleNameDisplay() {
   displayScientificNames = !displayScientificNames;
 
   // Update the button text
-  const toggleButton = document.getElementById("name-toggle");
+  const toggleButton = document.getElementById("name-toggle-button");
   if (toggleButton) {
     toggleButton.textContent = displayScientificNames
       ? "Scientific Names"
@@ -236,11 +246,11 @@ function setupClusterLayers() {
       "circle-radius": [
         "step",
         ["get", "point_count"],
-        20, // radius for clusters with < 10 points
+        25, // radius for clusters with < 10 points (larger for touch)
         10,
-        30, // radius for clusters with < 50 points
+        35, // radius for clusters with < 50 points
         50,
-        40, // radius for clusters with >= 50 points
+        45, // radius for clusters with >= 50 points
       ],
       "circle-opacity": 0.7,
     },
@@ -255,7 +265,7 @@ function setupClusterLayers() {
     layout: {
       "text-field": "{point_count_abbreviated}",
       "text-font": ["DIN Offc Pro Medium", "Arial Unicode MS Bold"],
-      "text-size": 12,
+      "text-size": 14, // Larger text for better touch
     },
     paint: {
       "text-color": "#ffffff",
@@ -275,15 +285,15 @@ function setupClusterLayers() {
         ["linear"],
         ["zoom"],
         14,
-        ["*", 0.5, ["sqrt", ["max", ["get", "dbh"], 1]]], // smaller at low zoom
+        ["*", 0.8, ["sqrt", ["max", ["get", "dbh"], 1]]], // slightly larger at low zoom
         18,
-        ["*", 2, ["sqrt", ["max", ["get", "dbh"], 1]]], // larger at high zoom
+        ["*", 2.5, ["sqrt", ["max", ["get", "dbh"], 1]]], // larger at high zoom
         20,
-        ["*", 4, ["sqrt", ["max", ["get", "dbh"], 1]]], // even larger at highest zoom
+        ["*", 5, ["sqrt", ["max", ["get", "dbh"], 1]]], // even larger at highest zoom
       ],
-      "circle-stroke-width": 1,
-      "circle-stroke-color": "#000000",
-      "circle-opacity": 0.4, // More transparent
+      "circle-stroke-width": 1.5,
+      "circle-stroke-color": "#ffffff",
+      "circle-opacity": 0.6, // More transparent
     },
   });
 
@@ -302,12 +312,12 @@ function setupClusterLayers() {
         17,
         0, // No labels at lower zoom levels
         18,
-        10, // Fixed minimum size at zoom level 18
+        12, // Larger minimum size at zoom level 18
         20,
-        14, // Larger fixed size at highest zoom
+        16, // Larger fixed size at highest zoom
       ],
       "text-font": ["DIN Offc Pro Medium", "Arial Unicode MS Bold"],
-      "text-offset": [0, -1.5], // Position labels above the circles
+      "text-offset": [0, -2], // Position labels above the circles
       "text-anchor": "center",
       "text-allow-overlap": false,
       "text-ignore-placement": false,
@@ -315,14 +325,14 @@ function setupClusterLayers() {
       "text-max-width": 12, // Allow text to wrap if needed
     },
     paint: {
-      "text-color": ["get", "color"],
+      "text-color": "#ffffff",
       "text-halo-color": "#000000",
       "text-halo-width": 2, // Thicker halo for better contrast against the map
       "text-opacity": 0.9, // Slightly transparent text
     },
   });
 
-  // Add click handler for tree features
+  // Add click handler for tree features with larger hit area for touch
   map.on("click", "unclustered-trees", function (e) {
     const feature = e.features[0];
     showTreePopup(feature, e.lngLat);
@@ -332,24 +342,6 @@ function setupClusterLayers() {
   map.on("click", "tree-labels", function (e) {
     const feature = e.features[0];
     showTreePopup(feature, e.lngLat);
-  });
-
-  // Also add cursor style for tree labels
-  map.on("mouseenter", "tree-labels", function () {
-    map.getCanvas().style.cursor = "pointer";
-  });
-
-  map.on("mouseleave", "tree-labels", function () {
-    map.getCanvas().style.cursor = "";
-  });
-
-  // Change cursor on hover for tree circles
-  map.on("mouseenter", "unclustered-trees", function () {
-    map.getCanvas().style.cursor = "pointer";
-  });
-
-  map.on("mouseleave", "unclustered-trees", function () {
-    map.getCanvas().style.cursor = "";
   });
 
   // Handle cluster clicks to zoom in
@@ -371,13 +363,16 @@ function setupClusterLayers() {
       });
   });
 
-  // Change cursor on cluster hover
-  map.on("mouseenter", "clusters", function () {
-    map.getCanvas().style.cursor = "pointer";
-  });
+  // Change cursor on hover for all interactive elements
+  const interactiveLayers = ["clusters", "unclustered-trees", "tree-labels"];
+  interactiveLayers.forEach((layer) => {
+    map.on("mouseenter", layer, () => {
+      map.getCanvas().style.cursor = "pointer";
+    });
 
-  map.on("mouseleave", "clusters", function () {
-    map.getCanvas().style.cursor = "";
+    map.on("mouseleave", layer, () => {
+      map.getCanvas().style.cursor = "";
+    });
   });
 
   console.log("✅ All cluster layers added successfully");
@@ -388,8 +383,16 @@ function showTreePopup(feature, lngLat) {
   // Create popup content
   const popupContent = createPopupContent(feature.properties);
 
-  // Create and show the popup
-  new mapboxgl.Popup().setLngLat(lngLat).setHTML(popupContent).addTo(map);
+  // Create and show the popup with mobile-friendly settings
+  new mapboxgl.Popup({
+    closeButton: true,
+    closeOnClick: true,
+    maxWidth: "300px",
+    className: "tree-popup-container",
+  })
+    .setLngLat(lngLat)
+    .setHTML(popupContent)
+    .addTo(map);
 }
 
 // Load tree data from file
@@ -640,17 +643,56 @@ function updateVisibleTrees() {
 }
 
 // Get user's current location
-function getUserLocation() {
+function getUserLocation(initialRequest = false) {
   if (navigator.geolocation) {
     // Show a message while we're getting location
     showLoading("Getting your location...");
 
+    // Combine location and orientation permission for iOS to reduce popups
+    if (
+      initialRequest &&
+      typeof DeviceOrientationEvent !== "undefined" &&
+      typeof DeviceOrientationEvent.requestPermission === "function" &&
+      !permissionRequested
+    ) {
+      permissionRequested = true;
+      // On iOS, request orientation permission at the same time
+      DeviceOrientationEvent.requestPermission()
+        .then((permissionState) => {
+          if (permissionState === "granted") {
+            window.addEventListener(
+              "deviceorientation",
+              handleOrientationAny,
+              true
+            );
+            window.hasOrientationPermission = true;
+          }
+          // Proceed with location request either way
+          requestLocation();
+        })
+        .catch((error) => {
+          // If orientation fails, still proceed with location
+          console.log("Orientation permission error:", error);
+          requestLocation();
+        });
+    } else {
+      // Not iOS or not initial request, just get location
+      requestLocation();
+    }
+  } else {
+    hideLoading();
+    alert(
+      "Geolocation is not supported by your browser. Please use a modern browser like Chrome, Firefox, or Safari."
+    );
+  }
+
+  function requestLocation() {
     navigator.geolocation.getCurrentPosition(
       // Success callback
       (position) => {
         hideLoading();
         const userLocation = [
-          position.coords.longitude, // Mapbox uses [lng, lat] order
+          position.coords.longitude,
           position.coords.latitude,
         ];
 
@@ -659,14 +701,15 @@ function getUserLocation() {
           userLocationMarker.remove();
         }
 
-        // Create the user marker element
+        // Create the user marker element (larger, more visible marker)
         const userMarkerElement = document.createElement("div");
         userMarkerElement.className = "user-marker";
         userMarkerElement.style.backgroundColor = "#4285F4";
-        userMarkerElement.style.width = "15px";
-        userMarkerElement.style.height = "15px";
+        userMarkerElement.style.width = "18px";
+        userMarkerElement.style.height = "18px";
         userMarkerElement.style.borderRadius = "50%";
-        userMarkerElement.style.border = "2px solid white";
+        userMarkerElement.style.border = "3px solid white";
+        userMarkerElement.style.boxShadow = "0 0 5px rgba(0,0,0,0.5)";
 
         // Add a marker at the user's location
         userLocationMarker = new mapboxgl.Marker({
@@ -680,54 +723,17 @@ function getUserLocation() {
         map.flyTo({
           center: userLocation,
           zoom: 19,
-          bearing: userHeading, // Apply any existing heading
-          essential: true, // This animation is considered essential with respect to prefers-reduced-motion
+          bearing: userHeading,
+          essential: true,
         });
-
-        // After getting location, make sure orientation is also enabled for iOS devices
-        if (
-          typeof DeviceOrientationEvent.requestPermission === "function" &&
-          !window.hasOrientationPermission
-        ) {
-          showOrientationPermissionPrompt();
-        }
       },
-      // Error callback - with improved error handling
+      // Error callback - with simplified error handling
       (error) => {
         hideLoading();
         console.error("Error getting location:", error);
 
-        let errorMessage = "";
-
-        switch (error.code) {
-          case error.PERMISSION_DENIED:
-            errorMessage =
-              "Location permission was denied. Please enable location services in your browser settings and try again.";
-            // Show instructions based on browser
-            if (/Chrome/i.test(navigator.userAgent)) {
-              errorMessage +=
-                "\n\nIn Chrome: Click the lock icon in the address bar, then set Location to 'Allow'.";
-            } else if (/Firefox/i.test(navigator.userAgent)) {
-              errorMessage +=
-                "\n\nIn Firefox: Click the lock icon in the address bar, then go to Permissions and allow Location Access.";
-            } else if (/Safari/i.test(navigator.userAgent)) {
-              errorMessage +=
-                "\n\nIn Safari: Go to Safari Preferences > Websites > Location and allow for this site.";
-            }
-            break;
-          case error.POSITION_UNAVAILABLE:
-            errorMessage =
-              "Location information is unavailable. Try again later or check your device settings.";
-            break;
-          case error.TIMEOUT:
-            errorMessage = "Location request timed out. Please try again.";
-            break;
-          default:
-            errorMessage =
-              "An unknown error occurred while getting your location. Please try again.";
-        }
-
-        // Show error alert with more helpful information
+        let errorMessage =
+          "Location access was denied or unavailable. Please enable location services and try again.";
         alert(errorMessage);
 
         // Fall back to a default view of Evanston
@@ -739,64 +745,15 @@ function getUserLocation() {
       // Options - increased timeout and improved accuracy
       {
         enableHighAccuracy: true,
-        timeout: 15000,
+        timeout: 10000,
         maximumAge: 0,
       }
     );
-  } else {
-    alert(
-      "Geolocation is not supported by your browser. Please use a modern browser like Chrome, Firefox, or Safari."
-    );
   }
 }
 
-// Setup device orientation to get compass heading with iOS priority
-function setupDeviceOrientation() {
-  // Check if device supports orientation events
-  if (window.DeviceOrientationEvent) {
-    // Check if we're on iOS (iOS 13+ needs permission)
-    if (typeof DeviceOrientationEvent.requestPermission === "function") {
-      // iOS-specific setup
-      setupiOSOrientation();
-    } else {
-      // Non-iOS setup (Android, desktop)
-      window.addEventListener(
-        "deviceorientationabsolute",
-        handleOrientation,
-        true
-      );
-      // Fallback to regular deviceorientation if absolute is not available
-      window.addEventListener("deviceorientation", handleOrientation, true);
-    }
-  } else {
-    console.log("Device orientation not supported on this device");
-  }
-}
-
-// iOS-specific orientation setup
-function setupiOSOrientation() {
-  // If we already have permission, add the listener
-  if (window.hasOrientationPermission) {
-    window.addEventListener("deviceorientation", handleiOSOrientation, true);
-    return;
-  }
-
-  // Show the permission prompt
-  showOrientationPermissionPrompt();
-}
-
-// iOS-specific orientation handler - update map rotation
-function handleiOSOrientation(event) {
-  // iOS provides webkitCompassHeading which is already calibrated
-  if (event.webkitCompassHeading !== undefined) {
-    // webkitCompassHeading is measured clockwise from north in degrees (0-359)
-    userHeading = event.webkitCompassHeading;
-    updateMapRotation(userHeading);
-  }
-}
-
-// General orientation handler - update map rotation
-function handleOrientation(event) {
+// Simplified device orientation handler
+function handleOrientationAny(event) {
   let heading;
 
   // Try to get the most accurate heading depending on what's available
@@ -804,11 +761,10 @@ function handleOrientation(event) {
     // iOS compass heading
     heading = event.webkitCompassHeading;
   } else if (event.absolute === true && event.alpha !== null) {
-    // Android absolute orientation (alpha is measured counterclockwise from west)
-    // Convert to clockwise from north
+    // Android absolute orientation
     heading = (360 - event.alpha) % 360;
   } else if (event.alpha !== null) {
-    // Fallback: non-absolute alpha
+    // Fallback non-absolute alpha
     heading = (360 - event.alpha) % 360;
   } else {
     // No usable heading data
@@ -816,120 +772,14 @@ function handleOrientation(event) {
   }
 
   userHeading = heading;
-  updateMapRotation(heading);
-}
 
-// Update the map rotation based on the heading
-function updateMapRotation(heading) {
-  // Only update if we have a user marker and heading is valid
-  if (!userLocationMarker || heading === undefined) return;
-
-  // Update the map bearing (rotation) to match the user's heading
-  map.easeTo({
-    bearing: heading,
-    duration: 300, // smooth transition over 300ms
-  });
-
-  // Store the current heading for later use
-  userHeading = heading;
-}
-
-// Show a prompt optimized for iOS to get orientation permission
-function showOrientationPermissionPrompt() {
-  // Create an iOS-style overlay
-  const overlay = document.createElement("div");
-  overlay.style.position = "fixed";
-  overlay.style.top = "0";
-  overlay.style.left = "0";
-  overlay.style.width = "100%";
-  overlay.style.height = "100%";
-  overlay.style.backgroundColor = "rgba(0,0,0,0.7)";
-  overlay.style.zIndex = "1000";
-  overlay.style.display = "flex";
-  overlay.style.flexDirection = "column";
-  overlay.style.alignItems = "center";
-  overlay.style.justifyContent = "center";
-  overlay.style.color = "white";
-  overlay.style.textAlign = "center";
-  overlay.style.padding = "20px";
-  overlay.style.fontFamily =
-    "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif";
-
-  // iOS-style dialog content
-  overlay.innerHTML = `
-    <div style="background-color: #fff; padding: 20px; border-radius: 13px; max-width: 280px; color: #000;">
-      <h2 style="margin-top: 0; font-size: 18px;">Allow Access to Motion & Orientation</h2>
-      <p style="margin-bottom: 20px; font-size: 14px;">This enables the compass feature that shows which direction you're facing on the map.</p>
-      <button style="background-color: #007AFF; border: none; color: white; padding: 10px 0; 
-                  border-radius: 10px; font-weight: 600; margin-top: 15px; width: 100%; font-size: 16px;">Allow</button>
-    </div>
-  `;
-
-  document.body.appendChild(overlay);
-
-  // Handle the permission request when the user taps Allow
-  overlay.querySelector("button").addEventListener(
-    "click",
-    function () {
-      DeviceOrientationEvent.requestPermission()
-        .then((permissionState) => {
-          if (permissionState === "granted") {
-            // Add the orientation event listener for iOS
-            window.addEventListener(
-              "deviceorientation",
-              handleiOSOrientation,
-              true
-            );
-            window.hasOrientationPermission = true;
-
-            // Remove the overlay
-            document.body.removeChild(overlay);
-          } else {
-            // Update overlay to show permission denial
-            overlay.innerHTML = `
-            <div style="background-color: #fff; padding: 20px; border-radius: 13px; max-width: 280px; color: #000;">
-              <h2 style="margin-top: 0; font-size: 18px;">Permission Denied</h2>
-              <p style="margin-bottom: 20px; font-size: 14px;">The compass feature won't work without motion access. You can enable it in Settings > Safari > Motion & Orientation Access.</p>
-              <button style="background-color: #007AFF; border: none; color: white; padding: 10px 0; 
-                          border-radius: 10px; font-weight: 600; margin-top: 15px; width: 100%; font-size: 16px;">Close</button>
-            </div>
-          `;
-
-            // Add a new click handler to close the overlay
-            overlay.querySelector("button").addEventListener(
-              "click",
-              function () {
-                document.body.removeChild(overlay);
-              },
-              { once: true }
-            );
-          }
-        })
-        .catch((error) => {
-          console.error("Error requesting orientation permission:", error);
-
-          // Update overlay to show error
-          overlay.innerHTML = `
-          <div style="background-color: #fff; padding: 20px; border-radius: 13px; max-width: 280px; color: #000;">
-            <h2 style="margin-top: 0; font-size: 18px;">Error</h2>
-            <p style="margin-bottom: 20px; font-size: 14px;">There was a problem accessing compass features. Make sure your iOS is updated and try again.</p>
-            <button style="background-color: #007AFF; border: none; color: white; padding: 10px 0; 
-                        border-radius: 10px; font-weight: 600; margin-top: 15px; width: 100%; font-size: 16px;">Close</button>
-          </div>
-        `;
-
-          // Add a new click handler to close the overlay
-          overlay.querySelector("button").addEventListener(
-            "click",
-            function () {
-              document.body.removeChild(overlay);
-            },
-            { once: true }
-          );
-        });
-    },
-    { once: true }
-  );
+  // Only update map if we have a user marker
+  if (userLocationMarker) {
+    map.easeTo({
+      bearing: heading,
+      duration: 300,
+    });
+  }
 }
 
 // Helper function to create consistent popup content
@@ -952,14 +802,14 @@ function createPopupContent(properties) {
     }
   }
 
-  // Create the popup HTML with monospace font and consistent formatting
-  return `<div class="tree-popup" style="min-width: 200px; font-family: 'Courier New', monospace; font-size: 14px; line-height: 1.5;">
-    <div style="font-weight: bold; text-transform: uppercase;">${commonName}</div>
-    <div style="font-style: italic;">${species}</div>
-    <div>${dbh} ft. wide</div>
+  // Create the popup HTML with improved styling for touch
+  return `<div class="tree-popup" style="min-width: 200px; font-family: 'Courier New', monospace; font-size: 16px; line-height: 1.5; padding: 10px;">
+    <div style="font-weight: bold; text-transform: uppercase; font-size: 18px; margin-bottom: 8px;">${commonName}</div>
+    <div style="font-style: italic; margin-bottom: 8px;">${species}</div>
+    <div style="margin-bottom: 8px;">${dbh} ft. wide</div>
     ${
       lastUpdated
-        ? `<div style="color: #777;">Last updated: ${lastUpdated}</div>`
+        ? `<div style="color: #777; font-size: 14px;">Last updated: ${lastUpdated}</div>`
         : ""
     }
   </div>`;
@@ -969,19 +819,19 @@ function createPopupContent(properties) {
 function getTreeColor(properties) {
   const genus = properties.genus || "";
 
-  // Color coding by common genera
+  // Color coding by common genera with brighter colors for better visibility
   const genusColors = {
-    Acer: "#e41a1c", // Maple - red
-    Quercus: "#4daf4a", // Oak - green
-    Ulmus: "#377eb8", // Elm - blue
-    Tilia: "#ff7f00", // Linden - orange
-    Gleditsia: "#984ea3", // Honeylocust - purple
-    Fraxinus: "#ffff33", // Ash - yellow
-    Celtis: "#a65628", // Hackberry - brown
-    Platanus: "#f781bf", // Sycamore - pink
+    Acer: "#ff4d4d", // Maple - brighter red
+    Quercus: "#4dff4d", // Oak - brighter green
+    Ulmus: "#4d4dff", // Elm - brighter blue
+    Tilia: "#ffaa00", // Linden - brighter orange
+    Gleditsia: "#aa44ff", // Honeylocust - brighter purple
+    Fraxinus: "#ffff55", // Ash - brighter yellow
+    Celtis: "#cc6633", // Hackberry - brighter brown
+    Platanus: "#ff66cc", // Sycamore - brighter pink
   };
 
-  return genusColors[genus] || "#999999"; // Default gray
+  return genusColors[genus] || "#cccccc"; // Lighter gray default
 }
 
 // Initialize when the page loads
