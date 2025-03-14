@@ -123,6 +123,9 @@ function initMap() {
     setTimeout(function () {
       getUserLocation(true); // true = initial load, less intrusive
     }, 1000);
+
+    // Setup device orientation properly
+    setupDeviceOrientation();
   });
 }
 
@@ -648,37 +651,8 @@ function getUserLocation(initialRequest = false) {
     // Show a message while we're getting location
     showLoading("Getting your location...");
 
-    // Combine location and orientation permission for iOS to reduce popups
-    if (
-      initialRequest &&
-      typeof DeviceOrientationEvent !== "undefined" &&
-      typeof DeviceOrientationEvent.requestPermission === "function" &&
-      !permissionRequested
-    ) {
-      permissionRequested = true;
-      // On iOS, request orientation permission at the same time
-      DeviceOrientationEvent.requestPermission()
-        .then((permissionState) => {
-          if (permissionState === "granted") {
-            window.addEventListener(
-              "deviceorientation",
-              handleOrientationAny,
-              true
-            );
-            window.hasOrientationPermission = true;
-          }
-          // Proceed with location request either way
-          requestLocation();
-        })
-        .catch((error) => {
-          // If orientation fails, still proceed with location
-          console.log("Orientation permission error:", error);
-          requestLocation();
-        });
-    } else {
-      // Not iOS or not initial request, just get location
-      requestLocation();
-    }
+    // Just request location directly - orientation is handled separately now
+    requestLocation();
   } else {
     hideLoading();
     alert(
@@ -726,6 +700,9 @@ function getUserLocation(initialRequest = false) {
           bearing: userHeading,
           essential: true,
         });
+
+        // Add debug message for orientation
+        console.log("Current heading:", userHeading);
       },
       // Error callback - with simplified error handling
       (error) => {
@@ -752,32 +729,116 @@ function getUserLocation(initialRequest = false) {
   }
 }
 
-// Simplified device orientation handler
-function handleOrientationAny(event) {
+// Setup device orientation to get compass heading with iOS priority
+function setupDeviceOrientation() {
+  console.log("Setting up device orientation...");
+
+  // Check if device supports orientation events
+  if (window.DeviceOrientationEvent) {
+    // iOS 13+ requires permission request
+    if (typeof DeviceOrientationEvent.requestPermission === "function") {
+      // For iOS devices
+      if (!permissionRequested) {
+        permissionRequested = true;
+
+        // Create a button for requesting permission (required by iOS)
+        const orientationButton = document.createElement("div");
+        orientationButton.className = "custom-button";
+        orientationButton.style.position = "absolute";
+        orientationButton.style.top = "10px";
+        orientationButton.style.right = "10px";
+        orientationButton.style.zIndex = "999";
+        orientationButton.innerHTML = "Enable Compass";
+        orientationButton.addEventListener("click", requestiOSPermission);
+        document.getElementById("map").appendChild(orientationButton);
+
+        console.log("iOS device detected. Added compass permission button.");
+      }
+    } else {
+      // For non-iOS devices, just add the listeners directly
+      console.log("Non-iOS device, adding orientation listeners directly");
+
+      // Try deviceorientationabsolute event first (more accurate)
+      window.addEventListener(
+        "deviceorientationabsolute",
+        handleOrientation,
+        true
+      );
+
+      // Fallback to regular deviceorientation if absolute is not available
+      window.addEventListener("deviceorientation", handleOrientation, true);
+    }
+  } else {
+    console.log("Device orientation not supported on this device");
+  }
+
+  // Function to request iOS permission when button is clicked
+  function requestiOSPermission() {
+    console.log("Requesting iOS orientation permission...");
+
+    DeviceOrientationEvent.requestPermission()
+      .then((permissionState) => {
+        if (permissionState === "granted") {
+          console.log("✅ iOS orientation permission granted");
+          // Add the event listener
+          window.addEventListener("deviceorientation", handleOrientation, true);
+          // Remove the button
+          event.target.remove();
+        } else {
+          console.log("❌ iOS orientation permission denied");
+          alert(
+            "Compass feature won't work without motion & orientation access."
+          );
+        }
+      })
+      .catch((error) => {
+        console.error("Error requesting orientation permission:", error);
+        alert("There was a problem enabling the compass. Please try again.");
+      });
+  }
+}
+
+// Universal orientation handler that works on iOS and Android
+function handleOrientation(event) {
+  // Debug orientation data
+  console.log(
+    "Orientation event received:",
+    event.alpha !== null ? `alpha: ${event.alpha}` : "no alpha",
+    event.webkitCompassHeading !== undefined
+      ? `webkitCompassHeading: ${event.webkitCompassHeading}`
+      : "no webkitCompassHeading"
+  );
+
   let heading;
 
   // Try to get the most accurate heading depending on what's available
   if (event.webkitCompassHeading !== undefined) {
-    // iOS compass heading
+    // iOS compass heading (already calibrated)
     heading = event.webkitCompassHeading;
+    console.log("Using iOS webkitCompassHeading:", heading);
   } else if (event.absolute === true && event.alpha !== null) {
-    // Android absolute orientation
+    // Android absolute orientation (alpha is measured counterclockwise from west)
+    // Convert to clockwise from north
     heading = (360 - event.alpha) % 360;
+    console.log("Using absolute orientation alpha:", heading);
   } else if (event.alpha !== null) {
-    // Fallback non-absolute alpha
+    // Fallback for non-absolute orientation
     heading = (360 - event.alpha) % 360;
+    console.log("Using fallback orientation alpha:", heading);
   } else {
     // No usable heading data
+    console.log("No usable heading data available");
     return;
   }
 
   userHeading = heading;
 
-  // Only update map if we have a user marker
+  // Update the map rotation if we have a user marker
   if (userLocationMarker) {
+    console.log("Updating map bearing to:", heading);
     map.easeTo({
       bearing: heading,
-      duration: 300,
+      duration: 300, // smooth transition
     });
   }
 }
