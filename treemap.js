@@ -203,12 +203,8 @@ function setupiOSOrientation() {
 
 // iOS-specific orientation handler
 function handleiOSOrientation(event) {
-  // iOS provides webkitCompassHeading which is already calibrated
   if (event.webkitCompassHeading !== undefined) {
-    // webkitCompassHeading is measured clockwise from north in degrees (0-359)
     const heading = event.webkitCompassHeading;
-
-    // Only rotate if auto-rotation is enabled
     if (autoRotateMap && map) {
       map.setBearing(heading);
       updateHeadingIndicator(heading);
