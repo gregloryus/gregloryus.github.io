@@ -15,10 +15,10 @@ function initMap() {
   console.log("Initializing map...");
   // Create a map centered on Evanston, IL
   map = L.map("map", {
-    maxZoom: 25, // Very high but finite number
-    zoomSnap: 0, // Disable zoom snapping
-    zoomDelta: 0.1, // Allow for very fine zoom control
-    wheelPxPerZoomLevel: 150, // Make scroll wheel zooming very gradual
+    maxZoom: 50, // High maximum zoom level
+    zoomSnap: 0.5, // Snap to increments of 0.5
+    zoomDelta: 1.0, // Each click changes zoom by 1.0 instead of 0.1
+    wheelPxPerZoomLevel: 80, // Less scrolling required to zoom
   }).setView([42.0451, -87.6877], 14);
 
   // Add OpenStreetMap tile layer
@@ -26,7 +26,7 @@ function initMap() {
     attribution:
       '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>',
     subdomains: "abcd",
-    maxZoom: 25, // Match the map's maxZoom
+    maxZoom: 50, // Increased from 25 to 50 to match the map's maxZoom
   }).addTo(map);
 
   // Initialize marker cluster group with improved settings for precision
@@ -36,19 +36,18 @@ function initMap() {
     chunkDelay: 50,
     maxClusterRadius: function (zoom) {
       // Reduce clustering radius as zoom level increases
-      return zoom >= 22
-        ? 3
-        : zoom >= 20
-        ? 5
+      // At zoom 18+, use minimal clustering values
+      return zoom >= 20
+        ? 1 // Almost no clustering at very high zoom
         : zoom >= 18
-        ? 10
+        ? 3 // Very minimal clustering at zoom 18-19
         : zoom >= 16
         ? 20
         : zoom >= 14
         ? 40
         : 60;
     },
-    disableClusteringAtZoom: 22, // Disable clustering at very high zoom
+    disableClusteringAtZoom: 18, // Completely disable clustering at zoom 18 and above
     spiderfyOnMaxZoom: false,
     showCoverageOnHover: true,
     zoomToBoundsOnClick: true,
@@ -290,21 +289,8 @@ function handleOrientation(event) {
 
     // If auto-rotate is enabled, rotate the map to match the device orientation
     if (autoRotateMap && map) {
-      // Store previous heading to detect significant changes
-      const prevHeading = map.getBearing() || 0;
-
-      // Set the map bearing to match the device heading
-      map.setBearing(heading);
-
-      // If rotation changed significantly, force a view update to fill in tiles
-      if (Math.abs(heading - prevHeading) > 20) {
-        setTimeout(() => {
-          // Small pan to force tile refresh
-          const center = map.getCenter();
-          map.panBy([1, 1], { animate: false });
-          map.panBy([-1, -1], { animate: false });
-        }, 100);
-      }
+      // Only rotate the map content, not the controls or UI
+      rotateMapContent(heading);
     }
 
     // If we already have a heading marker, update it
@@ -331,6 +317,40 @@ function handleOrientation(event) {
       opacity: 0.7,
     }).addTo(map);
   }
+}
+
+// New function to properly rotate only the map content
+function rotateMapContent(bearing) {
+  // Store the current bearing for reference
+  map._bearing = bearing;
+
+  // Get the main tile container (this contains the actual map tiles)
+  const mapPane = map._mapPane || document.querySelector(".leaflet-map-pane");
+  if (!mapPane) return;
+
+  // Only rotate the map pane, not the entire container
+  mapPane.style.transform = `rotate(${-bearing}deg)`;
+
+  // Apply counter-rotation to all text labels so they stay upright
+  const textLabels = document.querySelectorAll(".tree-text-label");
+  textLabels.forEach((label) => {
+    label.style.transform = `rotate(${bearing}deg)`;
+  });
+
+  // Make sure we load tiles in the corners by padding the visible area
+  const mapSize = map.getSize();
+  const padding = Math.ceil(
+    (Math.sqrt(Math.pow(mapSize.x, 2) + Math.pow(mapSize.y, 2)) -
+      Math.min(mapSize.x, mapSize.y)) /
+      2
+  );
+
+  // Force a small pan to trigger tile loading in the expanded area
+  const center = map.getCenter();
+  map.setView(center, map.getZoom(), {
+    padding: [padding, padding],
+    animate: false,
+  });
 }
 
 // Get user's current location
@@ -558,13 +578,11 @@ function displayInitialTrees(data) {
     return;
   }
 
-  // Clear the marker cluster
   markerClusterGroup.clearLayers();
 
   const bounds = map.getBounds();
   let visibleFeatures = [];
 
-  // Only filter by bounds if we have a valid bounds object
   if (bounds && bounds.isValid()) {
     visibleFeatures = data.features.filter((feature) => {
       if (!feature.geometry || !feature.geometry.coordinates) return false;
@@ -572,11 +590,9 @@ function displayInitialTrees(data) {
       return bounds.contains(L.latLng(coords[1], coords[0]));
     });
   } else {
-    // If bounds aren't valid yet, just take a subset
     visibleFeatures = data.features.slice(0, 500);
   }
 
-  // Limit to 500 trees initially for performance
   const limitedFeatures = visibleFeatures.slice(0, 500);
 
   console.log(
@@ -584,50 +600,65 @@ function displayInitialTrees(data) {
   );
   showLoading(`Loading ${limitedFeatures.length} trees...`);
 
-  // Create filtered data
   const filteredData = {
     type: "FeatureCollection",
     features: limitedFeatures,
   };
 
-  // Create GeoJSON layer
+  // Use pointToLayer only, and remove onEachFeature
   const geoJsonLayer = L.geoJSON(filteredData, {
     pointToLayer: createTreeMarker,
-    onEachFeature: bindTreePopup,
   });
 
-  // Add to cluster group
   markerClusterGroup.addLayer(geoJsonLayer);
-
-  // Update counter
   updateTreeCount(limitedFeatures.length, data.features.length);
-
-  // Hide loading indicator
   hideLoading();
 }
 
 // Create markers for trees
 function createTreeMarker(feature, latlng) {
   const currentZoom = map.getZoom();
+  const dbh = parseFloat(feature.properties.dbh) || 0;
 
-  // At highest zoom levels (18+), use text labels instead of circles
+  // At highest zoom levels (18+), use both circles proportional to DBH and text labels
   if (currentZoom >= 18) {
-    // Get the DBH (diameter at breast height) value
-    const dbh = parseFloat(feature.properties.dbh) || 0;
-
     // Skip trees with very small DBH when zoomed in
     if (dbh < 0.5) {
-      // Return a very small, nearly invisible marker for trees we want to skip
-      return L.circleMarker(latlng, {
-        radius: 2,
+      // Create a basic marker for tiny trees that's easier to click
+      return L.circle(latlng, {
+        radius: 0.3, // Slightly larger for better clickability
         fillColor: getTreeColor(feature.properties),
         color: "#000",
-        weight: 0.5,
-        opacity: 0.4,
-        fillOpacity: 0.4,
-      });
+        weight: 1,
+        opacity: 0.7,
+        fillOpacity: 0.7,
+      }).bindPopup(createPopupContent(feature.properties));
     }
 
+    // Create shared popup content for consistency
+    const popupContent = createPopupContent(feature.properties);
+
+    // Create a layer group to hold both the circle and text label
+    const treeLayerGroup = L.layerGroup();
+
+    // 1. Create a true-scale circle based on the DBH
+    // DBH is in feet, convert to meters for Leaflet (1 foot = 0.3048 meters)
+    const diameterInFeet = dbh;
+    const radiusInMeters = (diameterInFeet / 2) * 0.3048;
+
+    // Create a properly scaled circle marker
+    const circleMarker = L.circle(latlng, {
+      radius: radiusInMeters,
+      fillColor: getTreeColor(feature.properties),
+      color: "#000",
+      weight: 1,
+      opacity: 1.0,
+      fillOpacity: 1.0,
+    }).bindPopup(popupContent);
+
+    treeLayerGroup.addLayer(circleMarker);
+
+    // 2. Create clickable text label
     // Get the appropriate name based on current display mode
     const genus = feature.properties.genus || "";
     const species = feature.properties.spp || "";
@@ -653,49 +684,87 @@ function createTreeMarker(feature, latlng) {
     const words = displayName.split(" ");
     displayName = words.join("<br>");
 
-    // Define our font size range
+    // Get the dynamically calculated font size
     const minFontSize = 9;
     const maxFontSize = 22;
-
-    // Get the dynamically calculated font size
     const fontSize = getSmartFontSize(dbh, minFontSize, maxFontSize);
 
-    // Create a text label with the tree name
-    return L.marker(latlng, {
+    // Create a clickable text label with a slightly larger clickable area
+    const textLabel = L.marker(latlng, {
       icon: L.divIcon({
         className: "tree-text-label",
         html: `<div style="
+              cursor: pointer;
               color: ${getTreeColor(feature.properties)}; 
-              text-shadow: 0px 0px 2px #000, 0px 0px 2px #000; 
+              text-shadow: 0px 0px 3px #000; 
               font-size: ${fontSize}px; 
               text-align: center; 
-              background-color: rgba(0,0,0,0.3); 
-              padding: 3px; 
-              border-radius: 4px; 
-              font-weight: bold;">${displayName}</div>`,
-        iconSize: [100, 60],
-        iconAnchor: [50, 30],
+              font-weight: bold;
+              opacity: 0.9;
+              padding: 5px;">${displayName}</div>`,
+        iconSize: [120, 80], // Larger size to be more clickable
+        iconAnchor: [60, 40], // Center of the larger icon
       }),
+      interactive: true, // Make sure it's interactive
+      zIndexOffset: 1000, // Ensure text is above the circle
+    }).bindPopup(popupContent); // Bind the same popup as the circle
+
+    // Add click debugging to help see when text is clicked
+    textLabel.on("click", function () {
+      console.log("Text label clicked", feature.properties.spp);
     });
+
+    treeLayerGroup.addLayer(textLabel);
+
+    // Return the layer group containing both circle and text
+    return treeLayerGroup;
   } else {
-    // Default style for lower zoom levels - circle markers
-    const markerOptions = {
-      radius: 5,
+    // For lower zoom levels
+    const diameterInFeet = Math.max(dbh, 2); // Ensure visibility at lower zooms
+    const radiusInMeters = (diameterInFeet / 2) * 0.3048;
+
+    return L.circle(latlng, {
+      radius: radiusInMeters,
       fillColor: getTreeColor(feature.properties),
       color: "#000",
       weight: 1,
       opacity: 1,
       fillOpacity: 0.8,
-    };
-
-    // At higher zoom levels (but below 18), use slightly larger markers
-    if (currentZoom >= 16) {
-      markerOptions.radius = 6;
-      markerOptions.weight = 2;
-    }
-
-    return L.circleMarker(latlng, markerOptions);
+    }).bindPopup(createPopupContent(feature.properties));
   }
+}
+
+// Helper function to create consistent popup content
+function createPopupContent(properties) {
+  const species = properties.spp || "";
+  const commonName = properties.common || "Unknown";
+  const dbh = properties.dbh || "Unknown";
+
+  // Format the date
+  let lastUpdated = "";
+  if (properties.created_date) {
+    try {
+      const date = new Date(properties.created_date);
+      lastUpdated = date.toLocaleDateString(undefined, {
+        month: "long",
+        year: "numeric",
+      });
+    } catch (e) {
+      lastUpdated = properties.created_date;
+    }
+  }
+
+  // Create the popup HTML with monospace font and consistent formatting
+  return `<div class="tree-popup" style="min-width: 200px; font-family: 'Courier New', monospace; font-size: 14px; line-height: 1.5;">
+    <div style="font-weight: bold; text-transform: uppercase;">${commonName}</div>
+    <div style="font-style: italic;">${species}</div>
+    <div>${dbh} ft. wide</div>
+    ${
+      lastUpdated
+        ? `<div style="color: #777;">Last updated: ${lastUpdated}</div>`
+        : ""
+    }
+  </div>`;
 }
 
 // Function to calculate a smart font size based on DBH
@@ -789,51 +858,38 @@ function getTreeColor(properties) {
 // Bind popup to tree marker
 function bindTreePopup(feature, layer) {
   if (feature.properties) {
-    // Get scientific name (genus + species)
-    const genus = feature.properties.genus || "";
+    // Get species name (which already contains genus)
     const species = feature.properties.spp || "";
     const commonName = feature.properties.common || "Unknown";
-    const scientificName = `${genus} ${species}`.trim();
+    const dbh = feature.properties.dbh || "Unknown";
 
-    let popupContent = `<div class="tree-popup">
-                      <h3>${scientificName || commonName}</h3>
-                      <p><em>${commonName}</em></p>
-                      <table>`;
-
-    // Add important properties to the popup
-    const importantProps = [
-      "dbh",
-      "address",
-      "street",
-      "lifecycle",
-      "created_date",
-    ];
-    importantProps.forEach((prop) => {
-      if (feature.properties[prop]) {
-        const label = prop
-          .replace(/_/g, " ")
-          .replace(/\b\w/g, (l) => l.toUpperCase());
-        popupContent += `<tr><td><strong>${label}:</strong></td><td>${feature.properties[prop]}</td></tr>`;
-      }
-    });
-
-    // Add a "View all details" expandable section
-    popupContent += `</table>
-                    <p><a href="#" onclick="toggleDetails(this); return false;">View all details</a></p>
-                    <div class="all-details" style="display:none;">
-                      <table>`;
-
-    // Add all properties
-    for (const [key, value] of Object.entries(feature.properties)) {
-      if (value && !importantProps.includes(key)) {
-        const label = key
-          .replace(/_/g, " ")
-          .replace(/\b\w/g, (l) => l.toUpperCase());
-        popupContent += `<tr><td><strong>${label}:</strong></td><td>${value}</td></tr>`;
+    // Format the date to show only month and year if available
+    let lastUpdated = "";
+    if (feature.properties.created_date) {
+      try {
+        const date = new Date(feature.properties.created_date);
+        lastUpdated = date.toLocaleDateString(undefined, {
+          month: "long",
+          year: "numeric",
+        });
+      } catch (e) {
+        // If date parsing fails, use the original string
+        lastUpdated = feature.properties.created_date;
       }
     }
 
-    popupContent += `</table></div></div>`;
+    // Create the simplified popup content
+    let popupContent = `<div class="tree-popup" style="min-width: 200px;">
+      <div style="font-weight: bold; font-size: 16px;">${species}</div>
+      <div style="font-style: italic; margin-bottom: 5px;">${commonName}</div>
+      <div>Diameter: ${dbh} ft</div>`;
+
+    // Add last updated info in smaller text if available
+    if (lastUpdated) {
+      popupContent += `<div style="font-size: 11px; color: #888; margin-top: 8px;">Last updated: ${lastUpdated}</div>`;
+    }
+
+    popupContent += `</div>`;
 
     layer.bindPopup(popupContent);
   }
@@ -876,49 +932,37 @@ function updateVisibleTrees() {
   console.log("Updating visible trees...");
   showLoading("Updating visible trees...");
 
-  // Get current map bounds
   const bounds = map.getBounds();
-
-  // Filter trees in current view
   const visibleFeatures = window.fullTreeData.features.filter((feature) => {
     if (!feature.geometry || !feature.geometry.coordinates) return false;
     const coords = feature.geometry.coordinates;
     return bounds.contains(L.latLng(coords[1], coords[0]));
   });
 
-  // Store these visible features for font size calculations
   window.visibleTreeFeatures = visibleFeatures;
   window.lastVisibleUpdate = Date.now();
 
-  // Limit number of trees for performance
   const limitedFeatures = visibleFeatures.slice(0, 1000);
 
   console.log(
     `Loading ${limitedFeatures.length} of ${visibleFeatures.length} visible trees (from ${window.fullTreeData.features.length} total)`
   );
 
-  // Create filtered data
   const filteredData = {
     type: "FeatureCollection",
     features: limitedFeatures,
   };
 
-  // Clear existing markers and add new ones
   markerClusterGroup.clearLayers();
 
-  // Create GeoJSON layer with the current name display setting
+  // Create GeoJSON layer with pointToLayer only, remove onEachFeature
   const geoJsonLayer = L.geoJSON(filteredData, {
     pointToLayer: createTreeMarker,
-    onEachFeature: bindTreePopup,
+    // Removed onEachFeature since we're binding popups directly in createTreeMarker
   });
 
-  // Add to cluster group
   markerClusterGroup.addLayer(geoJsonLayer);
-
-  // Update counter
   updateTreeCount(limitedFeatures.length, window.fullTreeData.features.length);
-
-  // Hide loading indicator
   hideLoading();
 }
 
@@ -929,39 +973,8 @@ function enableMapRotation() {
     // Add rotation capabilities to Leaflet map
     L.Map.include({
       setBearing: function (bearing) {
-        // Store previous bearing for comparison
-        const prevBearing = this._bearing || 0;
-
-        // Store current center
-        const center = this.getCenter();
-
-        // Update the map container's rotation
-        this.getContainer().style.transform = `rotate(${-bearing}deg)`;
-
-        // Mark the map as rotated so we know about it
-        this._bearing = bearing;
-
-        // Get the map size and calculate the "padded" area needed for rotation
-        const size = this.getSize();
-        const paddingNeeded = calculateRotationPadding(size, bearing);
-
-        // Extend the render bounds to include areas that will be visible after rotation
-        if (paddingNeeded > 0) {
-          this._padBounds = paddingNeeded;
-
-          // Load additional tiles beyond visible area to fill corners during rotation
-          const currentZoom = this.getZoom();
-          const visibleBounds = this.getBounds();
-          const expandedBounds = visibleBounds.pad(0.4); // 40% larger area
-
-          // Force load of tiles in the expanded area
-          this._updatePathViewport();
-
-          // Trigger a moveend event to refresh tiles in the expanded area
-          if (Math.abs(bearing - prevBearing) > 5) {
-            this.fire("moveend");
-          }
-        }
+        // Only rotate the map content, not the controls
+        rotateMapContent(bearing);
 
         // Fire a rotation event
         this.fire("rotate");
@@ -974,47 +987,31 @@ function enableMapRotation() {
       },
 
       resetBearing: function () {
-        this.setBearing(0);
-        this._padBounds = 0;
+        // Reset map pane rotation
+        const mapPane =
+          this._mapPane || document.querySelector(".leaflet-map-pane");
+        if (mapPane) {
+          mapPane.style.transform = "";
+        }
+
+        // Reset all text labels
+        const textLabels = document.querySelectorAll(".tree-text-label");
+        textLabels.forEach((label) => {
+          label.style.transform = "";
+        });
+
+        this._bearing = 0;
+
+        // Trigger a moveend to refresh the view
+        this.fire("moveend");
+
         return this;
       },
     });
-
-    // Extend the original _updatePathViewport method to include rotation padding
-    const originalUpdateViewport = L.Map.prototype._updatePathViewport;
-    L.Map.prototype._updatePathViewport = function () {
-      // Call the original method
-      originalUpdateViewport.call(this);
-
-      // If we have rotation, extend the view bounds
-      if (this._padBounds) {
-        const bounds = this.getPixelBounds();
-        const padding = this._padBounds;
-        this._pathViewport = new L.Bounds(
-          bounds.min.subtract([padding, padding]),
-          bounds.max.add([padding, padding])
-        );
-      }
-    };
   }
 }
 
-// Calculate how much padding is needed based on rotation angle
-function calculateRotationPadding(size, angle) {
-  // Convert angle to radians
-  const rad = Math.abs(((angle % 90) * Math.PI) / 180);
-
-  // Calculate the diagonal length of the map
-  const diagonal = Math.sqrt(Math.pow(size.x, 2) + Math.pow(size.y, 2));
-
-  // Calculate the additional padding needed based on rotation angle
-  // This ensures the corners are filled when rotated
-  const padding = Math.ceil((diagonal - Math.max(size.x, size.y)) / 2);
-
-  return padding;
-}
-
-// Update the toggle rotation function to handle the extra rendering
+// Update toggle rotation function
 function toggleMapRotation() {
   autoRotateMap = !autoRotateMap;
 
@@ -1025,20 +1022,23 @@ function toggleMapRotation() {
       toggleButton.style.backgroundColor = "#4285F4";
       toggleButton.style.color = "white";
 
-      // When enabling rotation, immediately expand the view area
-      if (map._bearing) {
-        // If already rotated, refresh with expanded bounds
-        const currentBearing = map.getBearing();
-        map.setBearing(currentBearing);
+      // If device orientation is available, apply the current heading
+      if (
+        window.hasOrientationPermission &&
+        typeof DeviceOrientationEvent !== "undefined"
+      ) {
+        // Use the last known heading if available
+        const currentBearing = map._bearing || 0;
+        if (currentBearing) {
+          rotateMapContent(currentBearing);
+        }
       }
     } else {
       toggleButton.style.backgroundColor = "white";
       toggleButton.style.color = "black";
-      // Reset the map rotation to north up
-      map.resetBearing();
 
-      // Force a refresh to restore normal view
-      map.fire("moveend");
+      // Reset the map rotation
+      map.resetBearing();
     }
   }
 
