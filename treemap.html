@@ -5,10 +5,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Evanston Tree Map</title>
     
-    <!-- Mapbox GL JS CSS -->
+    <!-- Latest Mapbox GL JS CSS and JavaScript -->
     <link href="https://api.mapbox.com/mapbox-gl-js/v2.15.0/mapbox-gl.css" rel="stylesheet">
-    
-    <!-- Mapbox GL JS JavaScript -->
     <script src="https://api.mapbox.com/mapbox-gl-js/v2.15.0/mapbox-gl.js"></script>
 
     <style>
@@ -18,32 +16,15 @@
             height: 100%;
             width: 100%;
             font-family: Arial, sans-serif;
-            overflow: hidden; /* Prevent scrolling of the page */
+            position: fixed; /* Prevent scrolling on mobile */
+            overflow: hidden;
         }
         
         #map {
-            height: 100vh;
+            position: absolute;
+            top: 0;
+            bottom: 0;
             width: 100%;
-            touch-action: none; /* Disable browser's default touch actions */
-        }
-        
-        .info-panel {
-            padding: 10px;
-            background: white;
-            border-radius: 5px;
-            box-shadow: 0 0 15px rgba(0,0,0,0.2);
-            max-width: 300px;
-        }
-        
-        .tree-popup {
-            max-height: 200px;
-            overflow-y: auto;
-        }
-        
-        .user-marker {
-            background-color: #4285F4;
-            border-radius: 50%;
-            border: 2px solid white;
         }
         
         #loading-indicator {
@@ -58,50 +39,37 @@
             display: none;
         }
         
-        .mapboxgl-popup-content {
-            padding: 15px;
-            max-width: 250px;
-            background-color: rgba(0, 0, 0, 0.75);
-            color: white;
-            border-radius: 5px;
-        }
-        
-        /* Override Mapbox popup to match our dark theme */
-        .mapboxgl-popup-tip {
-            border-top-color: rgba(0, 0, 0, 0.75);
-        }
-        
-        /* Custom style for buttons */
-        .location-button button,
-        .name-toggle-button button {
-            cursor: pointer;
-            background-color: white;
+        .custom-button {
+            background: white;
             border: none;
             border-radius: 4px;
-            box-shadow: 0 0 0 2px rgba(0,0,0,0.1);
+            box-shadow: 0 0 10px rgba(0, 0, 0, 0.3);
+            cursor: pointer;
+            padding: 5px 10px;
+            margin: 5px;
+            font-weight: bold;
         }
         
-        .location-button button:hover,
-        .name-toggle-button button:hover {
-            background-color: #f0f0f0;
+        #location-button {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            z-index: 10;
         }
         
-        /* Ensure controls are always visible regardless of orientation */
-        .mapboxgl-ctrl-bottom-right {
-            bottom: 20px !important;
-            right: 10px !important;
-        }
-        
-        /* Custom styles for our buttons */
-        .mapboxgl-ctrl-group {
-            background-color: rgba(255, 255, 255, 0.9) !important;
-            box-shadow: 0 0 10px rgba(0, 0, 0, 0.3) !important;
+        #name-toggle-button {
+            position: absolute;
+            bottom: 20px;
+            right: 10px;
+            z-index: 10;
         }
     </style>
 </head>
 <body>
     <div id="map"></div>
     <div id="loading-indicator">Loading tree data...</div>
+    <button id="location-button" class="custom-button" title="Show My Location">📍</button>
+    <button id="name-toggle-button" class="custom-button" title="Toggle Scientific/Common Names">Scientific Names</button>
     
     <!-- External JavaScript file -->
     <script src="treemap-2.js"></script>

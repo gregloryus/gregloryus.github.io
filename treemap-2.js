@@ -19,168 +19,85 @@ const mapboxAccessToken =
 function initMap() {
   console.log("Initializing map with Mapbox...");
 
-  // Remove any existing handlers that might interfere with touch
-  document.body.addEventListener(
-    "touchmove",
-    function (e) {
-      // Don't prevent default touch behavior
-    },
-    { passive: true }
-  );
-
-  // Initialize Mapbox map with better mobile settings
+  // Initialize Mapbox map with simpler configuration
   mapboxgl.accessToken = mapboxAccessToken;
 
   map = new mapboxgl.Map({
     container: "map",
-    style: "mapbox://styles/mapbox/dark-v11", // Dark style for minimalist design
-    center: [-87.6877, 42.0451], // Evanston, IL coordinates - reversed for Mapbox
+    style: "mapbox://styles/mapbox/dark-v11",
+    center: [-87.6877, 42.0451],
     zoom: 14,
     attributionControl: false,
-    bearing: 0, // Initial rotation - will be updated based on user's heading
-    pitchWithRotate: false,
-    dragRotate: false, // Disable manual rotation via mouse/touch
-    interactive: true, // Ensure the map is interactive
-    maxTileCacheSize: 50, // Add reasonable tile cache for performance
+    bearing: 0,
+    dragRotate: false,
   });
 
-  // Add custom controls once map loads
+  // Add navigation control (zoom buttons)
+  map.addControl(
+    new mapboxgl.NavigationControl({
+      showCompass: false,
+    }),
+    "top-right"
+  );
+
+  // Set up custom buttons with direct DOM references
+  document
+    .getElementById("location-button")
+    .addEventListener("click", getUserLocation);
+  document
+    .getElementById("name-toggle-button")
+    .addEventListener("click", toggleNameDisplay);
+
+  // When map is loaded, set up everything else
   map.on("load", function () {
-    console.log("Map loaded, adding controls...");
+    console.log("Map loaded, setting up data and events...");
 
-    // Add loading indicator overlay
-    const loadingIndicator = document.createElement("div");
-    loadingIndicator.id = "loading-indicator";
-    loadingIndicator.innerHTML = "Loading tree data...";
-    loadingIndicator.style.display = "none";
-    document.body.appendChild(loadingIndicator);
-
-    // Add location button
-    addLocationButton();
-
-    // Add name toggle button
-    addNameToggleButton();
-
-    // Wait until map is fully loaded before loading tree data
+    // Load tree data
     loadTreeData();
 
-    // Prepare for clustering by adding the cluster source and layers
+    // Set up cluster layers
     setupClusterLayers();
 
-    // When map moves, update visible trees
+    // Set up map event handlers
     map.on("moveend", function () {
       if (window.fullTreeData) {
         updateVisibleTrees();
       }
     });
 
-    // When map zoom changes
     map.on("zoomend", function () {
       const currentZoom = map.getZoom();
-
-      // Only refresh at high zoom levels where precision matters
       if (currentZoom >= 17) {
         updateVisibleTrees();
       }
     });
 
-    // Automatically request user location after map is initialized
-    setTimeout(function () {
-      getUserLocation();
-    }, 1000);
+    // Request user location
+    setTimeout(getUserLocation, 1000);
 
-    // Setup device orientation with iOS focus
+    // Setup device orientation
     setupDeviceOrientation();
 
-    // Make sure all gesture behaviors are enabled
-    enableTouchGestures();
+    // Log that initialization is complete
+    console.log("Map initialization complete");
   });
-
-  // Add navigation control (zoom buttons) - positioned for visibility on all screen sizes
-  map.addControl(
-    new mapboxgl.NavigationControl({
-      showCompass: false, // Hide the compass since we'll use our own heading indicator
-      visualizePitch: false, // Don't visualize pitch since we're in 2D mode
-    }),
-    "top-right"
-  );
 }
 
-// Function to specifically enable touch gestures
-function enableTouchGestures() {
-  const mapContainer = document.getElementById("map");
+// Function to toggle between scientific and common names
+function toggleNameDisplay() {
+  displayScientificNames = !displayScientificNames;
 
-  // Ensure the map container doesn't have any CSS that might interfere
-  mapContainer.style.touchAction = "none";
-
-  // Add handlers to prevent default behavior for touch events that might interfere
-  mapContainer.addEventListener(
-    "touchstart",
-    function (e) {
-      if (e.touches.length > 1) {
-        e.preventDefault(); // Prevent browser zoom on pinch
-      }
-    },
-    { passive: false }
-  );
-
-  // Log touch events for debugging
-  console.log("Touch gestures enabled for map");
-}
-
-// Add location button to map
-function addLocationButton() {
-  // Create a custom HTML element for the button
-  const locationButton = document.createElement("div");
-  locationButton.className =
-    "mapboxgl-ctrl mapboxgl-ctrl-group location-button";
-  locationButton.innerHTML =
-    '<button type="button" title="Show My Location" style="font-weight: bold; text-decoration: none; color: black; display: block; text-align: center; height: 30px; width: 30px; line-height: 30px;">📍</button>';
-  locationButton.addEventListener("click", getUserLocation);
-
-  // Add the custom control directly to the DOM
-  locationButton.style.position = "absolute";
-  locationButton.style.top = "10px";
-  locationButton.style.left = "10px";
-  locationButton.style.zIndex = "1";
-  document.getElementById("map").appendChild(locationButton);
-}
-
-// Add name toggle button to map - repositioned for better visibility
-function addNameToggleButton() {
-  // Create a custom HTML element for the button
-  const nameToggleButton = document.createElement("div");
-  nameToggleButton.className =
-    "mapboxgl-ctrl mapboxgl-ctrl-group name-toggle-button";
-  nameToggleButton.innerHTML =
-    '<button id="name-toggle" type="button" title="Toggle Scientific/Common Names" style="font-weight: bold; text-decoration: none; color: black; display: block; text-align: center; padding: 5px; background-color: white; width: auto;">Scientific Names</button>';
-  nameToggleButton.addEventListener("click", toggleNameDisplay);
-
-  // Add the custom control directly to the DOM - positioned for better visibility
-  nameToggleButton.style.position = "absolute";
-  nameToggleButton.style.top = "60px"; // Positioned below the zoom controls
-  nameToggleButton.style.right = "10px";
-  nameToggleButton.style.zIndex = "10"; // Higher z-index to ensure visibility
-  nameToggleButton.style.backgroundColor = "white";
-  nameToggleButton.style.boxShadow = "0 0 10px rgba(0, 0, 0, 0.3)";
-  nameToggleButton.style.borderRadius = "4px";
-  document.getElementById("map").appendChild(nameToggleButton);
-}
-
-// Show loading indicator
-function showLoading(message = "Loading tree data...") {
-  const indicator = document.getElementById("loading-indicator");
-  if (indicator) {
-    indicator.style.display = "block";
-    indicator.innerHTML = message;
+  // Update the button text
+  const toggleButton = document.getElementById("name-toggle-button");
+  if (toggleButton) {
+    toggleButton.textContent = displayScientificNames
+      ? "Scientific Names"
+      : "Common Names";
   }
-}
 
-// Hide loading indicator
-function hideLoading() {
-  const indicator = document.getElementById("loading-indicator");
-  if (indicator) {
-    indicator.style.display = "none";
+  // Refresh the visible trees to update the display
+  if (window.fullTreeData) {
+    updateVisibleTrees();
   }
 }
 
@@ -596,24 +513,6 @@ function updateVisibleTrees() {
   }
 
   hideLoading();
-}
-
-// Function to toggle between scientific and common names
-function toggleNameDisplay() {
-  displayScientificNames = !displayScientificNames;
-
-  // Update the button text
-  const toggleButton = document.getElementById("name-toggle");
-  if (toggleButton) {
-    toggleButton.textContent = displayScientificNames
-      ? "Scientific Names"
-      : "Common Names";
-  }
-
-  // Refresh the visible trees to update the display
-  if (window.fullTreeData) {
-    updateVisibleTrees();
-  }
 }
 
 // Get user's current location
