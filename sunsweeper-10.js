@@ -12,7 +12,7 @@ const CONSTANTS = {
     COLLECTION_CHANCE: 0.03, // Approximately 1/33.7
     LEAF_MULTIPLIER: 3,
     AIRBORNE_STEPS: 34, // New constant for seed dispersal
-    DEFAULT_LIFESPAN: 1000, // Default lifespan in frames
+    DEFAULT_LIFESPAN: null, // Will be set dynamically
     REPRODUCTION_ENERGY_KEEP_RATIO: 0.3, // Keep 30% of energy after reproduction
     REPRODUCTION_ENERGY_MINIMUM: 3, // Minimum energy to keep after reproduction
   },
@@ -80,16 +80,44 @@ fastForward = false;
 fastForwardFactor = CONSTANTS.PERFORMANCE.FAST_FORWARD_FACTOR;
 frame = 0;
 
-// Add this constant near your other CONSTANTS or global variable declarations.
-const NUM_STARTER_SEEDS = 1; // Change this number to start with a different number of seeds
+// Change this constant to adjust number of starter seeds
+const NUM_STARTER_SEEDS = 40;
 
 function addInitialSeeds(numSeeds) {
-  // Calculate spacing: seeds will be positioned at x = i * (cols / (numSeeds + 1))
-  const spacing = cols / (numSeeds + 1);
-  for (let i = 1; i <= numSeeds; i++) {
-    const x = Math.floor(i * spacing);
-    const seed = new Seed(x, 0);
-    cells.push(seed);
+  const placedPositions = new Set();
+
+  for (let i = 0; i < numSeeds; i++) {
+    let attempts = 0;
+    let x, y;
+
+    // Find empty position with no neighbors
+    do {
+      x = Math.floor(Math.random() * cols);
+      y = Math.floor(Math.random() * rows);
+      attempts++;
+    } while (
+      (occupancyGrid.get(x, y) ||
+        hasNeighbors(x, y) ||
+        placedPositions.has(`${x},${y}`)) &&
+      attempts < 1000
+    );
+
+    if (attempts < 1000) {
+      const seed = new Seed(x, y);
+      cells.push(seed);
+      occupancyGrid.set(x, y, seed);
+      placedPositions.add(`${x},${y}`);
+    }
+  }
+
+  function hasNeighbors(x, y) {
+    for (let dx = -1; dx <= 1; dx++) {
+      for (let dy = -1; dy <= 1; dy++) {
+        if (dx === 0 && dy === 0) continue;
+        if (occupancyGrid.get(x + dx, y + dy)) return true;
+      }
+    }
+    return false;
   }
 }
 
@@ -141,7 +169,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   app.stage.addChild(countText);
 
   // Core simulation parameters
-  scaleSize = 16;
+  scaleSize = 8;
   cols = Math.floor(window.innerWidth / scaleSize);
   rows = Math.floor(window.innerHeight / scaleSize);
   cells = [];
@@ -216,8 +244,14 @@ document.addEventListener("DOMContentLoaded", async () => {
   });
 
   // Create seed (now after both celestial bodies)
-  const seed = new Seed(Math.floor(cols / 2), Math.floor(rows / 2));
-  cells.push(seed);
+  addInitialSeeds(NUM_STARTER_SEEDS);
+
+  // After these lines:
+  cols = Math.floor(window.innerWidth / scaleSize);
+  rows = Math.floor(window.innerHeight / scaleSize);
+
+  // Add this line:
+  CONSTANTS.ENERGY.DEFAULT_LIFESPAN = rows * cols + 1;
 
   mainLoop();
 
@@ -1063,8 +1097,7 @@ function mainLoop() {
     cells = [];
     occupancyGrid = new OccupancyGrid(cols, rows);
     frame = 0;
-    const seed = new Seed(Math.floor(cols / 2), Math.floor(rows / 2));
-    cells.push(seed);
+    addInitialSeeds(NUM_STARTER_SEEDS);
   }
 
   let shouldUpdate = false;
@@ -1179,8 +1212,7 @@ function resetSimulation() {
     initialSteps: moonOffset,
   });
 
-  const seed = new Seed(Math.floor(cols / 2), Math.floor(rows / 2));
-  cells.push(seed);
+  addInitialSeeds(NUM_STARTER_SEEDS);
 
   frame = 0;
 }

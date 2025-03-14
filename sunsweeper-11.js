@@ -1,3 +1,12 @@
+// TO DO:
+// simplify plants into cotyledons
+// set death color to white
+// sun ray casting
+// bud produce seed
+// reintroduce simplified energy system -- energy capacity of 3
+// fitness
+// flowers
+
 // CONSTANTS
 const CONSTANTS = {
   // Core energy parameters
@@ -12,7 +21,7 @@ const CONSTANTS = {
     COLLECTION_CHANCE: 0.03, // Approximately 1/33.7
     LEAF_MULTIPLIER: 3,
     AIRBORNE_STEPS: 34, // New constant for seed dispersal
-    DEFAULT_LIFESPAN: 1000, // Default lifespan in frames
+    DEFAULT_LIFESPAN: null, // Will be set dynamically
     REPRODUCTION_ENERGY_KEEP_RATIO: 0.3, // Keep 30% of energy after reproduction
     REPRODUCTION_ENERGY_MINIMUM: 3, // Minimum energy to keep after reproduction
   },
@@ -28,7 +37,7 @@ const CONSTANTS = {
     BUD: { r: 180, g: 240, b: 160, alpha: 1.0 },
     STEM: { r: 10, g: 100, b: 10, alpha: 1.0 },
     NODE: { r: 20, g: 160, b: 20, alpha: 1.0 },
-    DYING: { r: 255, g: 80, b: 80, alpha: 1.0 },
+    DYING: { r: 255, g: 255, b: 255, alpha: 1.0 },
     LEAF: { r: 0, g: 240, b: 0, alpha: 1.0 },
     LEAF_BUD: { r: 0, g: 200, b: 0, alpha: 1.0 },
     DYING_FLASH: { r: 255, g: 0, b: 0, alpha: 1.0 }, // New color for death flash
@@ -80,16 +89,44 @@ fastForward = false;
 fastForwardFactor = CONSTANTS.PERFORMANCE.FAST_FORWARD_FACTOR;
 frame = 0;
 
-// Add this constant near your other CONSTANTS or global variable declarations.
-const NUM_STARTER_SEEDS = 1; // Change this number to start with a different number of seeds
+// Change this constant to adjust number of starter seeds
+const NUM_STARTER_SEEDS = 1;
 
 function addInitialSeeds(numSeeds) {
-  // Calculate spacing: seeds will be positioned at x = i * (cols / (numSeeds + 1))
-  const spacing = cols / (numSeeds + 1);
-  for (let i = 1; i <= numSeeds; i++) {
-    const x = Math.floor(i * spacing);
-    const seed = new Seed(x, 0);
-    cells.push(seed);
+  const placedPositions = new Set();
+
+  for (let i = 0; i < numSeeds; i++) {
+    let attempts = 0;
+    let x, y;
+
+    // Find empty position with no neighbors
+    do {
+      x = Math.floor(Math.random() * cols);
+      y = Math.floor(Math.random() * rows);
+      attempts++;
+    } while (
+      (occupancyGrid.get(x, y) ||
+        hasNeighbors(x, y) ||
+        placedPositions.has(`${x},${y}`)) &&
+      attempts < 1000
+    );
+
+    if (attempts < 1000) {
+      const seed = new Seed(x, y);
+      cells.push(seed);
+      occupancyGrid.set(x, y, seed);
+      placedPositions.add(`${x},${y}`);
+    }
+  }
+
+  function hasNeighbors(x, y) {
+    for (let dx = -1; dx <= 1; dx++) {
+      for (let dy = -1; dy <= 1; dy++) {
+        if (dx === 0 && dy === 0) continue;
+        if (occupancyGrid.get(x + dx, y + dy)) return true;
+      }
+    }
+    return false;
   }
 }
 
@@ -216,8 +253,14 @@ document.addEventListener("DOMContentLoaded", async () => {
   });
 
   // Create seed (now after both celestial bodies)
-  const seed = new Seed(Math.floor(cols / 2), Math.floor(rows / 2));
-  cells.push(seed);
+  addInitialSeeds(NUM_STARTER_SEEDS);
+
+  // After these lines:
+  cols = Math.floor(window.innerWidth / scaleSize);
+  rows = Math.floor(window.innerHeight / scaleSize);
+
+  // Add this line:
+  CONSTANTS.ENERGY.DEFAULT_LIFESPAN = rows * cols + 1;
 
   mainLoop();
 
@@ -519,8 +562,8 @@ class Seed extends PlantCell {
     }
 
     this.genes = {
-      internodeSpacing: 3,
-      budGrowthLimit: 11,
+      internodeSpacing: 2,
+      budGrowthLimit: 2,
       cellLifespan: CONSTANTS.ENERGY.DEFAULT_LIFESPAN,
     };
   }
@@ -1063,8 +1106,7 @@ function mainLoop() {
     cells = [];
     occupancyGrid = new OccupancyGrid(cols, rows);
     frame = 0;
-    const seed = new Seed(Math.floor(cols / 2), Math.floor(rows / 2));
-    cells.push(seed);
+    addInitialSeeds(NUM_STARTER_SEEDS);
   }
 
   let shouldUpdate = false;
@@ -1179,8 +1221,7 @@ function resetSimulation() {
     initialSteps: moonOffset,
   });
 
-  const seed = new Seed(Math.floor(cols / 2), Math.floor(rows / 2));
-  cells.push(seed);
+  addInitialSeeds(NUM_STARTER_SEEDS);
 
   frame = 0;
 }
