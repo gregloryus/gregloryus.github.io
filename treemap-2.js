@@ -19,7 +19,7 @@ const mapboxAccessToken =
 function initMap() {
   console.log("Initializing map with Mapbox...");
 
-  // Initialize Mapbox map with simpler configuration
+  // Initialize Mapbox map with proper configuration
   mapboxgl.accessToken = mapboxAccessToken;
 
   map = new mapboxgl.Map({
@@ -29,7 +29,7 @@ function initMap() {
     zoom: 14,
     attributionControl: false,
     bearing: 0,
-    dragRotate: false,
+    dragRotate: false, // Disable manual rotation via mouse/touch
   });
 
   // Add navigation control (zoom buttons)
@@ -40,47 +40,123 @@ function initMap() {
     "top-right"
   );
 
-  // Set up custom buttons with direct DOM references
-  document
-    .getElementById("location-button")
-    .addEventListener("click", getUserLocation);
-  document
-    .getElementById("name-toggle-button")
-    .addEventListener("click", toggleNameDisplay);
-
-  // When map is loaded, set up everything else
+  // Add custom controls once map loads
   map.on("load", function () {
-    console.log("Map loaded, setting up data and events...");
+    console.log("Map loaded, adding controls...");
 
-    // Load tree data
+    // Add loading indicator overlay
+    const loadingIndicator = document.getElementById("loading-indicator");
+    if (!loadingIndicator) {
+      const newLoadingIndicator = document.createElement("div");
+      newLoadingIndicator.id = "loading-indicator";
+      newLoadingIndicator.innerHTML = "Loading tree data...";
+      newLoadingIndicator.style.display = "none";
+      newLoadingIndicator.style.position = "absolute";
+      newLoadingIndicator.style.bottom = "10px";
+      newLoadingIndicator.style.left = "10px";
+      newLoadingIndicator.style.zIndex = "999";
+      newLoadingIndicator.style.backgroundColor = "rgba(255, 255, 255, 0.8)";
+      newLoadingIndicator.style.padding = "5px 10px";
+      newLoadingIndicator.style.borderRadius = "5px";
+      newLoadingIndicator.style.fontWeight = "bold";
+      document.body.appendChild(newLoadingIndicator);
+    }
+
+    // Add location button
+    addLocationButton();
+
+    // Add name toggle button
+    addNameToggleButton();
+
+    // Wait until map is fully loaded before loading tree data
     loadTreeData();
 
-    // Set up cluster layers
+    // Prepare for clustering by adding the cluster source and layers
     setupClusterLayers();
 
-    // Set up map event handlers
+    // When map moves, update visible trees
     map.on("moveend", function () {
       if (window.fullTreeData) {
         updateVisibleTrees();
       }
     });
 
+    // When map zoom changes
     map.on("zoomend", function () {
       const currentZoom = map.getZoom();
+
+      // Only refresh at high zoom levels where precision matters
       if (currentZoom >= 17) {
         updateVisibleTrees();
       }
     });
 
-    // Request user location
-    setTimeout(getUserLocation, 1000);
+    // Automatically request user location after map is initialized
+    setTimeout(function () {
+      getUserLocation();
+    }, 1000);
 
-    // Setup device orientation
+    // Setup device orientation with iOS focus
     setupDeviceOrientation();
-
-    // Log that initialization is complete
-    console.log("Map initialization complete");
   });
+}
+
+// Add location button to map
+function addLocationButton() {
+  // Get existing button or create a new one
+  let locationButton = document.getElementById("location-button");
+
+  if (!locationButton) {
+    // Create a new button if it doesn't exist
+    locationButton = document.createElement("div");
+    locationButton.id = "location-button";
+    locationButton.className = "custom-button";
+    locationButton.innerHTML = "📍";
+    locationButton.title = "Show My Location";
+    locationButton.style.position = "absolute";
+    locationButton.style.top = "10px";
+    locationButton.style.left = "10px";
+    locationButton.style.zIndex = "10";
+    locationButton.style.backgroundColor = "white";
+    locationButton.style.padding = "5px 10px";
+    locationButton.style.borderRadius = "4px";
+    locationButton.style.boxShadow = "0 0 10px rgba(0, 0, 0, 0.3)";
+    locationButton.style.cursor = "pointer";
+    document.getElementById("map").appendChild(locationButton);
+  }
+
+  // Add event listener (remove any existing ones first)
+  locationButton.removeEventListener("click", getUserLocation);
+  locationButton.addEventListener("click", getUserLocation);
+}
+
+// Add name toggle button to map
+function addNameToggleButton() {
+  // Get existing button or create a new one
+  let nameToggleButton = document.getElementById("name-toggle-button");
+
+  if (!nameToggleButton) {
+    // Create a new button if it doesn't exist
+    nameToggleButton = document.createElement("div");
+    nameToggleButton.id = "name-toggle-button";
+    nameToggleButton.className = "custom-button";
+    nameToggleButton.innerHTML = "Scientific Names";
+    nameToggleButton.title = "Toggle Scientific/Common Names";
+    nameToggleButton.style.position = "absolute";
+    nameToggleButton.style.bottom = "20px";
+    nameToggleButton.style.right = "10px";
+    nameToggleButton.style.zIndex = "10";
+    nameToggleButton.style.backgroundColor = "white";
+    nameToggleButton.style.padding = "5px 10px";
+    nameToggleButton.style.borderRadius = "4px";
+    nameToggleButton.style.boxShadow = "0 0 10px rgba(0, 0, 0, 0.3)";
+    nameToggleButton.style.cursor = "pointer";
+    document.getElementById("map").appendChild(nameToggleButton);
+  }
+
+  // Add event listener (remove any existing ones first)
+  nameToggleButton.removeEventListener("click", toggleNameDisplay);
+  nameToggleButton.addEventListener("click", toggleNameDisplay);
 }
 
 // Function to toggle between scientific and common names

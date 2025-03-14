@@ -5,8 +5,10 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Evanston Tree Map</title>
     
-    <!-- Latest Mapbox GL JS CSS and JavaScript -->
+    <!-- Mapbox GL JS CSS -->
     <link href="https://api.mapbox.com/mapbox-gl-js/v2.15.0/mapbox-gl.css" rel="stylesheet">
+    
+    <!-- Mapbox GL JS JavaScript -->
     <script src="https://api.mapbox.com/mapbox-gl-js/v2.15.0/mapbox-gl.js"></script>
 
     <style>
@@ -28,14 +30,6 @@
         }
         
         #loading-indicator {
-            position: absolute;
-            bottom: 10px;
-            left: 10px;
-            z-index: 999;
-            background-color: rgba(255, 255, 255, 0.8);
-            padding: 5px 10px;
-            border-radius: 5px;
-            font-weight: bold;
             display: none;
         }
         
@@ -49,27 +43,11 @@
             margin: 5px;
             font-weight: bold;
         }
-        
-        #location-button {
-            position: absolute;
-            top: 10px;
-            left: 10px;
-            z-index: 10;
-        }
-        
-        #name-toggle-button {
-            position: absolute;
-            bottom: 20px;
-            right: 10px;
-            z-index: 10;
-        }
     </style>
 </head>
 <body>
     <div id="map"></div>
     <div id="loading-indicator">Loading tree data...</div>
-    <button id="location-button" class="custom-button" title="Show My Location">📍</button>
-    <button id="name-toggle-button" class="custom-button" title="Toggle Scientific/Common Names">Scientific Names</button>
     
     <!-- External JavaScript file -->
     <script src="treemap-2.js"></script>
