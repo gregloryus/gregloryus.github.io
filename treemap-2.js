@@ -12,6 +12,9 @@ let userHeading = 0;
 let initialLoad = true;
 let permissionRequested = false; // Track if we've already asked for permissions
 let orientationSupported = false; // Track if orientation is supported
+let orientationActive = false; // Track if orientation updates are active
+let lastOrientationUpdate = 0; // For throttling updates
+let orientationThrottleTime = 100; // Update orientation no more than once per 100ms
 
 // Mapbox access token - REPLACE WITH YOUR OWN TOKEN
 const mapboxAccessToken =
@@ -93,6 +96,25 @@ function initMap() {
     }),
     "bottom-right"
   );
+
+  // Detect touch interactions to pause orientation updates
+  map.on("touchstart", () => {
+    // If user is touching the map, temporarily pause orientation updates
+    orientationActive = false;
+    const compassButton = document.getElementById("compass-button");
+    if (compassButton && compassButton.classList.contains("active")) {
+      compassButton.classList.add("paused");
+    }
+  });
+
+  map.on("touchend", () => {
+    // Resume orientation updates if the compass was active before
+    const compassButton = document.getElementById("compass-button");
+    if (compassButton && compassButton.classList.contains("paused")) {
+      compassButton.classList.remove("paused");
+      orientationActive = true;
+    }
+  });
 
   // Add custom controls once map loads
   map.on("load", function () {
@@ -202,7 +224,7 @@ function addCompassButton() {
     compassButton.id = "compass-button";
     compassButton.className = "custom-button";
     compassButton.innerHTML = "🧭";
-    compassButton.title = "Enable Compass";
+    compassButton.title = "Toggle Compass";
     compassButton.style.position = "absolute";
     compassButton.style.top = "10px";
     compassButton.style.right = "10px";
@@ -222,20 +244,38 @@ function addCompassButton() {
 
     // Event listener
     compassButton.addEventListener("click", function () {
-      if (typeof DeviceOrientationEvent.requestPermission === "function") {
-        // iOS
-        requestiOSPermission();
+      // Toggle compass on/off instead of just enabling
+      if (orientationActive) {
+        // Turn off orientation
+        orientationActive = false;
+        this.classList.remove("active");
+        this.style.backgroundColor = "white";
+        this.style.borderColor = "#ccc";
+        this.style.borderWidth = "1px";
+        this.style.borderStyle = "solid";
+        this.innerHTML = "🧭";
+        logToDebugPanel("Compass deactivated - touch controls enabled");
       } else {
-        // Android or other
-        setupDeviceOrientation(true); // Force setup
-
-        // Flash the button to show it was clicked
-        this.style.backgroundColor = "#4285F4";
-        setTimeout(() => {
-          this.style.backgroundColor = "white";
-        }, 500);
-
-        logToDebugPanel("Trying to enable orientation (non-iOS device)");
+        // Request permission or turn on orientation if already granted
+        if (
+          typeof DeviceOrientationEvent.requestPermission === "function" &&
+          !orientationSupported
+        ) {
+          // iOS
+          requestiOSPermission();
+        } else {
+          // Android or already has permission
+          setupDeviceOrientation(true); // Force setup
+          orientationActive = true;
+          this.classList.add("active");
+          this.style.backgroundColor = "#e6f2ff";
+          this.style.borderColor = "#4285F4";
+          this.style.borderWidth = "2px";
+          this.style.borderStyle = "solid";
+          logToDebugPanel(
+            "Compass activated - tap screen to temporarily pause"
+          );
+        }
       }
     });
   }
@@ -854,6 +894,17 @@ function setupDeviceOrientation(forceSetup = false) {
         }
 
         orientationSupported = true;
+
+        // Mark compass as active
+        orientationActive = true;
+        const compassButton = document.getElementById("compass-button");
+        if (compassButton) {
+          compassButton.classList.add("active");
+          compassButton.style.backgroundColor = "#e6f2ff";
+          compassButton.style.borderColor = "#4285F4";
+          compassButton.style.borderWidth = "2px";
+          compassButton.style.borderStyle = "solid";
+        }
       } catch (e) {
         logToDebugPanel("Error setting up orientation: " + e.message);
       }
@@ -878,8 +929,17 @@ function requestiOSPermission() {
         // Add the event listener
         window.addEventListener("deviceorientation", handleOrientation);
         orientationSupported = true;
+        orientationActive = true;
 
-        // The compass button can stay, as it works as a visual indicator
+        // Mark compass as active
+        const compassButton = document.getElementById("compass-button");
+        if (compassButton) {
+          compassButton.classList.add("active");
+          compassButton.style.backgroundColor = "#e6f2ff";
+          compassButton.style.borderColor = "#4285F4";
+          compassButton.style.borderWidth = "2px";
+          compassButton.style.borderStyle = "solid";
+        }
       } else {
         logToDebugPanel("❌ iOS orientation permission denied");
       }
@@ -889,10 +949,17 @@ function requestiOSPermission() {
     });
 }
 
-// Universal orientation handler that works on iOS and Android
+// Throttled orientation handler - only update at most once per orientationThrottleTime ms
 function handleOrientation(event) {
-  let debugInfo = "Orientation event received:";
+  // Skip if orientation is not active
+  if (!orientationActive) return;
 
+  // Throttle updates to avoid overwhelming touch controls
+  const now = Date.now();
+  if (now - lastOrientationUpdate < orientationThrottleTime) return;
+  lastOrientationUpdate = now;
+
+  let debugInfo = "Orientation event received:";
   if (event.alpha !== null) debugInfo += ` alpha: ${event.alpha.toFixed(1)}°`;
   if (event.webkitCompassHeading !== undefined)
     debugInfo += ` webkitCompassHeading: ${event.webkitCompassHeading.toFixed(
@@ -900,7 +967,10 @@ function handleOrientation(event) {
     )}°`;
   if (event.absolute) debugInfo += " (absolute)";
 
-  logToDebugPanel(debugInfo);
+  // Only log occasionally to reduce visual noise
+  if (now % 1000 < 100) {
+    logToDebugPanel(debugInfo);
+  }
 
   let heading;
 
@@ -917,27 +987,19 @@ function handleOrientation(event) {
     heading = (360 - event.alpha) % 360;
   } else {
     // No usable heading data
-    logToDebugPanel("No usable heading data available");
     return;
   }
 
   userHeading = heading;
 
-  // Show heading in debug panel
-  logToDebugPanel(
-    `Heading: ${heading.toFixed(1)}° | Map bearing: ${map
-      .getBearing()
-      .toFixed(1)}°`
-  );
-
   // Update visual indicator of compass
   updateCompassButton(heading);
 
-  // Update the map rotation if we have a user marker
-  if (userLocationMarker) {
+  // Update the map rotation if we have a user marker and orientation is active
+  if (userLocationMarker && orientationActive) {
     map.easeTo({
       bearing: heading,
-      duration: 300, // smooth transition
+      duration: 100, // Use shorter animation for less interference with touch
     });
   }
 }
@@ -945,16 +1007,11 @@ function handleOrientation(event) {
 // Update the compass button appearance based on heading
 function updateCompassButton(heading) {
   const compassButton = document.getElementById("compass-button");
-  if (compassButton) {
+  if (compassButton && compassButton.classList.contains("active")) {
     // Show heading number
     compassButton.innerHTML = `🧭<div style="font-size: 10px; margin-top: 2px;">${Math.round(
       heading
     )}°</div>`;
-
-    // Visual indicator that orientation is working
-    compassButton.style.borderColor = "#4285F4";
-    compassButton.style.borderWidth = "2px";
-    compassButton.style.borderStyle = "solid";
   }
 }
 
