@@ -317,41 +317,37 @@ async function loadTreeData() {
   showLoading("Loading tree data...");
   console.log("Attempting to load tree data...");
 
-  // Check if we're running on github.io or locally
-  const isGitHubPages = window.location.hostname.includes("github.io");
-
   try {
-    // Set the URL based on environment - UPDATED for regular Git storage
+    // Check if we're running on github.io or locally
+    const isGitHubPages = window.location.hostname.includes("github.io");
+
+    // Set the correct URL based on environment
     const url = isGitHubPages
       ? "https://raw.githubusercontent.com/gregloryus/gregloryus.github.io/master/trees.geojson"
       : "trees.geojson";
 
     console.log("Trying to load from:", url);
 
-    try {
-      const response = await fetch(url);
-      if (!response.ok)
-        throw new Error(`HTTP error! Status: ${response.status}`);
-
-      showLoading("Processing GeoJSON data...");
-      const data = await response.json();
-      console.log(
-        "Successfully loaded GeoJSON data:",
-        data.features
-          ? `${data.features.length} features found`
-          : "Invalid format"
-      );
-
-      // Store full data
-      window.fullTreeData = data;
-
-      // Display initial subset
-      displayInitialTrees(data);
-      return;
-    } catch (e) {
-      console.error("Could not load GeoJSON data:", e);
-      alert("Unable to load tree data. Please check the console for details.");
+    const response = await fetch(url);
+    if (!response.ok) {
+      throw new Error(`HTTP error! Status: ${response.status}`);
     }
+
+    showLoading("Processing GeoJSON data...");
+    const data = await response.json();
+
+    console.log(
+      "Successfully loaded GeoJSON data:",
+      data.features
+        ? `${data.features.length} features found`
+        : "Invalid format"
+    );
+
+    // Store full data
+    window.fullTreeData = data;
+
+    // Display initial subset
+    displayInitialTrees(data);
   } catch (error) {
     hideLoading();
     console.error("Error in loadTreeData:", error);
