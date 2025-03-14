@@ -8,6 +8,7 @@ let treeData = [];
 let userMarker;
 let headingMarker;
 let displayScientificNames = false; // Changed default to common names
+let autoRotateMap = true; // Track whether map should auto-rotate based on orientation
 
 // Initialize the map
 function initMap() {
@@ -105,6 +106,22 @@ function initMap() {
   };
   nameToggleButton.addTo(map);
 
+  // Add a button to toggle map rotation
+  const rotateToggleButton = L.control({ position: "topleft" });
+  rotateToggleButton.onAdd = function (map) {
+    const div = L.DomUtil.create("div", "leaflet-bar leaflet-control");
+    div.innerHTML = `<a href="#" id="rotate-toggle" title="Toggle Map Rotation" 
+                    style="font-weight: bold; text-decoration: none; color: black; 
+                    display: block; text-align: center; height: 30px; width: 30px; 
+                    line-height: 30px; background-color: white;">🧭</a>`;
+    div.onclick = function () {
+      toggleMapRotation();
+      return false;
+    };
+    return div;
+  };
+  rotateToggleButton.addTo(map);
+
   // Add event listener for map movement to update visible trees
   map.on("moveend", function () {
     if (window.fullTreeData) {
@@ -150,6 +167,9 @@ function initMap() {
     },
     { passive: false }
   );
+
+  // Make sure map supports rotation
+  enableMapRotation();
 }
 
 // Setup device orientation to get compass heading
@@ -206,6 +226,7 @@ function showOrientationPermissionPrompt() {
         .then((permissionState) => {
           if (permissionState === "granted") {
             window.addEventListener("deviceorientation", handleOrientation);
+            window.hasOrientationPermission = true; // Track that permission is granted
             // Remove the overlay after granting permission
             document.body.removeChild(overlay);
           } else {
@@ -258,12 +279,21 @@ function showOrientationPermissionPrompt() {
   );
 }
 
-// Handle device orientation data to show heading
+// Handle device orientation data to show heading and rotate map
 function handleOrientation(event) {
   // Alpha is the compass direction the device is facing in degrees
   const heading = event.webkitCompassHeading || Math.abs(event.alpha - 360);
 
   if (heading && userMarker) {
+    // Track that we have orientation permission
+    window.hasOrientationPermission = true;
+
+    // If auto-rotate is enabled, rotate the map to match the device orientation
+    if (autoRotateMap && map) {
+      // Set the map bearing to match the device heading
+      map.setBearing(heading);
+    }
+
     // If we already have a heading marker, update it
     if (headingMarker) {
       map.removeLayer(headingMarker);
@@ -780,6 +810,68 @@ function updateVisibleTrees() {
 
   // Hide loading indicator
   hideLoading();
+}
+
+// Function to enable map rotation capabilities
+function enableMapRotation() {
+  // Check if Leaflet has already been extended with rotation capabilities
+  if (!L.Map.prototype.setBearing) {
+    // Add rotation capabilities to Leaflet map
+    L.Map.include({
+      setBearing: function (bearing) {
+        // Store current center
+        const center = this.getCenter();
+
+        // Rotate the map container
+        this.getContainer().style.transform = `rotate(${-bearing}deg)`;
+
+        // Mark the map as rotated so we know about it
+        this._bearing = bearing;
+
+        // Fire a rotation event
+        this.fire("rotate");
+
+        return this;
+      },
+
+      getBearing: function () {
+        return this._bearing || 0;
+      },
+
+      resetBearing: function () {
+        this.setBearing(0);
+        return this;
+      },
+    });
+  }
+}
+
+// Function to toggle map rotation mode
+function toggleMapRotation() {
+  autoRotateMap = !autoRotateMap;
+
+  const toggleButton = document.getElementById("rotate-toggle");
+  if (toggleButton) {
+    // Update visual appearance based on state
+    if (autoRotateMap) {
+      toggleButton.style.backgroundColor = "#4285F4";
+      toggleButton.style.color = "white";
+    } else {
+      toggleButton.style.backgroundColor = "white";
+      toggleButton.style.color = "black";
+      // Reset the map rotation to north up
+      map.resetBearing();
+    }
+  }
+
+  // If we don't have orientation permissions but want to rotate, prompt for them
+  if (
+    autoRotateMap &&
+    !window.hasOrientationPermission &&
+    typeof DeviceOrientationEvent.requestPermission === "function"
+  ) {
+    showOrientationPermissionPrompt();
+  }
 }
 
 // Initialize when the page loads
