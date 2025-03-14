@@ -164,6 +164,16 @@ function initMap() {
     },
     { passive: false }
   );
+
+  // Add this as a test in your browser console
+  map.setBearing(90); // This should rotate the map 90 degrees clockwise
+
+  // Make sure rotation is enabled and toggle button shows correct state
+  const toggleButton = document.getElementById("rotate-toggle");
+  if (toggleButton) {
+    toggleButton.style.backgroundColor = "#4285F4";
+    toggleButton.style.color = "white";
+  }
 }
 
 // Setup device orientation to get compass heading with iOS priority
