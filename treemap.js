@@ -158,25 +158,104 @@ function setupDeviceOrientation() {
     // Check if we need iOS permission
     if (typeof DeviceOrientationEvent.requestPermission === "function") {
       // iOS 13+ devices need to request permission
-      window.addEventListener(
-        "click",
-        function requestOrientationPermission() {
-          DeviceOrientationEvent.requestPermission()
-            .then((permissionState) => {
-              if (permissionState === "granted") {
-                window.addEventListener("deviceorientation", handleOrientation);
-              }
-            })
-            .catch(console.error);
-          window.removeEventListener("click", requestOrientationPermission);
-        },
-        { once: true }
-      );
+      // Show a modal/overlay to prompt user action immediately
+      showOrientationPermissionPrompt();
     } else {
-      // Non-iOS devices
+      // Non-iOS devices - directly add event listener
       window.addEventListener("deviceorientation", handleOrientation);
     }
   }
+}
+
+// Show a prompt to get orientation permission on iOS
+function showOrientationPermissionPrompt() {
+  // Create and show an overlay with instructions
+  const overlay = document.createElement("div");
+  overlay.style.position = "fixed";
+  overlay.style.top = "0";
+  overlay.style.left = "0";
+  overlay.style.width = "100%";
+  overlay.style.height = "100%";
+  overlay.style.backgroundColor = "rgba(0,0,0,0.7)";
+  overlay.style.zIndex = "1000";
+  overlay.style.display = "flex";
+  overlay.style.flexDirection = "column";
+  overlay.style.alignItems = "center";
+  overlay.style.justifyContent = "center";
+  overlay.style.color = "white";
+  overlay.style.textAlign = "center";
+  overlay.style.padding = "20px";
+
+  overlay.innerHTML = `
+    <div style="background-color: #333; padding: 20px; border-radius: 10px; max-width: 300px;">
+      <h2>Enable Compass</h2>
+      <p>Tap anywhere on this message to enable the compass feature for better navigation.</p>
+      <button style="background-color: #4285F4; border: none; color: white; padding: 10px 20px; 
+                    border-radius: 5px; font-weight: bold; margin-top: 15px;">Enable Compass</button>
+    </div>
+  `;
+
+  document.body.appendChild(overlay);
+
+  // Add click handler to the overlay
+  overlay.addEventListener(
+    "click",
+    function () {
+      // Request permission
+      DeviceOrientationEvent.requestPermission()
+        .then((permissionState) => {
+          if (permissionState === "granted") {
+            window.addEventListener("deviceorientation", handleOrientation);
+            // Remove the overlay after granting permission
+            document.body.removeChild(overlay);
+          } else {
+            // Update overlay to show permission was denied
+            overlay.innerHTML = `
+            <div style="background-color: #333; padding: 20px; border-radius: 10px; max-width: 300px;">
+              <h2>Permission Denied</h2>
+              <p>You denied compass permissions. Some features will be limited.</p>
+              <button style="background-color: #4285F4; border: none; color: white; padding: 10px 20px; 
+                          border-radius: 5px; font-weight: bold; margin-top: 15px;">Close</button>
+            </div>
+          `;
+
+            // Add a new click handler to close the overlay
+            overlay.addEventListener(
+              "click",
+              function () {
+                document.body.removeChild(overlay);
+              },
+              { once: true }
+            );
+          }
+        })
+        .catch((error) => {
+          console.error(
+            "Error requesting device orientation permission:",
+            error
+          );
+          // Update overlay to show error
+          overlay.innerHTML = `
+          <div style="background-color: #333; padding: 20px; border-radius: 10px; max-width: 300px;">
+            <h2>Error</h2>
+            <p>There was a problem accessing compass features.</p>
+            <button style="background-color: #4285F4; border: none; color: white; padding: 10px 20px; 
+                        border-radius: 5px; font-weight: bold; margin-top: 15px;">Close</button>
+          </div>
+        `;
+
+          // Add a new click handler to close the overlay
+          overlay.addEventListener(
+            "click",
+            function () {
+              document.body.removeChild(overlay);
+            },
+            { once: true }
+          );
+        });
+    },
+    { once: true }
+  );
 }
 
 // Handle device orientation data to show heading
@@ -247,7 +326,15 @@ function getUserLocation() {
         }).addTo(map);
 
         // Center the map on the user's location at maximum zoom
-        map.setView(userLocation, 19); // Changed to maximum zoom level
+        map.setView(userLocation, 19);
+
+        // After getting location, make sure orientation is also enabled for iOS devices
+        if (
+          typeof DeviceOrientationEvent.requestPermission === "function" &&
+          !window.hasOrientationPermission
+        ) {
+          showOrientationPermissionPrompt();
+        }
       },
       // Error callback - with improved error handling
       (error) => {
