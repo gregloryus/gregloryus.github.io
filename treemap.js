@@ -289,44 +289,22 @@ async function loadTreeData() {
   const isGitHubPages = window.location.hostname.includes("github.io");
 
   try {
-    // Try to load GeoJSON with .geojson extension first
+    // Set the URL based on environment
+    const url = isGitHubPages
+      ? "https://media.githubusercontent.com/media/gregloryus/gregloryus.github.io/master/trees.geojson"
+      : "trees.geojson";
+
+    console.log("Trying to load from:", url);
+
     try {
-      // For GitHub Pages, try different possible URLs
-      const urls = isGitHubPages
-        ? [
-            "trees.geojson", // Try relative path first
-            "/trees.geojson", // Try with leading slash
-            "/gregloryus.github.io/trees.geojson", // Try with repo name
-            "https://raw.githubusercontent.com/gregloryus/gregloryus.github.io/main/trees.geojson", // Try main branch
-            "https://raw.githubusercontent.com/gregloryus/gregloryus.github.io/master/trees.geojson", // Try master branch
-          ]
-        : ["trees.geojson"]; // Local only needs one path
+      const response = await fetch(url);
+      if (!response.ok)
+        throw new Error(`HTTP error! Status: ${response.status}`);
 
-      let data = null;
-      let loadedUrl = null;
-
-      // Try each URL until one works
-      for (const url of urls) {
-        try {
-          console.log("Trying to load from:", url);
-          const response = await fetch(url);
-
-          if (response.ok) {
-            console.log("Successfully fetched from:", url);
-            showLoading("Processing GeoJSON data...");
-            data = await response.json();
-            loadedUrl = url;
-            break;
-          }
-        } catch (e) {
-          console.log(`Failed to load from ${url}:`, e);
-        }
-      }
-
-      if (!data) throw new Error("All URLs failed to load");
-
+      showLoading("Processing GeoJSON data...");
+      const data = await response.json();
       console.log(
-        `Successfully loaded GeoJSON data from ${loadedUrl}:`,
+        "Successfully loaded GeoJSON data:",
         data.features
           ? `${data.features.length} features found`
           : "Invalid format"
@@ -339,71 +317,9 @@ async function loadTreeData() {
       displayInitialTrees(data);
       return;
     } catch (e) {
-      console.error("Could not load trees.geojson:", e);
-      showLoading("Could not load trees.geojson, trying trees.json...");
+      console.error("Could not load GeoJSON data:", e);
+      alert("Unable to load tree data. Please check the console for details.");
     }
-
-    // Try to load GeoJSON with .json extension
-    try {
-      console.log("Trying to load trees.json...");
-      const response = await fetch("trees.json");
-      if (!response.ok)
-        throw new Error(`HTTP error! Status: ${response.status}`);
-
-      showLoading("Processing JSON data...");
-      const data = await response.json();
-      console.log(
-        "Successfully loaded JSON data:",
-        data.features
-          ? `${data.features.length} features found`
-          : "JSON format detected"
-      );
-
-      // Store full data
-      window.fullTreeData = data;
-
-      // Display initial subset
-      displayInitialTrees(data);
-      return;
-    } catch (e) {
-      console.error("Could not load trees.json:", e);
-      showLoading("Could not load trees.json, trying trees.csv...");
-    }
-
-    // Try to load CSV as last resort
-    try {
-      console.log("Trying to load trees.csv...");
-      const response = await fetch("trees.csv");
-      if (!response.ok)
-        throw new Error(`HTTP error! Status: ${response.status}`);
-
-      showLoading("Processing CSV data...");
-      const csvText = await response.text();
-      const parsedData = parseCSV(csvText);
-      console.log(
-        "Successfully loaded CSV data:",
-        parsedData ? `${parsedData.length} records found` : "No data found"
-      );
-
-      // Store full data as GeoJSON
-      window.fullTreeData = {
-        type: "FeatureCollection",
-        features: convertToGeoJSON(parsedData),
-      };
-
-      // Display initial subset
-      displayInitialTrees(window.fullTreeData);
-      return;
-    } catch (e) {
-      console.error("Could not load trees.csv:", e);
-    }
-
-    // Alert if no data could be loaded
-    hideLoading();
-    console.error("Failed to load any tree data");
-    alert(
-      "Unable to load tree data. Please check that the data file exists and is formatted correctly."
-    );
   } catch (error) {
     hideLoading();
     console.error("Error in loadTreeData:", error);
