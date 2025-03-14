@@ -165,8 +165,18 @@ function initMap() {
     { passive: false }
   );
 
-  // Add this as a test in your browser console
-  map.setBearing(90); // This should rotate the map 90 degrees clockwise
+  // Test rotation after a delay to ensure plugin is loaded
+  setTimeout(function () {
+    // Test rotation after a delay to ensure plugin is loaded
+    console.log("Testing map rotation capabilities...");
+    if (typeof map.setAngle === "function") {
+      console.log("Rotation supported - rotating map 90 degrees");
+      map.setAngle(90);
+    } else {
+      console.error("Rotation not supported - setAngle method not available");
+      console.log("Available map methods:", Object.keys(map.__proto__));
+    }
+  }, 2000);
 
   // Make sure rotation is enabled and toggle button shows correct state
   const toggleButton = document.getElementById("rotate-toggle");
@@ -216,7 +226,7 @@ function handleiOSOrientation(event) {
   if (event.webkitCompassHeading !== undefined) {
     const heading = event.webkitCompassHeading;
     if (autoRotateMap && map) {
-      map.setBearing(heading);
+      map.setAngle(heading);
       updateHeadingIndicator(heading);
     }
   }
@@ -244,7 +254,7 @@ function handleOrientation(event) {
 
   // Only rotate if auto-rotation is enabled
   if (autoRotateMap && map) {
-    map.setBearing(heading);
+    map.setAngle(heading);
     updateHeadingIndicator(heading);
   }
 }
@@ -1014,8 +1024,8 @@ function toggleMapRotation() {
       toggleButton.style.color = "white";
 
       // Reset heading marker if we have user location
-      if (userMarker && map.getBearing) {
-        updateHeadingIndicator(map.getBearing());
+      if (userMarker && map.getAngle) {
+        updateHeadingIndicator(map.getAngle());
       }
     } else {
       toggleButton.style.backgroundColor = "white";
@@ -1023,7 +1033,7 @@ function toggleMapRotation() {
 
       // Reset to north up
       if (map) {
-        map.setBearing(0);
+        map.setAngle(0);
       }
     }
   }
