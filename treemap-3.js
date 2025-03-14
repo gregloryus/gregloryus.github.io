@@ -15,6 +15,7 @@ let orientationSupported = false; // Track if orientation is supported
 let orientationActive = false; // Track if orientation updates are active
 let lastOrientationUpdate = 0; // For throttling updates
 let orientationThrottleTime = 100; // Update orientation no more than once per 100ms
+let locationUpdateInterval = null; // Track the interval for location updates
 
 // Mapbox access token - REPLACE WITH YOUR OWN TOKEN
 const mapboxAccessToken =
@@ -417,7 +418,7 @@ function setupClusterLayers() {
     },
   });
 
-  // 4. Tree labels (only visible at high zoom) - Modified for better positioning and legibility
+  // 4. Tree labels (only visible at high zoom) - Modified for proper positioning
   map.addLayer({
     id: "tree-labels",
     type: "symbol",
@@ -437,7 +438,7 @@ function setupClusterLayers() {
         16, // Larger fixed size at highest zoom
       ],
       "text-font": ["DIN Offc Pro Medium", "Arial Unicode MS Bold"],
-      "text-offset": [0, -2], // Position labels above the circles
+      "text-offset": [0, 0], // Center the label over the circle
       "text-anchor": "center",
       "text-allow-overlap": false,
       "text-ignore-placement": false,
@@ -498,17 +499,19 @@ function setupClusterLayers() {
   console.log("✅ All cluster layers added successfully");
 }
 
-// Show popup for a tree
+// Show popup for a tree - modified to fix accessibility issue
 function showTreePopup(feature, lngLat) {
   // Create popup content
   const popupContent = createPopupContent(feature.properties);
 
-  // Create and show the popup with mobile-friendly settings
+  // Create and show the popup with mobile-friendly settings and fixed accessibility
   new mapboxgl.Popup({
     closeButton: true,
     closeOnClick: true,
     maxWidth: "300px",
     className: "tree-popup-container",
+    // Fix aria-hidden issue by specifying focus attributes
+    focusAfterOpen: false,
   })
     .setLngLat(lngLat)
     .setHTML(popupContent)
@@ -585,6 +588,29 @@ function processTreeData(data) {
     const species = properties.spp || "";
     const commonName = properties.common || "Unknown";
 
+    // Format common name according to new rules
+    let formattedCommonName = commonName;
+    if (commonName.includes(",")) {
+      // For names with commas like "maple, Norway"
+      const parts = commonName.split(",").map((part) => part.trim());
+      // Swap order and capitalize the genus part
+      formattedCommonName = parts[1] + " " + parts[0].toUpperCase();
+    } else {
+      // For names without commas, make everything uppercase
+      formattedCommonName = commonName.toUpperCase();
+    }
+
+    // Create map label with line breaks between words
+    let mapLabel = "";
+    if (commonName.includes(",")) {
+      const parts = commonName.split(",").map((part) => part.trim());
+      // First part after comma
+      mapLabel = parts[1] + "\n" + parts[0].toUpperCase();
+    } else {
+      // For names without commas, add line breaks between words
+      mapLabel = commonName.toUpperCase().split(" ").join("\n");
+    }
+
     // Scientific name
     let scientificName;
     const lowerSpecies = species.toLowerCase();
@@ -597,12 +623,13 @@ function processTreeData(data) {
     }
 
     properties.scientificName = scientificName;
-    properties.commonName = commonName;
+    properties.commonName = formattedCommonName;
+    properties.mapLabel = mapLabel;
 
     // Set initial display name based on current mode
     properties.displayName = displayScientificNames
       ? properties.scientificName
-      : properties.commonName;
+      : properties.mapLabel;
   });
 }
 
@@ -748,7 +775,7 @@ function updateVisibleTrees() {
 
     feature.properties.displayName = displayScientificNames
       ? feature.properties.scientificName
-      : feature.properties.commonName;
+      : feature.properties.mapLabel;
   });
 
   // Update the data in the source
@@ -762,7 +789,69 @@ function updateVisibleTrees() {
   hideLoading();
 }
 
-// Get user's current location
+// Function to start automatic location updates
+function startLocationUpdates() {
+  // Clear any existing interval
+  if (locationUpdateInterval) {
+    clearInterval(locationUpdateInterval);
+  }
+
+  // Set up new interval for location updates
+  locationUpdateInterval = setInterval(() => {
+    // Get location without visual notifications or map movement
+    getLocationQuietly();
+  }, 200);
+}
+
+// Get user's location without notifications or map movement
+function getLocationQuietly() {
+  if (navigator.geolocation) {
+    navigator.geolocation.getCurrentPosition(
+      // Success callback
+      (position) => {
+        const userLocation = [
+          position.coords.longitude,
+          position.coords.latitude,
+        ];
+
+        // Remove previous user marker if exists
+        if (userLocationMarker) {
+          userLocationMarker.remove();
+        }
+
+        // Create the user marker element (larger, more visible marker)
+        const userMarkerElement = document.createElement("div");
+        userMarkerElement.className = "user-marker";
+        userMarkerElement.style.backgroundColor = "#4285F4";
+        userMarkerElement.style.width = "18px";
+        userMarkerElement.style.height = "18px";
+        userMarkerElement.style.borderRadius = "50%";
+        userMarkerElement.style.border = "3px solid white";
+        userMarkerElement.style.boxShadow = "0 0 5px rgba(0,0,0,0.5)";
+
+        // Add a marker at the user's location
+        userLocationMarker = new mapboxgl.Marker({
+          element: userMarkerElement,
+          anchor: "center",
+        })
+          .setLngLat(userLocation)
+          .addTo(map);
+      },
+      // Silent error handling for quiet updates
+      (error) => {
+        console.error("Error in quiet location update:", error);
+      },
+      // Options
+      {
+        enableHighAccuracy: true,
+        timeout: 5000,
+        maximumAge: 0,
+      }
+    );
+  }
+}
+
+// Modify getUserLocation function to start automatic updates
 function getUserLocation(initialRequest = false) {
   if (navigator.geolocation) {
     // Show a message while we're getting location
@@ -813,6 +902,9 @@ function getUserLocation(initialRequest = false) {
         if (isMobileDevice()) {
           setupDeviceOrientation();
         }
+
+        // Start automatic location updates
+        startLocationUpdates();
 
         // Add debug message for orientation
         logToDebugPanel(`Location acquired! Current heading: ${userHeading}°`);
@@ -1018,12 +1110,22 @@ function updateCompassButton(heading) {
 // Helper function to create consistent popup content
 function createPopupContent(properties) {
   const species = properties.spp || "";
-  const commonName = properties.common || "Unknown";
+  const commonName = properties.commonName || "Unknown"; // Already formatted
   const dbh = properties.dbh || "Unknown";
 
-  // Format the date
+  // Format the date - check both possible date field names
   let lastUpdated = "";
-  if (properties.created_date) {
+  if (properties.last_edited_date) {
+    try {
+      const date = new Date(properties.last_edited_date);
+      lastUpdated = date.toLocaleDateString(undefined, {
+        month: "long",
+        year: "numeric",
+      });
+    } catch (e) {
+      lastUpdated = properties.last_edited_date;
+    }
+  } else if (properties.created_date) {
     try {
       const date = new Date(properties.created_date);
       lastUpdated = date.toLocaleDateString(undefined, {
@@ -1035,16 +1137,28 @@ function createPopupContent(properties) {
     }
   }
 
-  // Create the popup HTML with improved styling for touch
-  return `<div class="tree-popup" style="min-width: 200px; font-family: 'Courier New', monospace; font-size: 16px; line-height: 1.5; padding: 10px;">
-    <div style="font-weight: bold; text-transform: uppercase; font-size: 18px; margin-bottom: 8px;">${commonName}</div>
-    <div style="font-style: italic; margin-bottom: 8px;">${species}</div>
-    <div style="margin-bottom: 8px;">${dbh} ft. wide</div>
-    ${
-      lastUpdated
-        ? `<div style="color: #777; font-size: 14px;">Last updated: ${lastUpdated}</div>`
-        : ""
+  // Format DBH with the new requested format
+  let dbhDisplay = "Unknown width";
+  if (dbh !== "Unknown") {
+    const dbhInches = parseFloat(dbh);
+    if (!isNaN(dbhInches)) {
+      const feet = Math.floor(dbhInches / 12);
+      const inches = Math.round(dbhInches % 12);
+
+      if (feet > 0) {
+        dbhDisplay = `${dbhInches}" (${feet}ft ${inches}in) wide trunk at chest height`;
+      } else {
+        dbhDisplay = `${dbhInches}" wide trunk at chest height`;
+      }
     }
+  }
+
+  // Create the popup HTML with consistent font size and improved phrasing
+  return `<div class="tree-popup" style="min-width: 200px; font-family: 'Courier New', monospace; font-size: 14px; line-height: 1.5; padding: 10px;">
+    <div style="font-weight: bold; margin-bottom: 8px;">${commonName}</div>
+    <div style="font-style: italic; margin-bottom: 8px;">${species}</div>
+    <div style="margin-bottom: 8px;">${dbhDisplay}</div>
+    ${lastUpdated ? `<div style="color: #777;">As of ${lastUpdated}</div>` : ""}
   </div>`;
 }
 
@@ -1052,24 +1166,34 @@ function createPopupContent(properties) {
 function getTreeColor(properties) {
   const genus = properties.genus || "";
 
-  // Color coding by common genera with brighter colors for better visibility
+  // Updated color coding by common genera with new colors as requested
   const genusColors = {
-    Acer: "#ff4d4d", // Maple - brighter red
-    Quercus: "#4dff4d", // Oak - brighter green
-    Ulmus: "#4d4dff", // Elm - brighter blue
-    Tilia: "#ffaa00", // Linden - brighter orange
-    Gleditsia: "#aa44ff", // Honeylocust - brighter purple
-    Fraxinus: "#ffff55", // Ash - brighter yellow
-    Celtis: "#cc6633", // Hackberry - brighter brown
-    Platanus: "#ff66cc", // Sycamore - brighter pink
+    Acer: "#FFA823", // Maple - bright yellowy orange
+    Quercus: "#D4A76A", // Oak - bright/light brown
+    Ulmus: "#7CDA4D", // Elm - bright/light green
+    Tilia: "#FFF3A3", // Linden - creamy yellow
+    Gleditsia: "#FFD059", // Honeylocust - bright orangey yellow
+    Fraxinus: "#BBAA9A", // Ash - tannish grey
+    Celtis: "#A13E30", // Hackberry - brownish red
+    Platanus: "#C0D860", // Sycamore - yellowy green
+    Salix: "#A63CE8", // Willow - bright purple
+    Pinus: "#FF4530", // Pine - bright red
+    Fagus: "#78C2ED", // Beech - light blue
   };
 
-  return genusColors[genus] || "#cccccc"; // Lighter gray default
+  return genusColors[genus] || "#005500"; // Deep green default instead of light gray
 }
 
 // Initialize when the page loads
 document.addEventListener("DOMContentLoaded", function () {
   console.log("DOM loaded, initializing map...");
+
+  // Clear any existing location update interval (useful on reload)
+  if (locationUpdateInterval) {
+    clearInterval(locationUpdateInterval);
+    locationUpdateInterval = null;
+  }
+
   initMap();
 
   // Add a safety check to verify tree data loading
