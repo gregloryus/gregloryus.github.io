@@ -8,26 +8,16 @@ let treeData = [];
 let userMarker;
 let headingMarker;
 let displayScientificNames = false; // Changed default to common names
-let autoRotateMap = true; // Track whether map should auto-rotate based on orientation
-
-// Add the Leaflet.Rotate plugin dependencies at the top of the file
 
 // Initialize the map
 function initMap() {
   console.log("Initializing map...");
-  // Create a map centered on Evanston, IL with rotation support
+  // Create a map centered on Evanston, IL without rotation support
   map = L.map("map", {
     maxZoom: 50,
     zoomSnap: 0.5,
     zoomDelta: 1.0,
     wheelPxPerZoomLevel: 80,
-    rotate: true, // Enable rotation capability
-    bearing: 0, // Start with north up
-    rotateControl: {
-      // Add the rotation control
-      closeOnZeroBearing: false,
-      position: "topleft",
-    },
     attributionControl: false, // Remove the attribution control
   }).setView([42.0451, -87.6877], 14);
 
@@ -103,22 +93,6 @@ function initMap() {
   };
   nameToggleButton.addTo(map);
 
-  // Add a button to toggle map rotation
-  const rotateToggleButton = L.control({ position: "topleft" });
-  rotateToggleButton.onAdd = function (map) {
-    const div = L.DomUtil.create("div", "leaflet-bar leaflet-control");
-    div.innerHTML = `<a href="#" id="rotate-toggle" title="Toggle Map Rotation" 
-                    style="font-weight: bold; text-decoration: none; color: black; 
-                    display: block; text-align: center; height: 30px; width: 30px; 
-                    line-height: 30px; background-color: white;">🧭</a>`;
-    div.onclick = function () {
-      toggleMapRotation();
-      return false;
-    };
-    return div;
-  };
-  rotateToggleButton.addTo(map);
-
   // Add event listener for map movement to update visible trees
   map.on("moveend", function () {
     if (window.fullTreeData) {
@@ -164,9 +138,6 @@ function initMap() {
     },
     { passive: false }
   );
-
-  // Make sure map supports rotation
-  enableMapRotation();
 }
 
 // Setup device orientation to get compass heading with iOS priority
@@ -204,22 +175,17 @@ function setupiOSOrientation() {
   showOrientationPermissionPrompt();
 }
 
-// iOS-specific orientation handler
+// iOS-specific orientation handler - simplified to just update the heading indicator
 function handleiOSOrientation(event) {
   // iOS provides webkitCompassHeading which is already calibrated
   if (event.webkitCompassHeading !== undefined) {
     // webkitCompassHeading is measured clockwise from north in degrees (0-359)
     const heading = event.webkitCompassHeading;
-
-    // Only rotate if auto-rotation is enabled
-    if (autoRotateMap && map) {
-      map.setBearing(heading);
-      updateHeadingIndicator(heading);
-    }
+    updateHeadingIndicator(heading);
   }
 }
 
-// General orientation handler (for non-iOS devices)
+// General orientation handler - simplified to just update the heading indicator
 function handleOrientation(event) {
   let heading;
 
@@ -239,11 +205,7 @@ function handleOrientation(event) {
     return;
   }
 
-  // Only rotate if auto-rotation is enabled
-  if (autoRotateMap && map) {
-    map.setBearing(heading);
-    updateHeadingIndicator(heading);
-  }
+  updateHeadingIndicator(heading);
 }
 
 // Update the heading indicator arrow
@@ -997,49 +959,6 @@ function updateVisibleTrees() {
   markerClusterGroup.addLayer(geoJsonLayer);
   updateTreeCount(limitedFeatures.length, window.fullTreeData.features.length);
   hideLoading();
-}
-
-// Simplified toggleMapRotation function
-function toggleMapRotation() {
-  autoRotateMap = !autoRotateMap;
-
-  const toggleButton = document.getElementById("rotate-toggle");
-  if (toggleButton) {
-    // Update visual appearance based on state
-    if (autoRotateMap) {
-      toggleButton.style.backgroundColor = "#4285F4";
-      toggleButton.style.color = "white";
-
-      // Reset heading marker if we have user location
-      if (userMarker && map.getBearing) {
-        updateHeadingIndicator(map.getBearing());
-      }
-    } else {
-      toggleButton.style.backgroundColor = "white";
-      toggleButton.style.color = "black";
-
-      // Reset to north up
-      if (map) {
-        map.setBearing(0);
-      }
-    }
-  }
-
-  // If we don't have orientation permissions but want to rotate, prompt for them on iOS
-  if (
-    autoRotateMap &&
-    !window.hasOrientationPermission &&
-    typeof DeviceOrientationEvent !== "undefined" &&
-    typeof DeviceOrientationEvent.requestPermission === "function"
-  ) {
-    showOrientationPermissionPrompt();
-  }
-}
-
-// Simple placeholder to prevent errors - the actual rotation is handled by the plugin
-function enableMapRotation() {
-  console.log("Using Leaflet.Rotate plugin for map rotation");
-  // The plugin automatically handles rotation via the map options
 }
 
 // Initialize when the page loads
