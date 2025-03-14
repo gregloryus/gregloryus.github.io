@@ -10,15 +10,24 @@ let headingMarker;
 let displayScientificNames = false; // Changed default to common names
 let autoRotateMap = true; // Track whether map should auto-rotate based on orientation
 
+// Add the Leaflet.Rotate plugin dependencies at the top of the file
+
 // Initialize the map
 function initMap() {
   console.log("Initializing map...");
-  // Create a map centered on Evanston, IL
+  // Create a map centered on Evanston, IL with rotation support
   map = L.map("map", {
-    maxZoom: 50, // High maximum zoom level
-    zoomSnap: 0.5, // Snap to increments of 0.5
-    zoomDelta: 1.0, // Each click changes zoom by 1.0 instead of 0.1
-    wheelPxPerZoomLevel: 80, // Less scrolling required to zoom
+    maxZoom: 50,
+    zoomSnap: 0.5,
+    zoomDelta: 1.0,
+    wheelPxPerZoomLevel: 80,
+    rotate: true, // Enable rotation capability
+    bearing: 0, // Start with north up
+    rotateControl: {
+      // Add the rotation control
+      closeOnZeroBearing: false,
+      position: "topleft",
+    },
   }).setView([42.0451, -87.6877], 14);
 
   // Add OpenStreetMap tile layer
@@ -26,7 +35,7 @@ function initMap() {
     attribution:
       '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>',
     subdomains: "abcd",
-    maxZoom: 50, // Increased from 25 to 50 to match the map's maxZoom
+    maxZoom: 50,
   }).addTo(map);
 
   // Initialize marker cluster group with improved settings for precision
@@ -143,7 +152,7 @@ function initMap() {
     getUserLocation();
   }, 1000); // Short delay to ensure map is ready
 
-  // Setup device orientation if available
+  // Setup device orientation with iOS focus
   setupDeviceOrientation();
 
   console.log("Map initialized, loading tree data...");
@@ -171,24 +180,117 @@ function initMap() {
   enableMapRotation();
 }
 
-// Setup device orientation to get compass heading
+// Setup device orientation to get compass heading with iOS priority
 function setupDeviceOrientation() {
-  if (window.DeviceOrientationEvent && "ontouchstart" in window) {
-    // Check if we need iOS permission
+  // Check if device supports orientation events
+  if (window.DeviceOrientationEvent) {
+    // Check if we're on iOS (iOS 13+ needs permission)
     if (typeof DeviceOrientationEvent.requestPermission === "function") {
-      // iOS 13+ devices need to request permission
-      // Show a modal/overlay to prompt user action immediately
-      showOrientationPermissionPrompt();
+      // iOS-specific setup
+      setupiOSOrientation();
     } else {
-      // Non-iOS devices - directly add event listener
-      window.addEventListener("deviceorientation", handleOrientation);
+      // Non-iOS setup (Android, desktop)
+      window.addEventListener(
+        "deviceorientationabsolute",
+        handleOrientation,
+        true
+      );
+      // Fallback to regular deviceorientation if absolute is not available
+      window.addEventListener("deviceorientation", handleOrientation, true);
+    }
+  } else {
+    console.log("Device orientation not supported on this device");
+  }
+}
+
+// iOS-specific orientation setup
+function setupiOSOrientation() {
+  // If we already have permission, add the listener
+  if (window.hasOrientationPermission) {
+    window.addEventListener("deviceorientation", handleiOSOrientation, true);
+    return;
+  }
+
+  // Show the permission prompt
+  showOrientationPermissionPrompt();
+}
+
+// iOS-specific orientation handler
+function handleiOSOrientation(event) {
+  // iOS provides webkitCompassHeading which is already calibrated
+  if (event.webkitCompassHeading !== undefined) {
+    // webkitCompassHeading is measured clockwise from north in degrees (0-359)
+    // Leaflet.Rotate expects bearing in degrees clockwise from north
+    const heading = event.webkitCompassHeading;
+
+    // Only rotate if auto-rotation is enabled
+    if (autoRotateMap && map) {
+      map.setBearing(heading);
+      updateHeadingIndicator(heading);
     }
   }
 }
 
-// Show a prompt to get orientation permission on iOS
+// General orientation handler (for non-iOS devices)
+function handleOrientation(event) {
+  let heading;
+
+  // Try to get the most accurate heading depending on what's available
+  if (event.webkitCompassHeading !== undefined) {
+    // iOS compass heading
+    heading = event.webkitCompassHeading;
+  } else if (event.absolute === true && event.alpha !== null) {
+    // Android absolute orientation (alpha is measured counterclockwise from west)
+    // Convert to clockwise from north
+    heading = (360 - event.alpha) % 360;
+  } else if (event.alpha !== null) {
+    // Fallback: non-absolute alpha
+    heading = (360 - event.alpha) % 360;
+  } else {
+    // No usable heading data
+    return;
+  }
+
+  // Only rotate if auto-rotation is enabled
+  if (autoRotateMap && map) {
+    map.setBearing(heading);
+    updateHeadingIndicator(heading);
+  }
+}
+
+// Update the heading indicator arrow
+function updateHeadingIndicator(heading) {
+  // Only update if we have a user marker
+  if (!userMarker) return;
+
+  // Get user position
+  const pos = userMarker.getLatLng();
+
+  // Remove previous heading marker if it exists
+  if (headingMarker) {
+    map.removeLayer(headingMarker);
+  }
+
+  // Create a line showing the direction
+  const headingLine = [
+    [pos.lat, pos.lng],
+    [
+      pos.lat + 0.0003 * Math.cos((heading * Math.PI) / 180),
+      pos.lng + 0.0003 * Math.sin((heading * Math.PI) / 180),
+    ],
+  ];
+
+  // Add the heading indicator
+  headingMarker = L.polyline(headingLine, {
+    color: "#4285F4",
+    weight: 5,
+    opacity: 0.7,
+  }).addTo(map);
+}
+
+// Show a prompt optimized for iOS to get orientation permission
 function showOrientationPermissionPrompt() {
-  // Create and show an overlay with instructions
+  // Create an iOS-style overlay
   const overlay = document.createElement("div");
   overlay.style.position = "fixed";
   overlay.style.top = "0";
@@ -204,43 +306,51 @@ function showOrientationPermissionPrompt() {
   overlay.style.color = "white";
   overlay.style.textAlign = "center";
   overlay.style.padding = "20px";
+  overlay.style.fontFamily =
+    "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif";
 
+  // iOS-style dialog content
   overlay.innerHTML = `
-    <div style="background-color: #333; padding: 20px; border-radius: 10px; max-width: 300px;">
-      <h2>Enable Compass</h2>
-      <p>Tap anywhere on this message to enable the compass feature for better navigation.</p>
-      <button style="background-color: #4285F4; border: none; color: white; padding: 10px 20px; 
-                    border-radius: 5px; font-weight: bold; margin-top: 15px;">Enable Compass</button>
+    <div style="background-color: #fff; padding: 20px; border-radius: 13px; max-width: 280px; color: #000;">
+      <h2 style="margin-top: 0; font-size: 18px;">Allow Access to Motion & Orientation</h2>
+      <p style="margin-bottom: 20px; font-size: 14px;">This enables the compass feature that shows which direction you're facing on the map.</p>
+      <button style="background-color: #007AFF; border: none; color: white; padding: 10px 0; 
+                  border-radius: 10px; font-weight: 600; margin-top: 15px; width: 100%; font-size: 16px;">Allow</button>
     </div>
   `;
 
   document.body.appendChild(overlay);
 
-  // Add click handler to the overlay
-  overlay.addEventListener(
+  // Handle the permission request when the user taps Allow
+  overlay.querySelector("button").addEventListener(
     "click",
     function () {
-      // Request permission
       DeviceOrientationEvent.requestPermission()
         .then((permissionState) => {
           if (permissionState === "granted") {
-            window.addEventListener("deviceorientation", handleOrientation);
-            window.hasOrientationPermission = true; // Track that permission is granted
-            // Remove the overlay after granting permission
+            // Add the orientation event listener for iOS
+            window.addEventListener(
+              "deviceorientation",
+              handleiOSOrientation,
+              true
+            );
+            window.hasOrientationPermission = true;
+
+            // Remove the overlay
             document.body.removeChild(overlay);
           } else {
-            // Update overlay to show permission was denied
+            // Update overlay to show permission denial
             overlay.innerHTML = `
-            <div style="background-color: #333; padding: 20px; border-radius: 10px; max-width: 300px;">
-              <h2>Permission Denied</h2>
-              <p>You denied compass permissions. Some features will be limited.</p>
-              <button style="background-color: #4285F4; border: none; color: white; padding: 10px 20px; 
-                          border-radius: 5px; font-weight: bold; margin-top: 15px;">Close</button>
+            <div style="background-color: #fff; padding: 20px; border-radius: 13px; max-width: 280px; color: #000;">
+              <h2 style="margin-top: 0; font-size: 18px;">Permission Denied</h2>
+              <p style="margin-bottom: 20px; font-size: 14px;">The compass feature won't work without motion access. You can enable it in Settings > Safari > Motion & Orientation Access.</p>
+              <button style="background-color: #007AFF; border: none; color: white; padding: 10px 0; 
+                          border-radius: 10px; font-weight: 600; margin-top: 15px; width: 100%; font-size: 16px;">Close</button>
             </div>
           `;
 
             // Add a new click handler to close the overlay
-            overlay.addEventListener(
+            overlay.querySelector("button").addEventListener(
               "click",
               function () {
                 document.body.removeChild(overlay);
@@ -250,22 +360,20 @@ function showOrientationPermissionPrompt() {
           }
         })
         .catch((error) => {
-          console.error(
-            "Error requesting device orientation permission:",
-            error
-          );
+          console.error("Error requesting orientation permission:", error);
+
           // Update overlay to show error
           overlay.innerHTML = `
-          <div style="background-color: #333; padding: 20px; border-radius: 10px; max-width: 300px;">
-            <h2>Error</h2>
-            <p>There was a problem accessing compass features.</p>
-            <button style="background-color: #4285F4; border: none; color: white; padding: 10px 20px; 
-                        border-radius: 5px; font-weight: bold; margin-top: 15px;">Close</button>
+          <div style="background-color: #fff; padding: 20px; border-radius: 13px; max-width: 280px; color: #000;">
+            <h2 style="margin-top: 0; font-size: 18px;">Error</h2>
+            <p style="margin-bottom: 20px; font-size: 14px;">There was a problem accessing compass features. Make sure your iOS is updated and try again.</p>
+            <button style="background-color: #007AFF; border: none; color: white; padding: 10px 0; 
+                        border-radius: 10px; font-weight: 600; margin-top: 15px; width: 100%; font-size: 16px;">Close</button>
           </div>
         `;
 
           // Add a new click handler to close the overlay
-          overlay.addEventListener(
+          overlay.querySelector("button").addEventListener(
             "click",
             function () {
               document.body.removeChild(overlay);
@@ -276,81 +384,6 @@ function showOrientationPermissionPrompt() {
     },
     { once: true }
   );
-}
-
-// Handle device orientation data to show heading and rotate map
-function handleOrientation(event) {
-  // Alpha is the compass direction the device is facing in degrees
-  const heading = event.webkitCompassHeading || Math.abs(event.alpha - 360);
-
-  if (heading && userMarker) {
-    // Track that we have orientation permission
-    window.hasOrientationPermission = true;
-
-    // If auto-rotate is enabled, rotate the map to match the device orientation
-    if (autoRotateMap && map) {
-      // Only rotate the map content, not the controls or UI
-      rotateMapContent(heading);
-    }
-
-    // If we already have a heading marker, update it
-    if (headingMarker) {
-      map.removeLayer(headingMarker);
-    }
-
-    // Get user position
-    const pos = userMarker.getLatLng();
-
-    // Create a line showing the direction the user is facing
-    const headingLine = [
-      [pos.lat, pos.lng],
-      [
-        pos.lat + 0.0003 * Math.cos((heading * Math.PI) / 180),
-        pos.lng + 0.0003 * Math.sin((heading * Math.PI) / 180),
-      ],
-    ];
-
-    // Add the heading indicator
-    headingMarker = L.polyline(headingLine, {
-      color: "#4285F4",
-      weight: 5,
-      opacity: 0.7,
-    }).addTo(map);
-  }
-}
-
-// New function to properly rotate only the map content
-function rotateMapContent(bearing) {
-  // Store the current bearing for reference
-  map._bearing = bearing;
-
-  // Get the main tile container (this contains the actual map tiles)
-  const mapPane = map._mapPane || document.querySelector(".leaflet-map-pane");
-  if (!mapPane) return;
-
-  // Only rotate the map pane, not the entire container
-  mapPane.style.transform = `rotate(${-bearing}deg)`;
-
-  // Apply counter-rotation to all text labels so they stay upright
-  const textLabels = document.querySelectorAll(".tree-text-label");
-  textLabels.forEach((label) => {
-    label.style.transform = `rotate(${bearing}deg)`;
-  });
-
-  // Make sure we load tiles in the corners by padding the visible area
-  const mapSize = map.getSize();
-  const padding = Math.ceil(
-    (Math.sqrt(Math.pow(mapSize.x, 2) + Math.pow(mapSize.y, 2)) -
-      Math.min(mapSize.x, mapSize.y)) /
-      2
-  );
-
-  // Force a small pan to trigger tile loading in the expanded area
-  const center = map.getCenter();
-  map.setView(center, map.getZoom(), {
-    padding: [padding, padding],
-    animate: false,
-  });
 }
 
 // Get user's current location
@@ -631,7 +664,7 @@ function createTreeMarker(feature, latlng) {
         color: "#000",
         weight: 1,
         opacity: 0.7,
-        fillOpacity: 0.7,
+        fillOpacity: 0.3,
       }).bindPopup(createPopupContent(feature.properties));
     }
 
@@ -653,7 +686,7 @@ function createTreeMarker(feature, latlng) {
       color: "#000",
       weight: 1,
       opacity: 1.0,
-      fillOpacity: 1.0,
+      fillOpacity: 0.3,
     }).bindPopup(popupContent);
 
     treeLayerGroup.addLayer(circleMarker);
@@ -689,7 +722,7 @@ function createTreeMarker(feature, latlng) {
     const maxFontSize = 22;
     const fontSize = getSmartFontSize(dbh, minFontSize, maxFontSize);
 
-    // Create a clickable text label with a slightly larger clickable area
+    // Create a clickable text label with improved vertical centering
     const textLabel = L.marker(latlng, {
       icon: L.divIcon({
         className: "tree-text-label",
@@ -701,9 +734,13 @@ function createTreeMarker(feature, latlng) {
               text-align: center; 
               font-weight: bold;
               opacity: 0.9;
-              padding: 5px;">${displayName}</div>`,
+              display: flex;
+              align-items: center;
+              justify-content: center;
+              height: 100%;
+              padding: 0;">${displayName}</div>`,
         iconSize: [120, 80], // Larger size to be more clickable
-        iconAnchor: [60, 40], // Center of the larger icon
+        iconAnchor: [60, 40], // Center of the icon horizontally and vertically
       }),
       interactive: true, // Make sure it's interactive
       zIndexOffset: 1000, // Ensure text is above the circle
@@ -721,7 +758,17 @@ function createTreeMarker(feature, latlng) {
   } else {
     // For lower zoom levels
     const diameterInFeet = Math.max(dbh, 2); // Ensure visibility at lower zooms
-    const radiusInMeters = (diameterInFeet / 2) * 0.3048;
+    let radiusInMeters = (diameterInFeet / 2) * 0.3048;
+
+    // Calculate the minimum radius in meters that would represent 5px on screen
+    // Get meters per pixel at current zoom and latitude
+    const lat = latlng.lat;
+    const metersPerPixel =
+      (156543.03 * Math.cos((lat * Math.PI) / 180)) / Math.pow(2, currentZoom);
+    const minRadiusInMeters = 5 * metersPerPixel;
+
+    // Use the larger of the actual tree size or our minimum size
+    radiusInMeters = Math.max(radiusInMeters, minRadiusInMeters);
 
     return L.circle(latlng, {
       radius: radiusInMeters,
@@ -729,7 +776,7 @@ function createTreeMarker(feature, latlng) {
       color: "#000",
       weight: 1,
       opacity: 1,
-      fillOpacity: 0.8,
+      fillOpacity: 0.3,
     }).bindPopup(createPopupContent(feature.properties));
   }
 }
@@ -1022,30 +1069,26 @@ function toggleMapRotation() {
       toggleButton.style.backgroundColor = "#4285F4";
       toggleButton.style.color = "white";
 
-      // If device orientation is available, apply the current heading
-      if (
-        window.hasOrientationPermission &&
-        typeof DeviceOrientationEvent !== "undefined"
-      ) {
-        // Use the last known heading if available
-        const currentBearing = map._bearing || 0;
-        if (currentBearing) {
-          rotateMapContent(currentBearing);
-        }
+      // If we have orientation permission, reapply the current heading
+      if (window.hasOrientationPermission) {
+        // We'll let the orientation events update the bearing
       }
     } else {
       toggleButton.style.backgroundColor = "white";
       toggleButton.style.color = "black";
 
-      // Reset the map rotation
-      map.resetBearing();
+      // Reset to north up
+      if (map && map.setBearing) {
+        map.setBearing(0);
+      }
     }
   }
 
-  // If we don't have orientation permissions but want to rotate, prompt for them
+  // If we don't have orientation permissions but want to rotate, prompt for them on iOS
   if (
     autoRotateMap &&
     !window.hasOrientationPermission &&
+    typeof DeviceOrientationEvent !== "undefined" &&
     typeof DeviceOrientationEvent.requestPermission === "function"
   ) {
     showOrientationPermissionPrompt();
