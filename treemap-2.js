@@ -15,11 +15,11 @@ let initialLoad = true;
 const mapboxAccessToken =
   "pk.eyJ1IjoiZ3JlZ2xvcnl1cyIsImEiOiJjbTg4dWF5a3IwdWNiMmpwc2xkMHh2MG90In0.MiqAh3PR2fbJOvFblQBPSg";
 
-// Initialize the map
+// Initialize the map with just these additional touch options
 function initMap() {
   console.log("Initializing map with Mapbox...");
 
-  // Initialize Mapbox map with proper configuration
+  // Initialize Mapbox map
   mapboxgl.accessToken = mapboxAccessToken;
 
   map = new mapboxgl.Map({
@@ -29,7 +29,15 @@ function initMap() {
     zoom: 14,
     attributionControl: false,
     bearing: 0,
-    dragRotate: false, // Disable manual rotation via mouse/touch
+    pitchWithRotate: false,
+    dragRotate: false,
+    // Add these explicit touch-friendly settings
+    boxZoom: true,
+    doubleClickZoom: true,
+    touchZoomRotate: {
+      around: "center",
+      pinch: true,
+    },
   });
 
   // Add navigation control (zoom buttons)
@@ -130,33 +138,22 @@ function addLocationButton() {
   locationButton.addEventListener("click", getUserLocation);
 }
 
-// Add name toggle button to map
+// Only change name toggle button to be more visible
 function addNameToggleButton() {
-  // Get existing button or create a new one
-  let nameToggleButton = document.getElementById("name-toggle-button");
-
-  if (!nameToggleButton) {
-    // Create a new button if it doesn't exist
-    nameToggleButton = document.createElement("div");
-    nameToggleButton.id = "name-toggle-button";
-    nameToggleButton.className = "custom-button";
-    nameToggleButton.innerHTML = "Scientific Names";
-    nameToggleButton.title = "Toggle Scientific/Common Names";
-    nameToggleButton.style.position = "absolute";
-    nameToggleButton.style.bottom = "20px";
-    nameToggleButton.style.right = "10px";
-    nameToggleButton.style.zIndex = "10";
-    nameToggleButton.style.backgroundColor = "white";
-    nameToggleButton.style.padding = "5px 10px";
-    nameToggleButton.style.borderRadius = "4px";
-    nameToggleButton.style.boxShadow = "0 0 10px rgba(0, 0, 0, 0.3)";
-    nameToggleButton.style.cursor = "pointer";
-    document.getElementById("map").appendChild(nameToggleButton);
-  }
-
-  // Add event listener (remove any existing ones first)
-  nameToggleButton.removeEventListener("click", toggleNameDisplay);
+  // Create a custom HTML element for the button
+  const nameToggleButton = document.createElement("div");
+  nameToggleButton.className =
+    "mapboxgl-ctrl mapboxgl-ctrl-group name-toggle-button";
+  nameToggleButton.innerHTML =
+    '<button id="name-toggle" type="button" title="Toggle Scientific/Common Names" style="font-weight: bold; text-decoration: none; color: black; display: block; text-align: center; padding: 5px; background-color: white; width: auto;">Scientific Names</button>';
   nameToggleButton.addEventListener("click", toggleNameDisplay);
+
+  // Add the custom control directly to the DOM
+  nameToggleButton.style.position = "absolute";
+  nameToggleButton.style.bottom = "10px"; // Ensure it's visible in portrait mode
+  nameToggleButton.style.right = "10px";
+  nameToggleButton.style.zIndex = "10"; // Higher than default controls
+  document.getElementById("map").appendChild(nameToggleButton);
 }
 
 // Function to toggle between scientific and common names
@@ -164,7 +161,7 @@ function toggleNameDisplay() {
   displayScientificNames = !displayScientificNames;
 
   // Update the button text
-  const toggleButton = document.getElementById("name-toggle-button");
+  const toggleButton = document.getElementById("name-toggle");
   if (toggleButton) {
     toggleButton.textContent = displayScientificNames
       ? "Scientific Names"
@@ -306,21 +303,13 @@ function setupClusterLayers() {
     showTreePopup(feature, e.lngLat);
   });
 
-  // Add click handler for tree labels - so text is also clickable
+  // Add click handler for tree labels also
   map.on("click", "tree-labels", function (e) {
     const feature = e.features[0];
     showTreePopup(feature, e.lngLat);
   });
 
-  // Change cursor on hover for both circles and labels
-  map.on("mouseenter", "unclustered-trees", function () {
-    map.getCanvas().style.cursor = "pointer";
-  });
-
-  map.on("mouseleave", "unclustered-trees", function () {
-    map.getCanvas().style.cursor = "";
-  });
-
+  // Also add cursor style for tree labels
   map.on("mouseenter", "tree-labels", function () {
     map.getCanvas().style.cursor = "pointer";
   });
