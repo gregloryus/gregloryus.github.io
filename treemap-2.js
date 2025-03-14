@@ -31,6 +31,11 @@ function initMap() {
     bearing: 0, // Initial rotation - will be updated based on user's heading
     pitchWithRotate: false,
     dragRotate: false, // Disable manual rotation via mouse/touch
+    touchZoomRotate: true, // Explicitly enable touch zoom and rotate
+    dragPan: true, // Explicitly enable drag to pan
+    scrollZoom: true, // Explicitly enable scroll to zoom
+    doubleClickZoom: true, // Explicitly enable double click to zoom
+    touchPitch: false, // Disable touch pitch as we don't need 3D tilting
   });
 
   // Add custom controls once map loads
@@ -119,9 +124,9 @@ function addNameToggleButton() {
     '<button id="name-toggle" type="button" title="Toggle Scientific/Common Names" style="font-weight: bold; text-decoration: none; color: black; display: block; text-align: center; padding: 5px; background-color: white; width: auto;">Scientific Names</button>';
   nameToggleButton.addEventListener("click", toggleNameDisplay);
 
-  // Add the custom control directly to the DOM
+  // Add the custom control directly to the DOM - moved to top-right for better mobile visibility
   nameToggleButton.style.position = "absolute";
-  nameToggleButton.style.bottom = "50px";
+  nameToggleButton.style.top = "10px";
   nameToggleButton.style.right = "10px";
   nameToggleButton.style.zIndex = "1";
   document.getElementById("map").appendChild(nameToggleButton);
@@ -273,12 +278,26 @@ function setupClusterLayers() {
     showTreePopup(feature, e.lngLat);
   });
 
-  // Change cursor on hover
+  // Add click handler for tree labels - so text is also clickable
+  map.on("click", "tree-labels", function (e) {
+    const feature = e.features[0];
+    showTreePopup(feature, e.lngLat);
+  });
+
+  // Change cursor on hover for both circles and labels
   map.on("mouseenter", "unclustered-trees", function () {
     map.getCanvas().style.cursor = "pointer";
   });
 
   map.on("mouseleave", "unclustered-trees", function () {
+    map.getCanvas().style.cursor = "";
+  });
+
+  map.on("mouseenter", "tree-labels", function () {
+    map.getCanvas().style.cursor = "pointer";
+  });
+
+  map.on("mouseleave", "tree-labels", function () {
     map.getCanvas().style.cursor = "";
   });
 
