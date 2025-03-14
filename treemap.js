@@ -12,14 +12,19 @@ let headingMarker;
 function initMap() {
   console.log("Initializing map...");
   // Create a map centered on Evanston, IL
-  map = L.map("map").setView([42.0451, -87.6877], 14);
+  map = L.map("map", {
+    maxZoom: Infinity, // Try to remove upper limit completely
+    zoomSnap: 0, // Disable zoom snapping
+    zoomDelta: 0.1, // Allow for very fine zoom control
+    wheelPxPerZoomLevel: 150, // Make scroll wheel zooming very gradual
+  }).setView([42.0451, -87.6877], 14);
 
   // Add OpenStreetMap tile layer
   L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png", {
     attribution:
       '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>',
     subdomains: "abcd",
-    maxZoom: 19,
+    maxZoom: Infinity, // Try to remove tile provider limit
   }).addTo(map);
 
   // Initialize marker cluster group with improved settings for precision
@@ -101,6 +106,23 @@ function initMap() {
   console.log("Map initialized, loading tree data...");
   // Load tree data
   loadTreeData();
+
+  // Disable touch event restrictions
+  document.addEventListener(
+    "gesturestart",
+    function (e) {
+      e.preventDefault();
+    },
+    { passive: false }
+  );
+
+  document.addEventListener(
+    "gesturechange",
+    function (e) {
+      e.preventDefault();
+    },
+    { passive: false }
+  );
 }
 
 // Setup device orientation to get compass heading
