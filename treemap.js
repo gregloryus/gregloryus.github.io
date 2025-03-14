@@ -287,24 +287,46 @@ async function loadTreeData() {
 
   // Check if we're running on github.io or locally
   const isGitHubPages = window.location.hostname.includes("github.io");
-  const baseUrl = isGitHubPages
-    ? "https://raw.githubusercontent.com/gregloryus/gregloryus.github.io/master/"
-    : "";
 
   try {
     // Try to load GeoJSON with .geojson extension first
     try {
-      const geojsonUrl = baseUrl + "trees.geojson";
-      console.log("Trying to load from:", geojsonUrl);
+      // For GitHub Pages, try different possible URLs
+      const urls = isGitHubPages
+        ? [
+            "trees.geojson", // Try relative path first
+            "/trees.geojson", // Try with leading slash
+            "/gregloryus.github.io/trees.geojson", // Try with repo name
+            "https://raw.githubusercontent.com/gregloryus/gregloryus.github.io/main/trees.geojson", // Try main branch
+            "https://raw.githubusercontent.com/gregloryus/gregloryus.github.io/master/trees.geojson", // Try master branch
+          ]
+        : ["trees.geojson"]; // Local only needs one path
 
-      const response = await fetch(geojsonUrl);
-      if (!response.ok)
-        throw new Error(`HTTP error! Status: ${response.status}`);
+      let data = null;
+      let loadedUrl = null;
 
-      showLoading("Processing GeoJSON data...");
-      const data = await response.json();
+      // Try each URL until one works
+      for (const url of urls) {
+        try {
+          console.log("Trying to load from:", url);
+          const response = await fetch(url);
+
+          if (response.ok) {
+            console.log("Successfully fetched from:", url);
+            showLoading("Processing GeoJSON data...");
+            data = await response.json();
+            loadedUrl = url;
+            break;
+          }
+        } catch (e) {
+          console.log(`Failed to load from ${url}:`, e);
+        }
+      }
+
+      if (!data) throw new Error("All URLs failed to load");
+
       console.log(
-        "Successfully loaded GeoJSON data:",
+        `Successfully loaded GeoJSON data from ${loadedUrl}:`,
         data.features
           ? `${data.features.length} features found`
           : "Invalid format"
