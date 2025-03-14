@@ -7,6 +7,7 @@ let markerClusterGroup;
 let treeData = [];
 let userMarker;
 let headingMarker;
+let displayScientificNames = false; // Changed default to common names
 
 // Initialize the map
 function initMap() {
@@ -87,6 +88,22 @@ function initMap() {
     return div;
   };
   treeCountDisplay.addTo(map);
+
+  // Add name toggle button
+  const nameToggleButton = L.control({ position: "bottomright" });
+  nameToggleButton.onAdd = function (map) {
+    const div = L.DomUtil.create("div", "leaflet-bar leaflet-control");
+    div.innerHTML = `<a href="#" id="name-toggle" title="Toggle Scientific/Common Names" 
+                    style="font-weight: bold; text-decoration: none; color: black; 
+                    display: block; text-align: center; padding: 5px; 
+                    background-color: white; width: auto;">Scientific Names</a>`;
+    div.onclick = function () {
+      toggleNameDisplay();
+      return false;
+    };
+    return div;
+  };
+  nameToggleButton.addTo(map);
 
   // Add event listener for map movement to update visible trees
   map.on("moveend", function () {
@@ -461,23 +478,70 @@ function displayInitialTrees(data) {
 
 // Create markers for trees
 function createTreeMarker(feature, latlng) {
-  // Default style
-  const markerOptions = {
-    radius: 5,
-    fillColor: getTreeColor(feature.properties),
-    color: "#000",
-    weight: 1,
-    opacity: 1,
-    fillOpacity: 0.8,
-  };
+  const currentZoom = map.getZoom();
 
-  // At highest zoom levels, use slightly larger markers for better visibility
-  if (map.getZoom() >= 18) {
-    markerOptions.radius = 6;
-    markerOptions.weight = 2;
+  // At highest zoom levels (18+), use text labels instead of circles
+  if (currentZoom >= 18) {
+    // Get the appropriate name based on current display mode
+    const genus = feature.properties.genus || "";
+    const species = feature.properties.spp || "";
+    const commonName = feature.properties.common || "Unknown";
+
+    let displayName;
+    if (displayScientificNames) {
+      // For scientific names: ensure we don't repeat the genus and use lowercase
+      // Check if species already starts with the genus name
+      const lowerSpecies = species.toLowerCase();
+      const lowerGenus = genus.toLowerCase();
+
+      if (lowerSpecies.startsWith(lowerGenus)) {
+        displayName = lowerSpecies; // Species already includes genus
+      } else {
+        displayName = `${lowerGenus} ${lowerSpecies}`.trim(); // Concatenate genus and species
+      }
+    } else {
+      // For common names, use as is
+      displayName = commonName;
+    }
+
+    // Split the name by spaces and join with line breaks to create a more compact label
+    const words = displayName.split(" ");
+    displayName = words.join("<br>");
+
+    // Create a text label with the tree name
+    return L.marker(latlng, {
+      icon: L.divIcon({
+        className: "tree-text-label",
+        html: `<div style="text-transform: ${
+          displayScientificNames ? "lowercase" : "uppercase"
+        }; 
+              color: ${getTreeColor(feature.properties)}; 
+              text-shadow: 0px 0px 2px #000, 0px 0px 2px #000; font-size: 11px; 
+              text-align: center; background-color: rgba(0,0,0,0.3); 
+              padding: 3px; border-radius: 4px; font-weight: bold;">${displayName}</div>`,
+        iconSize: [100, 60],
+        iconAnchor: [50, 30],
+      }),
+    });
+  } else {
+    // Default style for lower zoom levels - circle markers
+    const markerOptions = {
+      radius: 5,
+      fillColor: getTreeColor(feature.properties),
+      color: "#000",
+      weight: 1,
+      opacity: 1,
+      fillOpacity: 0.8,
+    };
+
+    // At higher zoom levels (but below 18), use slightly larger markers
+    if (currentZoom >= 16) {
+      markerOptions.radius = 6;
+      markerOptions.weight = 2;
+    }
+
+    return L.circleMarker(latlng, markerOptions);
   }
-
-  return L.circleMarker(latlng, markerOptions);
 }
 
 // Get color based on tree genus
@@ -564,6 +628,24 @@ window.toggleDetails = function (link) {
   }
 };
 
+// Function to toggle between scientific and common names
+function toggleNameDisplay() {
+  displayScientificNames = !displayScientificNames;
+
+  // Update the button text
+  const toggleButton = document.getElementById("name-toggle");
+  if (toggleButton) {
+    toggleButton.textContent = displayScientificNames
+      ? "Scientific Names"
+      : "Common Names";
+  }
+
+  // Refresh the visible trees to update the display
+  if (window.fullTreeData) {
+    updateVisibleTrees();
+  }
+}
+
 // Update visible trees when map is moved
 function updateVisibleTrees() {
   if (!window.fullTreeData || !window.fullTreeData.features) return;
@@ -597,7 +679,7 @@ function updateVisibleTrees() {
   // Clear existing markers and add new ones
   markerClusterGroup.clearLayers();
 
-  // Create GeoJSON layer
+  // Create GeoJSON layer with the current name display setting
   const geoJsonLayer = L.geoJSON(filteredData, {
     pointToLayer: createTreeMarker,
     onEachFeature: bindTreePopup,
