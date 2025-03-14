@@ -290,8 +290,21 @@ function handleOrientation(event) {
 
     // If auto-rotate is enabled, rotate the map to match the device orientation
     if (autoRotateMap && map) {
+      // Store previous heading to detect significant changes
+      const prevHeading = map.getBearing() || 0;
+
       // Set the map bearing to match the device heading
       map.setBearing(heading);
+
+      // If rotation changed significantly, force a view update to fill in tiles
+      if (Math.abs(heading - prevHeading) > 20) {
+        setTimeout(() => {
+          // Small pan to force tile refresh
+          const center = map.getCenter();
+          map.panBy([1, 1], { animate: false });
+          map.panBy([-1, -1], { animate: false });
+        }, 100);
+      }
     }
 
     // If we already have a heading marker, update it
@@ -599,6 +612,22 @@ function createTreeMarker(feature, latlng) {
 
   // At highest zoom levels (18+), use text labels instead of circles
   if (currentZoom >= 18) {
+    // Get the DBH (diameter at breast height) value
+    const dbh = parseFloat(feature.properties.dbh) || 0;
+
+    // Skip trees with very small DBH when zoomed in
+    if (dbh < 0.5) {
+      // Return a very small, nearly invisible marker for trees we want to skip
+      return L.circleMarker(latlng, {
+        radius: 2,
+        fillColor: getTreeColor(feature.properties),
+        color: "#000",
+        weight: 0.5,
+        opacity: 0.4,
+        fillOpacity: 0.4,
+      });
+    }
+
     // Get the appropriate name based on current display mode
     const genus = feature.properties.genus || "";
     const species = feature.properties.spp || "";
@@ -606,15 +635,14 @@ function createTreeMarker(feature, latlng) {
 
     let displayName;
     if (displayScientificNames) {
-      // For scientific names: ensure we don't repeat the genus and use lowercase
-      // Check if species already starts with the genus name
+      // For scientific names: ensure we don't repeat the genus
       const lowerSpecies = species.toLowerCase();
       const lowerGenus = genus.toLowerCase();
 
       if (lowerSpecies.startsWith(lowerGenus)) {
-        displayName = lowerSpecies; // Species already includes genus
+        displayName = species; // Species already includes genus
       } else {
-        displayName = `${lowerGenus} ${lowerSpecies}`.trim(); // Concatenate genus and species
+        displayName = `${genus} ${species}`.trim(); // Concatenate genus and species
       }
     } else {
       // For common names, use as is
@@ -625,17 +653,26 @@ function createTreeMarker(feature, latlng) {
     const words = displayName.split(" ");
     displayName = words.join("<br>");
 
+    // Define our font size range
+    const minFontSize = 9;
+    const maxFontSize = 22;
+
+    // Get the dynamically calculated font size
+    const fontSize = getSmartFontSize(dbh, minFontSize, maxFontSize);
+
     // Create a text label with the tree name
     return L.marker(latlng, {
       icon: L.divIcon({
         className: "tree-text-label",
-        html: `<div style="text-transform: ${
-          displayScientificNames ? "lowercase" : "uppercase"
-        }; 
+        html: `<div style="
               color: ${getTreeColor(feature.properties)}; 
-              text-shadow: 0px 0px 2px #000, 0px 0px 2px #000; font-size: 11px; 
-              text-align: center; background-color: rgba(0,0,0,0.3); 
-              padding: 3px; border-radius: 4px; font-weight: bold;">${displayName}</div>`,
+              text-shadow: 0px 0px 2px #000, 0px 0px 2px #000; 
+              font-size: ${fontSize}px; 
+              text-align: center; 
+              background-color: rgba(0,0,0,0.3); 
+              padding: 3px; 
+              border-radius: 4px; 
+              font-weight: bold;">${displayName}</div>`,
         iconSize: [100, 60],
         iconAnchor: [50, 30],
       }),
@@ -659,6 +696,75 @@ function createTreeMarker(feature, latlng) {
 
     return L.circleMarker(latlng, markerOptions);
   }
+}
+
+// Function to calculate a smart font size based on DBH
+function getSmartFontSize(dbh, minFontSize, maxFontSize) {
+  // Cache these calculations to avoid repeating for each tree
+  if (
+    !window.dbhStats ||
+    window.dbhStatsLastUpdate !== window.lastVisibleUpdate
+  ) {
+    // Find min and max DBH values in the current visible trees
+    const visibleDBHs = [];
+
+    if (window.visibleTreeFeatures) {
+      window.visibleTreeFeatures.forEach((feature) => {
+        const dbh = parseFloat(feature.properties.dbh) || 0;
+        if (dbh >= 0.5) {
+          // Only consider visible trees
+          visibleDBHs.push(dbh);
+        }
+      });
+    }
+
+    // Calculate statistics from visible trees
+    let minDBH = Math.min(...visibleDBHs);
+    let maxDBH = Math.max(...visibleDBHs);
+
+    // If there are no visible trees or only one tree, use default range
+    if (visibleDBHs.length <= 1 || minDBH === maxDBH) {
+      minDBH = 1;
+      maxDBH = 80;
+    } else {
+      // Check if the range is too narrow (less than 20% difference)
+      const ratio = maxDBH / minDBH;
+      if (ratio < 1.2) {
+        // Expand the range to ensure at least 20% difference
+        const midpoint = (minDBH + maxDBH) / 2;
+        minDBH = midpoint / 1.1; // 10% below midpoint
+        maxDBH = midpoint * 1.1; // 10% above midpoint
+      }
+
+      // Constrain the range to reasonable limits
+      minDBH = Math.max(1, minDBH);
+      maxDBH = Math.min(80, maxDBH);
+    }
+
+    // Save statistics for reuse
+    window.dbhStats = {
+      min: minDBH,
+      max: maxDBH,
+    };
+    window.dbhStatsLastUpdate = window.lastVisibleUpdate;
+  }
+
+  // Use the cached statistics
+  const { min: minDBH, max: maxDBH } = window.dbhStats;
+
+  // Calculate the normalized position of this DBH in the range
+  let normalizedValue;
+  if (maxDBH === minDBH) {
+    normalizedValue = 0.5; // If all trees are the same size, use the middle of the range
+  } else {
+    normalizedValue = (dbh - minDBH) / (maxDBH - minDBH);
+  }
+
+  // Clamp between 0 and 1
+  normalizedValue = Math.max(0, Math.min(1, normalizedValue));
+
+  // Calculate final font size
+  return minFontSize + normalizedValue * (maxFontSize - minFontSize);
 }
 
 // Get color based on tree genus
@@ -780,6 +886,10 @@ function updateVisibleTrees() {
     return bounds.contains(L.latLng(coords[1], coords[0]));
   });
 
+  // Store these visible features for font size calculations
+  window.visibleTreeFeatures = visibleFeatures;
+  window.lastVisibleUpdate = Date.now();
+
   // Limit number of trees for performance
   const limitedFeatures = visibleFeatures.slice(0, 1000);
 
@@ -819,14 +929,39 @@ function enableMapRotation() {
     // Add rotation capabilities to Leaflet map
     L.Map.include({
       setBearing: function (bearing) {
+        // Store previous bearing for comparison
+        const prevBearing = this._bearing || 0;
+
         // Store current center
         const center = this.getCenter();
 
-        // Rotate the map container
+        // Update the map container's rotation
         this.getContainer().style.transform = `rotate(${-bearing}deg)`;
 
         // Mark the map as rotated so we know about it
         this._bearing = bearing;
+
+        // Get the map size and calculate the "padded" area needed for rotation
+        const size = this.getSize();
+        const paddingNeeded = calculateRotationPadding(size, bearing);
+
+        // Extend the render bounds to include areas that will be visible after rotation
+        if (paddingNeeded > 0) {
+          this._padBounds = paddingNeeded;
+
+          // Load additional tiles beyond visible area to fill corners during rotation
+          const currentZoom = this.getZoom();
+          const visibleBounds = this.getBounds();
+          const expandedBounds = visibleBounds.pad(0.4); // 40% larger area
+
+          // Force load of tiles in the expanded area
+          this._updatePathViewport();
+
+          // Trigger a moveend event to refresh tiles in the expanded area
+          if (Math.abs(bearing - prevBearing) > 5) {
+            this.fire("moveend");
+          }
+        }
 
         // Fire a rotation event
         this.fire("rotate");
@@ -840,13 +975,46 @@ function enableMapRotation() {
 
       resetBearing: function () {
         this.setBearing(0);
+        this._padBounds = 0;
         return this;
       },
     });
+
+    // Extend the original _updatePathViewport method to include rotation padding
+    const originalUpdateViewport = L.Map.prototype._updatePathViewport;
+    L.Map.prototype._updatePathViewport = function () {
+      // Call the original method
+      originalUpdateViewport.call(this);
+
+      // If we have rotation, extend the view bounds
+      if (this._padBounds) {
+        const bounds = this.getPixelBounds();
+        const padding = this._padBounds;
+        this._pathViewport = new L.Bounds(
+          bounds.min.subtract([padding, padding]),
+          bounds.max.add([padding, padding])
+        );
+      }
+    };
   }
 }
 
-// Function to toggle map rotation mode
+// Calculate how much padding is needed based on rotation angle
+function calculateRotationPadding(size, angle) {
+  // Convert angle to radians
+  const rad = Math.abs(((angle % 90) * Math.PI) / 180);
+
+  // Calculate the diagonal length of the map
+  const diagonal = Math.sqrt(Math.pow(size.x, 2) + Math.pow(size.y, 2));
+
+  // Calculate the additional padding needed based on rotation angle
+  // This ensures the corners are filled when rotated
+  const padding = Math.ceil((diagonal - Math.max(size.x, size.y)) / 2);
+
+  return padding;
+}
+
+// Update the toggle rotation function to handle the extra rendering
 function toggleMapRotation() {
   autoRotateMap = !autoRotateMap;
 
@@ -856,11 +1024,21 @@ function toggleMapRotation() {
     if (autoRotateMap) {
       toggleButton.style.backgroundColor = "#4285F4";
       toggleButton.style.color = "white";
+
+      // When enabling rotation, immediately expand the view area
+      if (map._bearing) {
+        // If already rotated, refresh with expanded bounds
+        const currentBearing = map.getBearing();
+        map.setBearing(currentBearing);
+      }
     } else {
       toggleButton.style.backgroundColor = "white";
       toggleButton.style.color = "black";
       // Reset the map rotation to north up
       map.resetBearing();
+
+      // Force a refresh to restore normal view
+      map.fire("moveend");
     }
   }
 
