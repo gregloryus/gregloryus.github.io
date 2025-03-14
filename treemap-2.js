@@ -15,7 +15,7 @@ let initialLoad = true;
 const mapboxAccessToken =
   "pk.eyJ1IjoiZ3JlZ2xvcnl1cyIsImEiOiJjbTg4dWF5a3IwdWNiMmpwc2xkMHh2MG90In0.MiqAh3PR2fbJOvFblQBPSg";
 
-// Initialize the map with just these additional touch options
+// Initialize the map
 function initMap() {
   console.log("Initializing map with Mapbox...");
 
@@ -24,51 +24,25 @@ function initMap() {
 
   map = new mapboxgl.Map({
     container: "map",
-    style: "mapbox://styles/mapbox/dark-v11",
-    center: [-87.6877, 42.0451],
+    style: "mapbox://styles/mapbox/dark-v11", // Dark style for minimalist design
+    center: [-87.6877, 42.0451], // Evanston, IL coordinates - reversed for Mapbox
     zoom: 14,
     attributionControl: false,
-    bearing: 0,
+    bearing: 0, // Initial rotation - will be updated based on user's heading
     pitchWithRotate: false,
-    dragRotate: false,
-    // Add these explicit touch-friendly settings
-    boxZoom: true,
-    doubleClickZoom: true,
-    touchZoomRotate: {
-      around: "center",
-      pinch: true,
-    },
+    dragRotate: false, // Disable manual rotation via mouse/touch
   });
-
-  // Add navigation control (zoom buttons)
-  map.addControl(
-    new mapboxgl.NavigationControl({
-      showCompass: false,
-    }),
-    "top-right"
-  );
 
   // Add custom controls once map loads
   map.on("load", function () {
     console.log("Map loaded, adding controls...");
 
     // Add loading indicator overlay
-    const loadingIndicator = document.getElementById("loading-indicator");
-    if (!loadingIndicator) {
-      const newLoadingIndicator = document.createElement("div");
-      newLoadingIndicator.id = "loading-indicator";
-      newLoadingIndicator.innerHTML = "Loading tree data...";
-      newLoadingIndicator.style.display = "none";
-      newLoadingIndicator.style.position = "absolute";
-      newLoadingIndicator.style.bottom = "10px";
-      newLoadingIndicator.style.left = "10px";
-      newLoadingIndicator.style.zIndex = "999";
-      newLoadingIndicator.style.backgroundColor = "rgba(255, 255, 255, 0.8)";
-      newLoadingIndicator.style.padding = "5px 10px";
-      newLoadingIndicator.style.borderRadius = "5px";
-      newLoadingIndicator.style.fontWeight = "bold";
-      document.body.appendChild(newLoadingIndicator);
-    }
+    const loadingIndicator = document.createElement("div");
+    loadingIndicator.id = "loading-indicator";
+    loadingIndicator.innerHTML = "Loading tree data...";
+    loadingIndicator.style.display = "none";
+    document.body.appendChild(loadingIndicator);
 
     // Add location button
     addLocationButton();
@@ -107,38 +81,35 @@ function initMap() {
     // Setup device orientation with iOS focus
     setupDeviceOrientation();
   });
+
+  // Add navigation control (zoom buttons)
+  map.addControl(
+    new mapboxgl.NavigationControl({
+      showCompass: false, // Hide the compass since we'll use our own heading indicator
+    }),
+    "bottom-right"
+  );
 }
 
 // Add location button to map
 function addLocationButton() {
-  // Get existing button or create a new one
-  let locationButton = document.getElementById("location-button");
-
-  if (!locationButton) {
-    // Create a new button if it doesn't exist
-    locationButton = document.createElement("div");
-    locationButton.id = "location-button";
-    locationButton.className = "custom-button";
-    locationButton.innerHTML = "📍";
-    locationButton.title = "Show My Location";
-    locationButton.style.position = "absolute";
-    locationButton.style.top = "10px";
-    locationButton.style.left = "10px";
-    locationButton.style.zIndex = "10";
-    locationButton.style.backgroundColor = "white";
-    locationButton.style.padding = "5px 10px";
-    locationButton.style.borderRadius = "4px";
-    locationButton.style.boxShadow = "0 0 10px rgba(0, 0, 0, 0.3)";
-    locationButton.style.cursor = "pointer";
-    document.getElementById("map").appendChild(locationButton);
-  }
-
-  // Add event listener (remove any existing ones first)
-  locationButton.removeEventListener("click", getUserLocation);
+  // Create a custom HTML element for the button
+  const locationButton = document.createElement("div");
+  locationButton.className =
+    "mapboxgl-ctrl mapboxgl-ctrl-group location-button";
+  locationButton.innerHTML =
+    '<button type="button" title="Show My Location" style="font-weight: bold; text-decoration: none; color: black; display: block; text-align: center; height: 30px; width: 30px; line-height: 30px;">📍</button>';
   locationButton.addEventListener("click", getUserLocation);
+
+  // Add the custom control directly to the DOM
+  locationButton.style.position = "absolute";
+  locationButton.style.top = "10px";
+  locationButton.style.left = "10px";
+  locationButton.style.zIndex = "1";
+  document.getElementById("map").appendChild(locationButton);
 }
 
-// Only change name toggle button to be more visible
+// Add name toggle button to map
 function addNameToggleButton() {
   // Create a custom HTML element for the button
   const nameToggleButton = document.createElement("div");
@@ -150,52 +121,44 @@ function addNameToggleButton() {
 
   // Add the custom control directly to the DOM
   nameToggleButton.style.position = "absolute";
-  nameToggleButton.style.bottom = "10px"; // Ensure it's visible in portrait mode
+  nameToggleButton.style.bottom = "50px";
   nameToggleButton.style.right = "10px";
-  nameToggleButton.style.zIndex = "10"; // Higher than default controls
+  nameToggleButton.style.zIndex = "1";
   document.getElementById("map").appendChild(nameToggleButton);
 }
 
-// Function to toggle between scientific and common names
-function toggleNameDisplay() {
-  displayScientificNames = !displayScientificNames;
-
-  // Update the button text
-  const toggleButton = document.getElementById("name-toggle");
-  if (toggleButton) {
-    toggleButton.textContent = displayScientificNames
-      ? "Scientific Names"
-      : "Common Names";
+// Show loading indicator
+function showLoading(message = "Loading tree data...") {
+  const indicator = document.getElementById("loading-indicator");
+  if (indicator) {
+    indicator.style.display = "block";
+    indicator.innerHTML = message;
   }
+}
 
-  // Refresh the visible trees to update the display
-  if (window.fullTreeData) {
-    updateVisibleTrees();
+// Hide loading indicator
+function hideLoading() {
+  const indicator = document.getElementById("loading-indicator");
+  if (indicator) {
+    indicator.style.display = "none";
   }
 }
 
 // Setup clustering layers for tree visualization
 function setupClusterLayers() {
-  console.log("Setting up cluster layers...");
+  // Add empty source for tree data
+  map.addSource("trees", {
+    type: "geojson",
+    data: {
+      type: "FeatureCollection",
+      features: [],
+    },
+    cluster: true,
+    clusterMaxZoom: 14, // Disable clustering at higher zoom levels
+    clusterRadius: 40,
+  });
 
-  try {
-    // Add empty source for tree data
-    map.addSource("trees", {
-      type: "geojson",
-      data: {
-        type: "FeatureCollection",
-        features: [],
-      },
-      cluster: true,
-      clusterMaxZoom: 14,
-      clusterRadius: 40,
-    });
-    console.log("✅ Tree source added successfully");
-    clusterSourceAdded = true;
-  } catch (error) {
-    console.error("❌ Error adding tree source:", error);
-    return; // Exit if we can't add the source
-  }
+  clusterSourceAdded = true;
 
   // Add layers for clustered and unclustered points
 
@@ -310,18 +273,12 @@ function setupClusterLayers() {
     showTreePopup(feature, e.lngLat);
   });
 
-  // Add click handler for tree labels also
-  map.on("click", "tree-labels", function (e) {
-    const feature = e.features[0];
-    showTreePopup(feature, e.lngLat);
-  });
-
-  // Also add cursor style for tree labels
-  map.on("mouseenter", "tree-labels", function () {
+  // Change cursor on hover
+  map.on("mouseenter", "unclustered-trees", function () {
     map.getCanvas().style.cursor = "pointer";
   });
 
-  map.on("mouseleave", "tree-labels", function () {
+  map.on("mouseleave", "unclustered-trees", function () {
     map.getCanvas().style.cursor = "";
   });
 
@@ -352,8 +309,6 @@ function setupClusterLayers() {
   map.on("mouseleave", "clusters", function () {
     map.getCanvas().style.cursor = "";
   });
-
-  console.log("✅ All cluster layers added successfully");
 }
 
 // Show popup for a tree
@@ -398,17 +353,15 @@ async function loadTreeData() {
 
     // Process the data to add required properties for display
     processTreeData(data);
-    console.log("✅ Tree data processed");
 
     // Store full data
     window.fullTreeData = data;
 
     // Display initial subset
-    console.log("Calling displayInitialTrees...");
     displayInitialTrees(data);
   } catch (error) {
     hideLoading();
-    console.error("❌ Error in loadTreeData:", error);
+    console.error("Error in loadTreeData:", error);
     alert(`Error loading tree data: ${error.message}`);
   }
 }
@@ -458,24 +411,11 @@ function processTreeData(data) {
 
 // Display initial subset of trees
 function displayInitialTrees(data) {
-  console.log("Starting displayInitialTrees...");
-
+  console.log("Displaying initial trees...");
   if (!data || !data.features) {
-    console.error("❌ Invalid data format:", data);
+    console.error("Invalid data format:", data);
     hideLoading();
     return;
-  }
-
-  // Check if the source is ready
-  if (!map.getSource("trees")) {
-    console.error("❌ Tree source not found! Re-initializing source...");
-    try {
-      setupClusterLayers();
-    } catch (e) {
-      console.error("❌ Failed to set up cluster layers:", e);
-      hideLoading();
-      return;
-    }
   }
 
   // Get current map bounds
@@ -499,7 +439,7 @@ function displayInitialTrees(data) {
       );
     });
   } else {
-    console.log("Map bounds not available, using subset");
+    // If no bounds yet, just use a subset
     visibleFeatures = data.features.slice(0, 500);
   }
 
@@ -512,19 +452,11 @@ function displayInitialTrees(data) {
   showLoading(`Loading ${limitedFeatures.length} trees...`);
 
   // Update the data in the source
-  try {
-    if (map.getSource("trees")) {
-      console.log("Updating source data with trees...");
-      map.getSource("trees").setData({
-        type: "FeatureCollection",
-        features: limitedFeatures,
-      });
-      console.log("✅ Source data updated successfully");
-    } else {
-      console.error("❌ Tree source still not available after setup attempt");
-    }
-  } catch (error) {
-    console.error("❌ Error updating source data:", error);
+  if (map.getSource("trees")) {
+    map.getSource("trees").setData({
+      type: "FeatureCollection",
+      features: limitedFeatures,
+    });
   }
 
   hideLoading();
@@ -610,6 +542,24 @@ function updateVisibleTrees() {
   }
 
   hideLoading();
+}
+
+// Function to toggle between scientific and common names
+function toggleNameDisplay() {
+  displayScientificNames = !displayScientificNames;
+
+  // Update the button text
+  const toggleButton = document.getElementById("name-toggle");
+  if (toggleButton) {
+    toggleButton.textContent = displayScientificNames
+      ? "Scientific Names"
+      : "Common Names";
+  }
+
+  // Refresh the visible trees to update the display
+  if (window.fullTreeData) {
+    updateVisibleTrees();
+  }
 }
 
 // Get user's current location
@@ -961,12 +911,4 @@ function getTreeColor(properties) {
 document.addEventListener("DOMContentLoaded", function () {
   console.log("DOM loaded, initializing map...");
   initMap();
-
-  // Add a safety check to verify tree data loading
-  setTimeout(function () {
-    if (!window.fullTreeData) {
-      console.log("⚠️ No tree data loaded after 5 seconds, retrying...");
-      loadTreeData();
-    }
-  }, 5000);
 });
