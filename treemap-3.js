@@ -17,34 +17,12 @@ let lastOrientationUpdate = 0; // For throttling updates
 let orientationThrottleTime = 100; // Update orientation no more than once per 100ms
 let locationUpdateInterval = null; // Track the interval for location updates
 
+// At the top of the file with other constants
+const DIM_OPACITY = 0.9; // Maximum opacity for dimming effect during tree highlighting
+
 // Mapbox access token - REPLACE WITH YOUR OWN TOKEN
 const mapboxAccessToken =
   "pk.eyJ1IjoiZ3JlZ2xvcnl1cyIsImEiOiJjbTg4dWF5a3IwdWNiMmpwc2xkMHh2MG90In0.MiqAh3PR2fbJOvFblQBPSg";
-
-// Debug panel for mobile testing
-function createDebugPanel() {
-  const debugPanel = document.createElement("div");
-  debugPanel.id = "debug-panel";
-  debugPanel.style.position = "absolute";
-  debugPanel.style.bottom = "60px";
-  debugPanel.style.left = "10px";
-  debugPanel.style.backgroundColor = "rgba(0, 0, 0, 0.7)";
-  debugPanel.style.color = "white";
-  debugPanel.style.padding = "10px";
-  debugPanel.style.borderRadius = "5px";
-  debugPanel.style.maxWidth = "300px";
-  debugPanel.style.fontSize = "12px";
-  debugPanel.style.zIndex = "1000";
-  debugPanel.innerHTML = "Orientation Debug Panel";
-  document.body.appendChild(debugPanel);
-  return debugPanel;
-}
-
-// Function to log debug info to the panel
-function logToDebugPanel(message) {
-  const panel = document.getElementById("debug-panel") || createDebugPanel();
-  panel.innerHTML = message;
-}
 
 // IMPORTANT: Define utility functions first to avoid "not defined" errors
 // Show loading indicator
@@ -160,8 +138,8 @@ function initMap() {
     // Add compass button (for all devices)
     addCompassButton();
 
-    // Create debug panel
-    createDebugPanel();
+    // Add find biggest tree button
+    addFindBiggestTreeButton();
 
     // Wait until map is fully loaded before loading tree data
     loadTreeData();
@@ -267,7 +245,6 @@ function addCompassButton() {
         this.style.borderWidth = "1px";
         this.style.borderStyle = "solid";
         this.innerHTML = "🧭";
-        logToDebugPanel("Compass deactivated - touch controls enabled");
       } else {
         // Request permission or turn on orientation if already granted
         if (
@@ -285,9 +262,6 @@ function addCompassButton() {
           this.style.borderColor = "#4285F4";
           this.style.borderWidth = "2px";
           this.style.borderStyle = "solid";
-          logToDebugPanel(
-            "Compass activated - tap screen to temporarily pause"
-          );
         }
       }
     });
@@ -302,17 +276,28 @@ function locationButtonClicked() {
 
 // Add name toggle button
 function addNameToggleButton() {
-  // Create a custom HTML element for the button
   const nameToggleButton = document.createElement("div");
   nameToggleButton.id = "name-toggle-button";
   nameToggleButton.className = "custom-button";
   nameToggleButton.style.position = "absolute";
-  nameToggleButton.style.bottom = "10px"; // Ensure it's visible in portrait mode
+  nameToggleButton.style.bottom = "10px";
   nameToggleButton.style.right = "10px";
-  nameToggleButton.style.zIndex = "10"; // Higher than default controls
-  nameToggleButton.style.minWidth = "auto";
-  nameToggleButton.style.padding = "10px 15px";
-  nameToggleButton.innerHTML = "Scientific Names";
+  nameToggleButton.style.zIndex = "10";
+  nameToggleButton.style.padding = "10px";
+  nameToggleButton.style.backgroundColor = "white";
+  nameToggleButton.style.borderRadius = "4px";
+  nameToggleButton.style.boxShadow = "0 0 10px rgba(0, 0, 0, 0.3)";
+  nameToggleButton.style.cursor = "pointer";
+  nameToggleButton.style.width = "auto";
+  nameToggleButton.style.height = "44px";
+  nameToggleButton.style.display = "flex";
+  nameToggleButton.style.alignItems = "center";
+  nameToggleButton.style.justifyContent = "center";
+  nameToggleButton.style.textAlign = "center";
+  nameToggleButton.style.minWidth = "90px";
+  nameToggleButton.innerHTML = displayScientificNames
+    ? "Show<br>common<br>names"
+    : "Show<br>scientific<br>names";
   nameToggleButton.addEventListener("click", toggleNameDisplay);
   document.getElementById("map").appendChild(nameToggleButton);
 }
@@ -321,12 +306,12 @@ function addNameToggleButton() {
 function toggleNameDisplay() {
   displayScientificNames = !displayScientificNames;
 
-  // Update the button text
+  // Update the button text with new wording and line breaks
   const toggleButton = document.getElementById("name-toggle-button");
   if (toggleButton) {
-    toggleButton.textContent = displayScientificNames
-      ? "Scientific Names"
-      : "Common Names";
+    toggleButton.innerHTML = displayScientificNames
+      ? "Show<br>common<br>names"
+      : "Show<br>scientific<br>names";
   }
 
   // Refresh the visible trees to update the display
@@ -340,70 +325,24 @@ function setupClusterLayers() {
   console.log("Setting up cluster layers...");
 
   try {
-    // Add empty source for tree data
+    // Add empty source for tree data without clustering
     map.addSource("trees", {
       type: "geojson",
       data: {
         type: "FeatureCollection",
         features: [],
       },
-      cluster: true,
-      clusterMaxZoom: 14,
-      clusterRadius: 40,
+      // Remove cluster-related options
     });
     console.log("✅ Tree source added successfully");
     clusterSourceAdded = true;
   } catch (error) {
     console.error("❌ Error adding tree source:", error);
-    return; // Exit if we can't add the source
+    return;
   }
 
-  // Add layers for clustered and unclustered points
-
-  // 1. Cluster circles
-  map.addLayer({
-    id: "clusters",
-    type: "circle",
-    source: "trees",
-    filter: ["has", "point_count"],
-    paint: {
-      "circle-color": [
-        "step",
-        ["get", "point_count"],
-        "#51bbd6", // color for clusters with < 10 points
-        10,
-        "#f1f075", // color for clusters with < 50 points
-        50,
-        "#f28cb1", // color for clusters with >= 50 points
-      ],
-      "circle-radius": [
-        "step",
-        ["get", "point_count"],
-        25, // radius for clusters with < 10 points (larger for touch)
-        10,
-        35, // radius for clusters with < 50 points
-        50,
-        45, // radius for clusters with >= 50 points
-      ],
-      "circle-opacity": 0.7,
-    },
-  });
-
-  // 2. Cluster count labels
-  map.addLayer({
-    id: "cluster-count",
-    type: "symbol",
-    source: "trees",
-    filter: ["has", "point_count"],
-    layout: {
-      "text-field": "{point_count_abbreviated}",
-      "text-font": ["DIN Offc Pro Medium", "Arial Unicode MS Bold"],
-      "text-size": 14, // Larger text for better touch
-    },
-    paint: {
-      "text-color": "#ffffff",
-    },
-  });
+  // Remove the cluster circles and cluster count layers
+  // Only keep the unclustered-trees and tree-labels layers
 
   // 3. Individual tree markers (circles sized by tree diameter)
   map.addLayer({
@@ -477,27 +416,8 @@ function setupClusterLayers() {
     showTreePopup(feature, e.lngLat);
   });
 
-  // Handle cluster clicks to zoom in
-  map.on("click", "clusters", function (e) {
-    const features = map.queryRenderedFeatures(e.point, {
-      layers: ["clusters"],
-    });
-    const clusterId = features[0].properties.cluster_id;
-
-    map
-      .getSource("trees")
-      .getClusterExpansionZoom(clusterId, function (err, zoom) {
-        if (err) return;
-
-        map.easeTo({
-          center: features[0].geometry.coordinates,
-          zoom: zoom,
-        });
-      });
-  });
-
   // Change cursor on hover for all interactive elements
-  const interactiveLayers = ["clusters", "unclustered-trees", "tree-labels"];
+  const interactiveLayers = ["unclustered-trees", "tree-labels"];
   interactiveLayers.forEach((layer) => {
     map.on("mouseenter", layer, () => {
       map.getCanvas().style.cursor = "pointer";
@@ -919,7 +839,7 @@ function getUserLocation(initialRequest = false) {
         startLocationUpdates();
 
         // Add debug message for orientation
-        logToDebugPanel(`Location acquired! Current heading: ${userHeading}°`);
+        console.log(`Location acquired! Current heading: ${userHeading}°`);
       },
       // Error callback - with simplified error handling
       (error) => {
@@ -960,46 +880,28 @@ function isMobileDevice() {
 
 // Setup device orientation to get compass heading
 function setupDeviceOrientation(forceSetup = false) {
-  if (orientationSupported && !forceSetup) return; // Skip if already set up
+  if (orientationSupported && !forceSetup) return;
 
-  logToDebugPanel("Setting up device orientation...");
-
-  // Check if device supports orientation events
   if (window.DeviceOrientationEvent) {
-    // iOS 13+ requires permission request
     if (typeof DeviceOrientationEvent.requestPermission === "function") {
-      // For iOS devices
-      logToDebugPanel(
-        "iOS device detected. Click 🧭 button to enable compass."
-      );
-      return; // The button will handle the permission request
+      return;
     } else {
-      // For non-iOS devices (Android, older iOS)
       try {
-        // Remove any existing listeners first
         window.removeEventListener("deviceorientation", handleOrientation);
         window.removeEventListener(
           "deviceorientationabsolute",
           handleOrientation
         );
-
-        // Add the standard device orientation listener
         window.addEventListener("deviceorientation", handleOrientation);
 
-        // Also try the absolute version, which is more accurate but less supported
         if ("ondeviceorientationabsolute" in window) {
           window.addEventListener(
             "deviceorientationabsolute",
             handleOrientation
           );
-          logToDebugPanel("Using deviceorientationabsolute (more accurate)");
-        } else {
-          logToDebugPanel("Using standard deviceorientation");
         }
 
         orientationSupported = true;
-
-        // Mark compass as active
         orientationActive = true;
         const compassButton = document.getElementById("compass-button");
         if (compassButton) {
@@ -1010,47 +912,36 @@ function setupDeviceOrientation(forceSetup = false) {
           compassButton.style.borderStyle = "solid";
         }
       } catch (e) {
-        logToDebugPanel("Error setting up orientation: " + e.message);
+        console.error("Error setting up orientation:", e);
       }
     }
-  } else {
-    logToDebugPanel("Device orientation not supported on this device");
   }
 }
 
 // Request iOS permission for orientation
 function requestiOSPermission() {
-  logToDebugPanel("Requesting iOS orientation permission...");
-
-  DeviceOrientationEvent.requestPermission()
-    .then((permissionState) => {
-      if (permissionState === "granted") {
-        logToDebugPanel("✅ iOS orientation permission granted");
-
-        // Remove any existing listeners first
-        window.removeEventListener("deviceorientation", handleOrientation);
-
-        // Add the event listener
-        window.addEventListener("deviceorientation", handleOrientation);
-        orientationSupported = true;
-        orientationActive = true;
-
-        // Mark compass as active
-        const compassButton = document.getElementById("compass-button");
-        if (compassButton) {
-          compassButton.classList.add("active");
-          compassButton.style.backgroundColor = "#e6f2ff";
-          compassButton.style.borderColor = "#4285F4";
-          compassButton.style.borderWidth = "2px";
-          compassButton.style.borderStyle = "solid";
+  if (typeof DeviceOrientationEvent.requestPermission === "function") {
+    DeviceOrientationEvent.requestPermission()
+      .then((permissionState) => {
+        if (permissionState === "granted") {
+          orientationSupported = true;
+          orientationActive = true;
+          const compassButton = document.getElementById("compass-button");
+          if (compassButton) {
+            compassButton.classList.add("active");
+            compassButton.style.backgroundColor = "#e6f2ff";
+            compassButton.style.borderColor = "#4285F4";
+            compassButton.style.borderWidth = "2px";
+            compassButton.style.borderStyle = "solid";
+          }
+        } else {
+          console.log("❌ iOS orientation permission denied");
         }
-      } else {
-        logToDebugPanel("❌ iOS orientation permission denied");
-      }
-    })
-    .catch((error) => {
-      logToDebugPanel("Error requesting permission: " + error.message);
-    });
+      })
+      .catch((error) => {
+        console.error("Error requesting permission: " + error.message);
+      });
+  }
 }
 
 // Throttled orientation handler - only update at most once per orientationThrottleTime ms
@@ -1073,7 +964,7 @@ function handleOrientation(event) {
 
   // Only log occasionally to reduce visual noise
   if (now % 1000 < 100) {
-    logToDebugPanel(debugInfo);
+    console.log(debugInfo);
   }
 
   let heading;
@@ -1179,7 +1070,7 @@ function createPopupContent(properties) {
     
     ${
       lastUpdated
-        ? `<div style="font-style: italic; color: #999; font-size: 10px;">as of ${lastUpdated}</div>`
+        ? `<div style="font-style: italic; color: #999; font-size: 10px; text-align: right;">as of ${lastUpdated}</div>`
         : ""
     }
   </div>`;
@@ -1206,6 +1097,370 @@ function getTreeColor(properties) {
   };
 
   return genusColors[genus] || "#005500"; // Deep green default
+}
+
+// Add new button and functionality
+function addFindBiggestTreeButton() {
+  const findBiggestButton = document.createElement("div");
+  findBiggestButton.id = "find-biggest-button";
+  findBiggestButton.className = "custom-button";
+  findBiggestButton.style.position = "absolute";
+  findBiggestButton.style.bottom = "10px";
+  findBiggestButton.style.left = "10px";
+  findBiggestButton.style.zIndex = "10";
+  findBiggestButton.style.backgroundColor = "white";
+  findBiggestButton.style.padding = "10px";
+  findBiggestButton.style.borderRadius = "4px";
+  findBiggestButton.style.boxShadow = "0 0 10px rgba(0, 0, 0, 0.3)";
+  findBiggestButton.style.cursor = "pointer";
+  findBiggestButton.style.width = "auto";
+  findBiggestButton.style.height = "44px";
+  findBiggestButton.style.display = "flex";
+  findBiggestButton.style.alignItems = "center";
+  findBiggestButton.style.justifyContent = "center";
+  findBiggestButton.style.textAlign = "center";
+  findBiggestButton.style.minWidth = "90px";
+  findBiggestButton.innerHTML = "Find<br>biggest<br>tree";
+  findBiggestButton.addEventListener("click", highlightBiggestTrees);
+  document.getElementById("map").appendChild(findBiggestButton);
+}
+
+function highlightBiggestTrees() {
+  // Get all buttons
+  const buttons = [
+    document.getElementById("location-button"), // Top-left
+    document.getElementById("compass-button"), // Top-right
+    document.getElementById("find-biggest-button"), // Bottom-left
+    document.getElementById("name-toggle-button"), // Bottom-right
+  ];
+
+  // Get map container dimensions
+  const mapContainer = map.getContainer();
+  const containerWidth = mapContainer.offsetWidth;
+  const containerHeight = mapContainer.offsetHeight;
+
+  // Create exclusion rectangles that extend to screen edges
+  const exclusionRects = buttons
+    .map((button) => {
+      if (!button) return null;
+      const rect = button.getBoundingClientRect();
+      const mapRect = mapContainer.getBoundingClientRect();
+
+      // Convert coordinates relative to map container
+      const left = rect.left - mapRect.left;
+      const top = rect.top - mapRect.top;
+      const right = rect.right - mapRect.left;
+      const bottom = rect.bottom - mapRect.top;
+
+      // Extend rectangles to screen edges based on button position
+      if (left < containerWidth / 2 && top < containerHeight / 2) {
+        // Top-left button: extend to left and top edges
+        return [
+          [0, 0],
+          [right + 10, bottom + 10],
+        ];
+      } else if (left >= containerWidth / 2 && top < containerHeight / 2) {
+        // Top-right button: extend to right and top edges
+        return [
+          [left - 10, 0],
+          [containerWidth, bottom + 10],
+        ];
+      } else if (left < containerWidth / 2 && top >= containerHeight / 2) {
+        // Bottom-left button: extend to left and bottom edges
+        return [
+          [0, top - 10],
+          [right + 10, containerHeight],
+        ];
+      } else {
+        // Bottom-right button: extend to right and bottom edges
+        return [
+          [left - 10, top - 10],
+          [containerWidth, containerHeight],
+        ];
+      }
+    })
+    .filter((rect) => rect !== null);
+
+  // Query visible trees, excluding those in button areas
+  const features = [];
+  const fullMapArea = [
+    [0, 0],
+    [containerWidth, containerHeight],
+  ];
+
+  // Get all visible trees first
+  const allVisibleTrees = map.queryRenderedFeatures(fullMapArea, {
+    layers: ["unclustered-trees"],
+  });
+
+  // Filter out trees in exclusion zones
+  allVisibleTrees.forEach((tree) => {
+    const point = map.project(tree.geometry.coordinates);
+    let isInExclusionZone = false;
+
+    // Check if tree is in any exclusion rectangle
+    for (const rect of exclusionRects) {
+      if (
+        point.x >= rect[0][0] &&
+        point.x <= rect[1][0] &&
+        point.y >= rect[0][1] &&
+        point.y <= rect[1][1]
+      ) {
+        isInExclusionZone = true;
+        break;
+      }
+    }
+
+    if (!isInExclusionZone) {
+      features.push(tree);
+    }
+  });
+
+  if (!features.length) return;
+
+  // Rest of the highlighting logic remains the same
+  const maxDBH = Math.max(...features.map((f) => f.properties.dbh || 0));
+  const biggestTreeFilter = ["==", ["get", "dbh"], maxDBH];
+
+  // Add a dim layer if it doesn't exist
+  if (!map.getLayer("dim-layer")) {
+    map.addLayer(
+      {
+        id: "dim-layer",
+        type: "background",
+        paint: {
+          "background-color": "#000",
+          "background-opacity": 0,
+        },
+      },
+      "unclustered-trees"
+    );
+  }
+
+  // Create or update highlighted trees layer
+  if (!map.getLayer("highlighted-trees")) {
+    map.addLayer({
+      id: "highlighted-trees",
+      type: "circle",
+      source: "trees",
+      filter: ["==", ["get", "dbh"], -1], // Initially empty
+      paint: {
+        "circle-color": ["get", "color"],
+        "circle-radius": map.getPaintProperty(
+          "unclustered-trees",
+          "circle-radius"
+        ),
+        "circle-stroke-width": 1.5,
+        "circle-stroke-color": "#ffffff",
+        "circle-opacity": 0,
+        "circle-stroke-opacity": 0,
+      },
+    });
+
+    // Add highlighted labels layer on top of everything
+    map.addLayer({
+      id: "highlighted-labels",
+      type: "symbol",
+      source: "trees",
+      filter: ["==", ["get", "dbh"], -1],
+      layout: {
+        "text-field": ["get", "displayName"],
+        "text-size": [
+          "interpolate",
+          ["linear"],
+          ["zoom"],
+          17,
+          0,
+          18,
+          12,
+          20,
+          16,
+        ],
+        "text-font": ["DIN Offc Pro Medium", "Arial Unicode MS Bold"],
+        "text-offset": [0, 0],
+        "text-anchor": "center",
+        "text-allow-overlap": true, // Allow labels to overlap for highlighted trees
+        "text-ignore-placement": true, // Ensure labels are always shown
+        "symbol-sort-key": ["*", -1, ["get", "dbh"]],
+      },
+      paint: {
+        "text-color": "#ffffff",
+        "text-halo-color": "#000000",
+        "text-halo-width": 2,
+        "text-opacity": 0,
+      },
+    });
+  }
+
+  // Save original opacity values
+  const originalCircleOpacity = map.getPaintProperty(
+    "unclustered-trees",
+    "circle-opacity"
+  );
+  const originalStrokeOpacity =
+    map.getPaintProperty("unclustered-trees", "circle-stroke-opacity") || 1;
+  const originalLabelOpacity = map.getPaintProperty(
+    "tree-labels",
+    "text-opacity"
+  );
+
+  // Animate the dimming effect
+  let startTime = null;
+  const duration = 500;
+
+  function animate(currentTime) {
+    if (!startTime) startTime = currentTime;
+    const elapsed = currentTime - startTime;
+    const phase = Math.floor(elapsed / duration);
+    const phaseProgress = (elapsed % duration) / duration;
+
+    if (phase >= 3) {
+      // Reset everything at once
+      map.setPaintProperty("dim-layer", "background-opacity", 0);
+      map.setPaintProperty(
+        "unclustered-trees",
+        "circle-opacity",
+        originalCircleOpacity
+      );
+      map.setPaintProperty(
+        "unclustered-trees",
+        "circle-stroke-opacity",
+        originalStrokeOpacity
+      );
+      map.setPaintProperty("tree-labels", "text-opacity", originalLabelOpacity);
+      map.setFilter("highlighted-trees", ["==", ["get", "dbh"], -1]);
+      map.setFilter("highlighted-labels", ["==", ["get", "dbh"], -1]);
+      return;
+    }
+
+    if (phase === 0) {
+      // Phase 1: Fade in dim effect - everything dims together
+      const dimProgress = phaseProgress;
+      const dimmedOpacity = 0.2;
+
+      // Dim background
+      map.setPaintProperty(
+        "dim-layer",
+        "background-opacity",
+        dimProgress * DIM_OPACITY
+      );
+
+      // Dim regular trees and their labels at the same rate as background
+      const currentOpacity =
+        originalCircleOpacity * (1 - dimProgress) + dimmedOpacity * dimProgress;
+
+      // Regular trees
+      map.setPaintProperty("unclustered-trees", "circle-opacity", [
+        "case",
+        biggestTreeFilter,
+        0,
+        currentOpacity,
+      ]);
+      map.setPaintProperty("unclustered-trees", "circle-stroke-opacity", [
+        "case",
+        biggestTreeFilter,
+        0,
+        currentOpacity,
+      ]);
+      map.setPaintProperty("tree-labels", "text-opacity", [
+        "case",
+        biggestTreeFilter,
+        0,
+        currentOpacity,
+      ]);
+
+      // Show highlighted trees at full opacity
+      map.setFilter("highlighted-trees", biggestTreeFilter);
+      map.setFilter("highlighted-labels", biggestTreeFilter);
+      map.setPaintProperty(
+        "highlighted-trees",
+        "circle-opacity",
+        originalCircleOpacity
+      );
+      map.setPaintProperty(
+        "highlighted-trees",
+        "circle-stroke-opacity",
+        originalStrokeOpacity
+      );
+      map.setPaintProperty("highlighted-labels", "text-opacity", 1);
+    } else if (phase === 1) {
+      // Phase 2: Hold the effect
+      map.setPaintProperty("dim-layer", "background-opacity", DIM_OPACITY);
+    } else if (phase === 2) {
+      // Phase 3: Fade out dim effect - everything brightens together
+      const brightProgress = phaseProgress;
+      const dimmedOpacity = 0.2;
+
+      // Brighten background
+      map.setPaintProperty(
+        "dim-layer",
+        "background-opacity",
+        DIM_OPACITY * (1 - brightProgress)
+      );
+
+      // Restore regular trees and labels
+      const currentOpacity =
+        dimmedOpacity * (1 - brightProgress) +
+        originalCircleOpacity * brightProgress;
+
+      // Regular trees
+      map.setPaintProperty("unclustered-trees", "circle-opacity", [
+        "case",
+        biggestTreeFilter,
+        0,
+        currentOpacity,
+      ]);
+      map.setPaintProperty("unclustered-trees", "circle-stroke-opacity", [
+        "case",
+        biggestTreeFilter,
+        0,
+        currentOpacity,
+      ]);
+      map.setPaintProperty("tree-labels", "text-opacity", [
+        "case",
+        biggestTreeFilter,
+        0,
+        currentOpacity,
+      ]);
+
+      // Keep highlighted trees fully visible until the very end
+      if (brightProgress < 0.9) {
+        map.setPaintProperty(
+          "highlighted-trees",
+          "circle-opacity",
+          originalCircleOpacity
+        );
+        map.setPaintProperty(
+          "highlighted-trees",
+          "circle-stroke-opacity",
+          originalStrokeOpacity
+        );
+        map.setPaintProperty("highlighted-labels", "text-opacity", 1);
+      } else {
+        // Only fade out highlighted trees in the final 10% of the transition
+        const finalFade = (brightProgress - 0.9) * 10;
+        map.setPaintProperty(
+          "highlighted-trees",
+          "circle-opacity",
+          originalCircleOpacity * (1 - finalFade)
+        );
+        map.setPaintProperty(
+          "highlighted-trees",
+          "circle-stroke-opacity",
+          originalStrokeOpacity * (1 - finalFade)
+        );
+        map.setPaintProperty(
+          "highlighted-labels",
+          "text-opacity",
+          1 - finalFade
+        );
+      }
+    }
+
+    requestAnimationFrame(animate);
+  }
+
+  requestAnimationFrame(animate);
 }
 
 // Initialize when the page loads
