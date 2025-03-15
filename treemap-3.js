@@ -102,6 +102,13 @@ function initMap() {
   map.on("touchstart", () => {
     // If user is touching the map, temporarily pause orientation updates
     orientationActive = false;
+
+    // Also pause location updates
+    if (locationUpdateInterval) {
+      clearInterval(locationUpdateInterval);
+      locationUpdateInterval = null;
+    }
+
     const compassButton = document.getElementById("compass-button");
     if (compassButton && compassButton.classList.contains("active")) {
       compassButton.classList.add("paused");
@@ -114,6 +121,11 @@ function initMap() {
     if (compassButton && compassButton.classList.contains("paused")) {
       compassButton.classList.remove("paused");
       orientationActive = true;
+    }
+
+    // Restart location updates
+    if (!locationUpdateInterval) {
+      startLocationUpdates();
     }
   });
 
