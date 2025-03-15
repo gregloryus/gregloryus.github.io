@@ -1110,6 +1110,7 @@ function updateCompassButton(heading) {
 // Helper function to create consistent popup content
 function createPopupContent(properties) {
   const species = properties.spp || "";
+  const scientificName = properties.scientificName || "";
   const commonName = properties.commonName || "Unknown"; // Already formatted
   const dbh = properties.dbh || "Unknown";
 
@@ -1137,8 +1138,8 @@ function createPopupContent(properties) {
     }
   }
 
-  // Format DBH with the new requested format
-  let dbhDisplay = "Unknown width";
+  // Format DBH with the simplified format
+  let dbhDisplay = "Unknown";
   if (dbh !== "Unknown") {
     const dbhInches = parseFloat(dbh);
     if (!isNaN(dbhInches)) {
@@ -1146,19 +1147,29 @@ function createPopupContent(properties) {
       const inches = Math.round(dbhInches % 12);
 
       if (feet > 0) {
-        dbhDisplay = `${dbhInches}" (${feet}ft ${inches}in) wide trunk at chest height`;
+        dbhDisplay = `${dbhInches}" (${feet}ft ${inches}in)`;
       } else {
-        dbhDisplay = `${dbhInches}" wide trunk at chest height`;
+        dbhDisplay = `${dbhInches}"`;
       }
     }
   }
 
-  // Create the popup HTML with consistent font size and improved phrasing
-  return `<div class="tree-popup" style="min-width: 200px; font-family: 'Courier New', monospace; font-size: 14px; line-height: 1.5; padding: 10px;">
-    <div style="font-weight: bold; margin-bottom: 8px;">${commonName}</div>
-    <div style="font-style: italic; margin-bottom: 8px;">${species}</div>
-    <div style="margin-bottom: 8px;">${dbhDisplay}</div>
-    ${lastUpdated ? `<div style="color: #777;">As of ${lastUpdated}</div>` : ""}
+  // Create the popup HTML with new styling and labels
+  return `<div class="tree-popup" style="min-width: 220px; font-family: 'Courier New', monospace; font-size: 14px; line-height: 1.2; padding: 10px;">
+    <div style="font-weight: bold; margin-bottom: 2px;">${commonName}</div>
+    <div style="color: #999; font-size: 10px; margin-bottom: 12px;">Common name</div>
+    
+    <div style="font-style: italic; margin-bottom: 2px;">${scientificName}</div>
+    <div style="color: #999; font-size: 10px; margin-bottom: 12px;">Scientific name</div>
+    
+    <div style="margin-bottom: 2px;">${dbhDisplay}</div>
+    <div style="color: #999; font-size: 10px; margin-bottom: 12px;">Trunk width at chest height</div>
+    
+    ${
+      lastUpdated
+        ? `<div style="font-style: italic; color: #999; font-size: 10px;">as of ${lastUpdated}</div>`
+        : ""
+    }
   </div>`;
 }
 
@@ -1166,22 +1177,23 @@ function createPopupContent(properties) {
 function getTreeColor(properties) {
   const genus = properties.genus || "";
 
-  // Updated color coding by common genera with new colors as requested
+  // Updated color coding with your new color preferences
   const genusColors = {
-    Acer: "#FFA823", // Maple - bright yellowy orange
-    Quercus: "#D4A76A", // Oak - bright/light brown
-    Ulmus: "#7CDA4D", // Elm - bright/light green
-    Tilia: "#FFF3A3", // Linden - creamy yellow
-    Gleditsia: "#FFD059", // Honeylocust - bright orangey yellow
-    Fraxinus: "#BBAA9A", // Ash - tannish grey
-    Celtis: "#A13E30", // Hackberry - brownish red
-    Platanus: "#C0D860", // Sycamore - yellowy green
-    Salix: "#A63CE8", // Willow - bright purple
-    Pinus: "#FF4530", // Pine - bright red
-    Fagus: "#78C2ED", // Beech - light blue
+    Acer: "#FF362D", // Maple - updated to bright red
+    Quercus: "#BA4A00", // Oak - updated to brown
+    Ulmus: "#A9DFBF", // Elm - updated to light green
+    Tilia: "#F9E79F", // Linden - updated to light yellow
+    Gleditsia: "#FFD059", // Honeylocust - bright orangey yellow (unchanged)
+    Fraxinus: "#BBAA9A", // Ash - tannish grey (unchanged)
+    Celtis: "#A13E30", // Hackberry - brownish red (unchanged)
+    Platanus: "#C0D860", // Sycamore - yellowy green (unchanged)
+    Salix: "#A63CE8", // Willow - bright purple (unchanged)
+    Pinus: "#52BE80", // Pine - updated to medium green
+    Malus: "#F5B7B1", // Apple - added new light pink/salmon
+    Fagus: "#78C2ED", // Beech - light blue (unchanged)
   };
 
-  return genusColors[genus] || "#005500"; // Deep green default instead of light gray
+  return genusColors[genus] || "#005500"; // Deep green default
 }
 
 // Initialize when the page loads
