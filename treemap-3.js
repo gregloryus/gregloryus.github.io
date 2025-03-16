@@ -269,6 +269,7 @@ function addCompassButton() {
       } else {
         // Request permission or turn on orientation if already granted
         if (
+          window.DeviceOrientationEvent &&
           typeof DeviceOrientationEvent.requestPermission === "function" &&
           !orientationPermissionGranted
         ) {
@@ -927,6 +928,7 @@ function setupDeviceOrientation(forceSetup = false) {
   if (window.DeviceOrientationEvent) {
     // Fix for iOS permission flow - don't early return
     if (
+      window.DeviceOrientationEvent &&
       typeof DeviceOrientationEvent.requestPermission === "function" &&
       !orientationPermissionGranted
     ) {
@@ -985,7 +987,10 @@ function setupDeviceOrientation(forceSetup = false) {
 
 // Request iOS permission for orientation
 function requestiOSPermission() {
-  if (typeof DeviceOrientationEvent.requestPermission === "function") {
+  if (
+    window.DeviceOrientationEvent &&
+    typeof DeviceOrientationEvent.requestPermission === "function"
+  ) {
     DeviceOrientationEvent.requestPermission()
       .then((permissionState) => {
         if (permissionState === "granted") {
