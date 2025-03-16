@@ -201,22 +201,12 @@ function addLocationButton() {
     locationButton.style.alignItems = "center";
     locationButton.style.justifyContent = "center";
     locationButton.style.fontSize = "20px";
-
-    // Add this line to ensure clicks work anywhere in the button
-    locationButton.style.pointerEvents = "auto";
-
     document.getElementById("map").appendChild(locationButton);
   }
 
   // Add event listener (remove any existing ones first)
   locationButton.removeEventListener("click", locationButtonClicked);
   locationButton.addEventListener("click", locationButtonClicked);
-
-  // Add touch events for better mobile handling
-  locationButton.addEventListener("touchstart", function (e) {
-    e.preventDefault(); // Prevent default touch behavior
-    locationButtonClicked();
-  });
 }
 
 // Add compass button - always visible
@@ -244,12 +234,10 @@ function addCompassButton() {
     compassButton.style.alignItems = "center";
     compassButton.style.justifyContent = "center";
     compassButton.style.fontSize = "20px";
-    compassButton.style.pointerEvents = "auto"; // Ensure clicks work anywhere
-
     document.getElementById("map").appendChild(compassButton);
 
-    // Store original handler to use with both click and touch
-    const compassClickHandler = function () {
+    // Event listener
+    compassButton.addEventListener("click", function () {
       // Immediate visual feedback when clicked
       this.style.backgroundColor = "#e6f2ff";
       this.style.borderColor = "#4285F4";
@@ -267,86 +255,22 @@ function addCompassButton() {
         this.style.borderStyle = "solid";
         this.innerHTML = "🧭";
       } else {
-        // Try to set up orientation with a more robust iOS check
-        try {
-          // New approach: wrap the iOS permission request in a try-catch
-          if (window.DeviceOrientationEvent) {
-            if (
-              typeof window.DeviceOrientationEvent.requestPermission ===
-              "function"
-            ) {
-              // iOS-specific approach - show "requesting" state
-              this.innerHTML =
-                "🧭<div style='font-size: 10px; margin-top: 2px;'>Requesting...</div>";
-
-              // Use a timeout to ensure UI updates before permission request
-              setTimeout(() => {
-                window.DeviceOrientationEvent.requestPermission()
-                  .then((permissionState) => {
-                    if (permissionState === "granted") {
-                      // Permission granted
-                      orientationPermissionGranted = true;
-                      orientationSupported = true;
-                      orientationActive = true;
-
-                      // Setup the orientation handlers
-                      setupDeviceOrientation(true);
-
-                      // Update button state
-                      this.classList.add("active");
-                      this.style.backgroundColor = "#e6f2ff";
-                      this.style.borderColor = "#4285F4";
-                    } else {
-                      // Permission denied by user
-                      this.innerHTML =
-                        "🧭<div style='font-size: 10px; color: orange; margin-top: 2px;'>denied</div>";
-                      setTimeout(() => {
-                        this.innerHTML = "🧭";
-                      }, 2000);
-                    }
-                  })
-                  .catch((error) => {
-                    console.error("Permission request error:", error);
-                    this.innerHTML =
-                      "🧭<div style='font-size: 10px; color: red; margin-top: 2px;'>error</div>";
-                    setTimeout(() => {
-                      this.innerHTML = "🧭";
-                    }, 2000);
-                  });
-              }, 100);
-            } else {
-              // Non-iOS device or older iOS - try direct setup
-              orientationActive = true;
-              setupDeviceOrientation(true);
-              this.classList.add("active");
-            }
-          } else {
-            // DeviceOrientation not supported
-            this.innerHTML =
-              "🧭<div style='font-size: 10px; color: red; margin-top: 2px;'>not supported</div>";
-            setTimeout(() => {
-              this.innerHTML = "🧭";
-            }, 2000);
-          }
-        } catch (err) {
-          // Handle any unexpected errors
-          console.error("Compass setup error:", err);
+        // Request permission or turn on orientation if already granted
+        if (
+          typeof DeviceOrientationEvent.requestPermission === "function" &&
+          !orientationPermissionGranted
+        ) {
+          // iOS specific flow
           this.innerHTML =
-            "🧭<div style='font-size: 10px; color: red; margin-top: 2px;'>error</div>";
-          setTimeout(() => {
-            this.innerHTML = "🧭";
-          }, 2000);
+            "🧭<div style='font-size: 10px; margin-top: 2px;'>Requesting...</div>";
+          requestiOSPermission();
+        } else {
+          // Android or already has permission
+          this.classList.add("active");
+          setupDeviceOrientation(true); // Force setup
+          orientationActive = true;
         }
       }
-    };
-
-    // Event listener
-    compassButton.addEventListener("click", compassClickHandler);
-
-    // Add touch event for better mobile handling
-    compassButton.addEventListener("touchstart", function (e) {
-      e.preventDefault(); // Prevent default touch behavior
-      compassClickHandler.call(this); // Ensure 'this' references the button
     });
   }
 }
@@ -378,20 +302,10 @@ function addNameToggleButton() {
   nameToggleButton.style.justifyContent = "center";
   nameToggleButton.style.textAlign = "center";
   nameToggleButton.style.minWidth = "90px";
-  nameToggleButton.style.pointerEvents = "auto"; // Ensure clicks work anywhere
-
   nameToggleButton.innerHTML = displayScientificNames
     ? "Show<br>common<br>names"
     : "Show<br>scientific<br>names";
-
   nameToggleButton.addEventListener("click", toggleNameDisplay);
-
-  // Add touch event for better mobile handling
-  nameToggleButton.addEventListener("touchstart", function (e) {
-    e.preventDefault(); // Prevent default touch behavior
-    toggleNameDisplay();
-  });
-
   document.getElementById("map").appendChild(nameToggleButton);
 }
 
@@ -979,52 +893,113 @@ function isMobileDevice() {
 function setupDeviceOrientation(forceSetup = false) {
   if (orientationSupported && !forceSetup) return;
 
-  try {
-    // Clean up existing listeners
-    window.removeEventListener("deviceorientation", handleOrientation);
-    window.removeEventListener("deviceorientationabsolute", handleOrientation);
-
-    // Set a timeout to verify we're actually receiving orientation data
-    lastOrientationData = null;
-    setTimeout(() => {
-      if (!lastOrientationData && orientationActive) {
-        console.log("⚠️ No orientation data received after 2 seconds");
-        const compassButton = document.getElementById("compass-button");
-        if (compassButton && compassButton.classList.contains("active")) {
-          compassButton.innerHTML =
-            "🧭<div style='font-size: 10px; color: orange; margin-top: 2px;'>no data</div>";
-        }
-      }
-    }, 2000);
-
-    // Add event listeners
-    window.addEventListener("deviceorientation", handleOrientation);
-    if ("ondeviceorientationabsolute" in window) {
-      window.addEventListener("deviceorientationabsolute", handleOrientation);
+  if (window.DeviceOrientationEvent) {
+    // Fix for iOS permission flow - don't early return
+    if (
+      typeof DeviceOrientationEvent.requestPermission === "function" &&
+      !orientationPermissionGranted
+    ) {
+      console.log("iOS device detected, waiting for explicit permission");
+      return; // Still return, but only if permission hasn't been granted
     }
 
-    orientationSupported = true;
-    const compassButton = document.getElementById("compass-button");
-    if (compassButton) {
-      compassButton.classList.add("active");
-      compassButton.style.backgroundColor = "#e6f2ff";
-      compassButton.style.borderColor = "#4285F4";
-      compassButton.style.borderWidth = "2px";
-      compassButton.style.borderStyle = "solid";
-    }
-  } catch (e) {
-    console.error("Error setting up orientation:", e);
-    orientationActive = false;
-    const compassButton = document.getElementById("compass-button");
-    if (compassButton) {
-      compassButton.classList.remove("active");
-      compassButton.style.backgroundColor = "white";
-      compassButton.innerHTML =
-        "🧭<div style='font-size: 10px; color: red; margin-top: 2px;'>setup error</div>";
+    try {
+      // Clean up existing listeners
+      window.removeEventListener("deviceorientation", handleOrientation);
+      window.removeEventListener(
+        "deviceorientationabsolute",
+        handleOrientation
+      );
+
+      // Set a timeout to verify we're actually receiving orientation data
+      lastOrientationData = null;
       setTimeout(() => {
-        compassButton.innerHTML = "🧭";
+        if (!lastOrientationData && orientationActive) {
+          console.log("⚠️ No orientation data received after 2 seconds");
+          const compassButton = document.getElementById("compass-button");
+          if (compassButton) {
+            compassButton.innerHTML =
+              "🧭<div style='font-size: 10px; color: orange; margin-top: 2px;'>no data</div>";
+          }
+        }
       }, 2000);
+
+      // Add event listeners
+      window.addEventListener("deviceorientation", handleOrientation);
+      if ("ondeviceorientationabsolute" in window) {
+        window.addEventListener("deviceorientationabsolute", handleOrientation);
+      }
+
+      orientationSupported = true;
+      orientationActive = true;
+      const compassButton = document.getElementById("compass-button");
+      if (compassButton) {
+        compassButton.classList.add("active");
+        compassButton.style.backgroundColor = "#e6f2ff";
+        compassButton.style.borderColor = "#4285F4";
+        compassButton.style.borderWidth = "2px";
+        compassButton.style.borderStyle = "solid";
+      }
+    } catch (e) {
+      console.error("Error setting up orientation:", e);
+      const compassButton = document.getElementById("compass-button");
+      if (compassButton) {
+        compassButton.style.backgroundColor = "white";
+        compassButton.innerHTML =
+          "🧭<div style='font-size: 10px; color: red; margin-top: 2px;'>error</div>";
+      }
     }
+  }
+}
+
+// Request iOS permission for orientation
+function requestiOSPermission() {
+  if (typeof DeviceOrientationEvent.requestPermission === "function") {
+    DeviceOrientationEvent.requestPermission()
+      .then((permissionState) => {
+        if (permissionState === "granted") {
+          orientationPermissionGranted = true; // Mark permission as explicitly granted
+          orientationSupported = true;
+          orientationActive = true;
+
+          // Actually set up the orientation handling - this was missing
+          setupDeviceOrientation(true);
+
+          const compassButton = document.getElementById("compass-button");
+          if (compassButton) {
+            compassButton.classList.add("active");
+            compassButton.style.backgroundColor = "#e6f2ff";
+            compassButton.style.borderColor = "#4285F4";
+            compassButton.style.borderWidth = "2px";
+            compassButton.style.borderStyle = "solid";
+          }
+        } else {
+          console.log("❌ iOS orientation permission denied");
+          const compassButton = document.getElementById("compass-button");
+          if (compassButton) {
+            compassButton.style.backgroundColor = "white";
+            compassButton.innerHTML =
+              "🧭<div style='font-size: 10px; color: red; margin-top: 2px;'>denied</div>";
+            // Reset button after 2 seconds
+            setTimeout(() => {
+              compassButton.innerHTML = "🧭";
+            }, 2000);
+          }
+        }
+      })
+      .catch((error) => {
+        console.error("Error requesting permission: " + error.message);
+        const compassButton = document.getElementById("compass-button");
+        if (compassButton) {
+          compassButton.style.backgroundColor = "white";
+          compassButton.innerHTML =
+            "🧭<div style='font-size: 10px; color: red; margin-top: 2px;'>error</div>";
+          // Reset button after 2 seconds
+          setTimeout(() => {
+            compassButton.innerHTML = "🧭";
+          }, 2000);
+        }
+      });
   }
 }
 
@@ -1157,8 +1132,8 @@ function createPopupContent(properties) {
     )}`;
   }
 
-  // Create the popup HTML with new styling and labels - now with Wikipedia link and adjusted padding
-  return `<div class="tree-popup" style="min-width: 220px; font-family: 'Courier New', monospace; font-size: 14px; line-height: 1.2; padding: 5px 5px 2px 5px;">
+  // Create the popup HTML with new styling and labels - now with Wikipedia link
+  return `<div class="tree-popup" style="min-width: 220px; font-family: 'Courier New', monospace; font-size: 14px; line-height: 1.2; padding: 10px;">
     <div style="font-weight: bold; margin-bottom: 2px;">${commonName}</div>
     <div style="color: #999; font-size: 10px; margin-bottom: 12px;">Common name</div>
     
@@ -1176,7 +1151,7 @@ function createPopupContent(properties) {
     
     ${
       lastUpdated
-        ? `<div style="font-style: italic; color: #999; font-size: 10px; text-align: right;"><br>as of ${lastUpdated}</div>`
+        ? `<div style="font-style: italic; color: #999; font-size: 10px; text-align: right;">as of ${lastUpdated}</div>`
         : ""
     }
   </div>`;
@@ -1226,18 +1201,8 @@ function addFindBiggestTreeButton() {
   findBiggestButton.style.justifyContent = "center";
   findBiggestButton.style.textAlign = "center";
   findBiggestButton.style.minWidth = "90px";
-  findBiggestButton.style.pointerEvents = "auto"; // Ensure clicks work anywhere
-
   findBiggestButton.innerHTML = "Find<br>biggest<br>tree";
-
   findBiggestButton.addEventListener("click", highlightBiggestTrees);
-
-  // Add touch event for better mobile handling
-  findBiggestButton.addEventListener("touchstart", function (e) {
-    e.preventDefault(); // Prevent default touch behavior
-    highlightBiggestTrees();
-  });
-
   document.getElementById("map").appendChild(findBiggestButton);
 }
 
