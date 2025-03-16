@@ -184,22 +184,21 @@ function addLocationButton() {
     locationButton = document.createElement("div");
     locationButton.id = "location-button";
     locationButton.className = "custom-button";
-    locationButton.innerHTML = "📍";
+    locationButton.innerHTML =
+      "<div style='width:100%; height:100%; display:flex; align-items:center; justify-content:center;'>📍</div>";
     locationButton.title = "Show My Location";
     locationButton.style.position = "absolute";
     locationButton.style.top = "10px";
     locationButton.style.left = "10px";
     locationButton.style.zIndex = "10";
     locationButton.style.backgroundColor = "white";
-    locationButton.style.padding = "10px";
+    locationButton.style.padding = "0"; // Remove padding - content div will handle it
     locationButton.style.borderRadius = "4px";
     locationButton.style.boxShadow = "0 0 10px rgba(0, 0, 0, 0.3)";
     locationButton.style.cursor = "pointer";
     locationButton.style.width = "44px";
     locationButton.style.height = "44px";
-    locationButton.style.display = "flex";
-    locationButton.style.alignItems = "center";
-    locationButton.style.justifyContent = "center";
+    locationButton.style.display = "block"; // Changed from flex to block
     locationButton.style.fontSize = "20px";
     document.getElementById("map").appendChild(locationButton);
   }
@@ -217,22 +216,21 @@ function addCompassButton() {
     compassButton = document.createElement("div");
     compassButton.id = "compass-button";
     compassButton.className = "custom-button";
-    compassButton.innerHTML = "🧭";
+    compassButton.innerHTML =
+      "<div style='width:100%; height:100%; display:flex; align-items:center; justify-content:center;'>🧭</div>";
     compassButton.title = "Toggle Compass";
     compassButton.style.position = "absolute";
     compassButton.style.top = "10px";
     compassButton.style.right = "10px";
     compassButton.style.zIndex = "10";
     compassButton.style.backgroundColor = "white";
-    compassButton.style.padding = "10px";
+    compassButton.style.padding = "0"; // Remove padding - content div will handle it
     compassButton.style.borderRadius = "4px";
     compassButton.style.boxShadow = "0 0 10px rgba(0, 0, 0, 0.3)";
     compassButton.style.cursor = "pointer";
     compassButton.style.width = "44px";
     compassButton.style.height = "44px";
-    compassButton.style.display = "flex";
-    compassButton.style.alignItems = "center";
-    compassButton.style.justifyContent = "center";
+    compassButton.style.display = "block"; // Changed from flex to block
     compassButton.style.fontSize = "20px";
     document.getElementById("map").appendChild(compassButton);
 
@@ -253,7 +251,7 @@ function addCompassButton() {
         this.style.borderColor = "#ccc";
         this.style.borderWidth = "1px";
         this.style.borderStyle = "solid";
-        this.innerHTML = "🧭";
+        this.querySelector("div").innerHTML = "🧭"; // Update inner div
       } else {
         // Request permission or turn on orientation if already granted
         if (
@@ -261,7 +259,7 @@ function addCompassButton() {
           !orientationPermissionGranted
         ) {
           // iOS specific flow
-          this.innerHTML =
+          this.querySelector("div").innerHTML =
             "🧭<div style='font-size: 10px; margin-top: 2px;'>Requesting...</div>";
           requestiOSPermission();
         } else {
@@ -290,35 +288,47 @@ function addNameToggleButton() {
   nameToggleButton.style.bottom = "10px";
   nameToggleButton.style.right = "10px";
   nameToggleButton.style.zIndex = "10";
-  nameToggleButton.style.padding = "10px";
+  nameToggleButton.style.padding = "0"; // Remove padding - content div will handle it
   nameToggleButton.style.backgroundColor = "white";
   nameToggleButton.style.borderRadius = "4px";
   nameToggleButton.style.boxShadow = "0 0 10px rgba(0, 0, 0, 0.3)";
   nameToggleButton.style.cursor = "pointer";
   nameToggleButton.style.width = "auto";
   nameToggleButton.style.height = "44px";
-  nameToggleButton.style.display = "flex";
-  nameToggleButton.style.alignItems = "center";
-  nameToggleButton.style.justifyContent = "center";
+  nameToggleButton.style.display = "block"; // Changed from flex to block
   nameToggleButton.style.textAlign = "center";
   nameToggleButton.style.minWidth = "90px";
-  nameToggleButton.innerHTML = displayScientificNames
+
+  // Create content div that fills the entire button
+  const contentDiv = document.createElement("div");
+  contentDiv.style.width = "100%";
+  contentDiv.style.height = "100%";
+  contentDiv.style.display = "flex";
+  contentDiv.style.alignItems = "center";
+  contentDiv.style.justifyContent = "center";
+  contentDiv.style.padding = "10px"; // Add padding here instead of on the button
+  contentDiv.innerHTML = displayScientificNames
     ? "Show<br>common<br>names"
     : "Show<br>scientific<br>names";
+
+  nameToggleButton.appendChild(contentDiv);
   nameToggleButton.addEventListener("click", toggleNameDisplay);
   document.getElementById("map").appendChild(nameToggleButton);
 }
 
-// Function to toggle between scientific and common names
+// Function to toggle between scientific and common names - updated
 function toggleNameDisplay() {
   displayScientificNames = !displayScientificNames;
 
   // Update the button text with new wording and line breaks
   const toggleButton = document.getElementById("name-toggle-button");
   if (toggleButton) {
-    toggleButton.innerHTML = displayScientificNames
-      ? "Show<br>common<br>names"
-      : "Show<br>scientific<br>names";
+    const contentDiv = toggleButton.querySelector("div");
+    if (contentDiv) {
+      contentDiv.innerHTML = displayScientificNames
+        ? "Show<br>common<br>names"
+        : "Show<br>scientific<br>names";
+    }
   }
 
   // Refresh the visible trees to update the display
@@ -918,7 +928,7 @@ function setupDeviceOrientation(forceSetup = false) {
           console.log("⚠️ No orientation data received after 2 seconds");
           const compassButton = document.getElementById("compass-button");
           if (compassButton) {
-            compassButton.innerHTML =
+            compassButton.querySelector("div").innerHTML =
               "🧭<div style='font-size: 10px; color: orange; margin-top: 2px;'>no data</div>";
           }
         }
@@ -945,7 +955,7 @@ function setupDeviceOrientation(forceSetup = false) {
       const compassButton = document.getElementById("compass-button");
       if (compassButton) {
         compassButton.style.backgroundColor = "white";
-        compassButton.innerHTML =
+        compassButton.querySelector("div").innerHTML =
           "🧭<div style='font-size: 10px; color: red; margin-top: 2px;'>error</div>";
       }
     }
@@ -978,11 +988,11 @@ function requestiOSPermission() {
           const compassButton = document.getElementById("compass-button");
           if (compassButton) {
             compassButton.style.backgroundColor = "white";
-            compassButton.innerHTML =
+            compassButton.querySelector("div").innerHTML =
               "🧭<div style='font-size: 10px; color: red; margin-top: 2px;'>denied</div>";
             // Reset button after 2 seconds
             setTimeout(() => {
-              compassButton.innerHTML = "🧭";
+              compassButton.querySelector("div").innerHTML = "🧭";
             }, 2000);
           }
         }
@@ -992,11 +1002,11 @@ function requestiOSPermission() {
         const compassButton = document.getElementById("compass-button");
         if (compassButton) {
           compassButton.style.backgroundColor = "white";
-          compassButton.innerHTML =
+          compassButton.querySelector("div").innerHTML =
             "🧭<div style='font-size: 10px; color: red; margin-top: 2px;'>error</div>";
           // Reset button after 2 seconds
           setTimeout(() => {
-            compassButton.innerHTML = "🧭";
+            compassButton.querySelector("div").innerHTML = "🧭";
           }, 2000);
         }
       });
@@ -1065,10 +1075,13 @@ function handleOrientation(event) {
 function updateCompassButton(heading) {
   const compassButton = document.getElementById("compass-button");
   if (compassButton && compassButton.classList.contains("active")) {
-    // Show heading number
-    compassButton.innerHTML = `🧭<div style="font-size: 10px; margin-top: 2px;">${Math.round(
-      heading
-    )}°</div>`;
+    // Show heading number - update the content div
+    const contentDiv = compassButton.querySelector("div");
+    if (contentDiv) {
+      contentDiv.innerHTML = `🧭<div style="font-size: 10px; margin-top: 2px;">${Math.round(
+        heading
+      )}°</div>`;
+    }
   }
 }
 
@@ -1190,18 +1203,27 @@ function addFindBiggestTreeButton() {
   findBiggestButton.style.left = "10px";
   findBiggestButton.style.zIndex = "10";
   findBiggestButton.style.backgroundColor = "white";
-  findBiggestButton.style.padding = "10px";
+  findBiggestButton.style.padding = "0"; // Remove padding - content div will handle it
   findBiggestButton.style.borderRadius = "4px";
   findBiggestButton.style.boxShadow = "0 0 10px rgba(0, 0, 0, 0.3)";
   findBiggestButton.style.cursor = "pointer";
   findBiggestButton.style.width = "auto";
   findBiggestButton.style.height = "44px";
-  findBiggestButton.style.display = "flex";
-  findBiggestButton.style.alignItems = "center";
-  findBiggestButton.style.justifyContent = "center";
+  findBiggestButton.style.display = "block"; // Changed from flex to block
   findBiggestButton.style.textAlign = "center";
   findBiggestButton.style.minWidth = "90px";
-  findBiggestButton.innerHTML = "Find<br>biggest<br>tree";
+
+  // Create content div that fills the entire button
+  const contentDiv = document.createElement("div");
+  contentDiv.style.width = "100%";
+  contentDiv.style.height = "100%";
+  contentDiv.style.display = "flex";
+  contentDiv.style.alignItems = "center";
+  contentDiv.style.justifyContent = "center";
+  contentDiv.style.padding = "10px"; // Add padding here instead of on the button
+  contentDiv.innerHTML = "Find<br>biggest<br>tree";
+
+  findBiggestButton.appendChild(contentDiv);
   findBiggestButton.addEventListener("click", highlightBiggestTrees);
   document.getElementById("map").appendChild(findBiggestButton);
 }
@@ -1217,7 +1239,12 @@ function highlightBiggestTrees() {
   findBiggestButton.style.borderColor = "#4285F4";
   findBiggestButton.style.borderWidth = "2px";
   findBiggestButton.style.borderStyle = "solid";
-  findBiggestButton.innerHTML = "Finding<br>biggest<br>trees...";
+
+  // Update content of the inner div
+  const contentDiv = findBiggestButton.querySelector("div");
+  if (contentDiv) {
+    contentDiv.innerHTML = "Finding<br>biggest<br>trees...";
+  }
 
   isAnimatingBiggestTrees = true;
 
@@ -1317,7 +1344,13 @@ function highlightBiggestTrees() {
     findBiggestButton.style.borderColor = "";
     findBiggestButton.style.borderWidth = "";
     findBiggestButton.style.borderStyle = "";
-    findBiggestButton.innerHTML = "Find<br>biggest<br>tree";
+
+    // Update inner content div
+    const contentDiv = findBiggestButton.querySelector("div");
+    if (contentDiv) {
+      contentDiv.innerHTML = "Find<br>biggest<br>tree";
+    }
+
     isAnimatingBiggestTrees = false;
     return;
   }
@@ -1395,7 +1428,12 @@ function highlightBiggestTrees() {
       findBiggestButton.style.borderColor = "";
       findBiggestButton.style.borderWidth = "";
       findBiggestButton.style.borderStyle = "";
-      findBiggestButton.innerHTML = "Find<br>biggest<br>tree";
+
+      // Update inner content div
+      const contentDiv = findBiggestButton.querySelector("div");
+      if (contentDiv) {
+        contentDiv.innerHTML = "Find<br>biggest<br>tree";
+      }
 
       isAnimatingBiggestTrees = false;
       return;
