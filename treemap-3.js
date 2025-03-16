@@ -201,12 +201,22 @@ function addLocationButton() {
     locationButton.style.alignItems = "center";
     locationButton.style.justifyContent = "center";
     locationButton.style.fontSize = "20px";
+
+    // Add this line to ensure clicks work anywhere in the button
+    locationButton.style.pointerEvents = "auto";
+
     document.getElementById("map").appendChild(locationButton);
   }
 
   // Add event listener (remove any existing ones first)
   locationButton.removeEventListener("click", locationButtonClicked);
   locationButton.addEventListener("click", locationButtonClicked);
+
+  // Add touch events for better mobile handling
+  locationButton.addEventListener("touchstart", function (e) {
+    e.preventDefault(); // Prevent default touch behavior
+    locationButtonClicked();
+  });
 }
 
 // Add compass button - always visible
@@ -234,10 +244,12 @@ function addCompassButton() {
     compassButton.style.alignItems = "center";
     compassButton.style.justifyContent = "center";
     compassButton.style.fontSize = "20px";
+    compassButton.style.pointerEvents = "auto"; // Ensure clicks work anywhere
+
     document.getElementById("map").appendChild(compassButton);
 
-    // Event listener
-    compassButton.addEventListener("click", function () {
+    // Store original handler to use with both click and touch
+    const compassClickHandler = function () {
       // Immediate visual feedback when clicked
       this.style.backgroundColor = "#e6f2ff";
       this.style.borderColor = "#4285F4";
@@ -271,6 +283,15 @@ function addCompassButton() {
           orientationActive = true;
         }
       }
+    };
+
+    // Event listener
+    compassButton.addEventListener("click", compassClickHandler);
+
+    // Add touch event for better mobile handling
+    compassButton.addEventListener("touchstart", function (e) {
+      e.preventDefault(); // Prevent default touch behavior
+      compassClickHandler.call(this); // Ensure 'this' references the button
     });
   }
 }
@@ -302,10 +323,20 @@ function addNameToggleButton() {
   nameToggleButton.style.justifyContent = "center";
   nameToggleButton.style.textAlign = "center";
   nameToggleButton.style.minWidth = "90px";
+  nameToggleButton.style.pointerEvents = "auto"; // Ensure clicks work anywhere
+
   nameToggleButton.innerHTML = displayScientificNames
     ? "Show<br>common<br>names"
     : "Show<br>scientific<br>names";
+
   nameToggleButton.addEventListener("click", toggleNameDisplay);
+
+  // Add touch event for better mobile handling
+  nameToggleButton.addEventListener("touchstart", function (e) {
+    e.preventDefault(); // Prevent default touch behavior
+    toggleNameDisplay();
+  });
+
   document.getElementById("map").appendChild(nameToggleButton);
 }
 
@@ -562,12 +593,16 @@ function processTreeData(data) {
     }
 
     properties.scientificName = scientificName;
+
+    // NEW: Also create scientific name with line breaks for map display
+    properties.scientificNameForMap = scientificName.split(" ").join("\n");
+
     properties.commonName = formattedCommonName;
     properties.mapLabel = mapLabel;
 
     // Set initial display name based on current mode
     properties.displayName = displayScientificNames
-      ? properties.scientificName
+      ? properties.scientificNameForMap // Use the version with line breaks
       : properties.mapLabel;
   });
 }
@@ -713,7 +748,7 @@ function updateVisibleTrees() {
     if (!feature.properties) return;
 
     feature.properties.displayName = displayScientificNames
-      ? feature.properties.scientificName
+      ? feature.properties.scientificNameForMap // Use version with line breaks
       : feature.properties.mapLabel;
   });
 
@@ -1115,12 +1150,31 @@ function createPopupContent(properties) {
     }
   }
 
-  // Create the popup HTML with new styling and labels
-  return `<div class="tree-popup" style="min-width: 220px; font-family: 'Courier New', monospace; font-size: 14px; line-height: 1.2; padding: 10px;">
+  // Create Wikipedia link for scientific name with special case for "Ulmus x"
+  let wikipediaLink = "";
+
+  if (scientificName && scientificName.trim().match(/^Ulmus\s+x\s*$/i)) {
+    // Special case for hybrid elms that only have "Ulmus x" as the name
+    wikipediaLink = "https://en.wikipedia.org/wiki/Elm#Hybrid_cultivars";
+  } else if (scientificName) {
+    // Regular case - link to the species page
+    wikipediaLink = `https://en.wikipedia.org/wiki/${encodeURIComponent(
+      scientificName.replace(/ /g, "_")
+    )}`;
+  }
+
+  // Create the popup HTML with new styling and labels - now with Wikipedia link and adjusted padding
+  return `<div class="tree-popup" style="min-width: 220px; font-family: 'Courier New', monospace; font-size: 14px; line-height: 1.2; padding: 5px 5px 2px 5px;">
     <div style="font-weight: bold; margin-bottom: 2px;">${commonName}</div>
     <div style="color: #999; font-size: 10px; margin-bottom: 12px;">Common name</div>
     
-    <div style="font-style: italic; margin-bottom: 2px;">${scientificName}</div>
+    <div style="font-style: italic; margin-bottom: 2px;">
+      ${
+        scientificName
+          ? `<a href="${wikipediaLink}" target="_blank" style="color: #4285F4; text-decoration: underline;">${scientificName}</a>`
+          : "Unknown"
+      }
+    </div>
     <div style="color: #999; font-size: 10px; margin-bottom: 12px;">Scientific name</div>
     
     <div style="margin-bottom: 2px;">${dbhDisplay}</div>
@@ -1128,7 +1182,7 @@ function createPopupContent(properties) {
     
     ${
       lastUpdated
-        ? `<div style="font-style: italic; color: #999; font-size: 10px; text-align: right;">as of ${lastUpdated}</div>`
+        ? `<div style="font-style: italic; color: #999; font-size: 10px; text-align: right;"><br>as of ${lastUpdated}</div>`
         : ""
     }
   </div>`;
@@ -1178,8 +1232,18 @@ function addFindBiggestTreeButton() {
   findBiggestButton.style.justifyContent = "center";
   findBiggestButton.style.textAlign = "center";
   findBiggestButton.style.minWidth = "90px";
+  findBiggestButton.style.pointerEvents = "auto"; // Ensure clicks work anywhere
+
   findBiggestButton.innerHTML = "Find<br>biggest<br>tree";
+
   findBiggestButton.addEventListener("click", highlightBiggestTrees);
+
+  // Add touch event for better mobile handling
+  findBiggestButton.addEventListener("touchstart", function (e) {
+    e.preventDefault(); // Prevent default touch behavior
+    highlightBiggestTrees();
+  });
+
   document.getElementById("map").appendChild(findBiggestButton);
 }
 
