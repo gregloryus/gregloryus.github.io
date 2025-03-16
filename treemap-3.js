@@ -269,7 +269,6 @@ function addCompassButton() {
       } else {
         // Request permission or turn on orientation if already granted
         if (
-          window.DeviceOrientationEvent &&
           typeof DeviceOrientationEvent.requestPermission === "function" &&
           !orientationPermissionGranted
         ) {
@@ -925,26 +924,25 @@ function isMobileDevice() {
 function setupDeviceOrientation(forceSetup = false) {
   if (orientationSupported && !forceSetup) return;
 
-  if (window.DeviceOrientationEvent) {
-    // Fix for iOS permission flow - don't early return
+  if (typeof window.DeviceOrientationEvent !== "undefined") {
+    // Fix for iOS permission flow
     if (
-      window.DeviceOrientationEvent &&
       typeof DeviceOrientationEvent.requestPermission === "function" &&
       !orientationPermissionGranted
     ) {
       console.log("iOS device detected, waiting for explicit permission");
-      return; // Still return, but only if permission hasn't been granted
+      return; // Return early, but only if permission hasn't been granted
     }
 
     try {
-      // Clean up existing listeners
+      // Clean up existing listeners first
       window.removeEventListener("deviceorientation", handleOrientation);
       window.removeEventListener(
         "deviceorientationabsolute",
         handleOrientation
       );
 
-      // Set a timeout to verify we're actually receiving orientation data
+      // Set a timeout to verify we're receiving orientation data
       lastOrientationData = null;
       setTimeout(() => {
         if (!lastOrientationData && orientationActive) {
@@ -979,8 +977,22 @@ function setupDeviceOrientation(forceSetup = false) {
       if (compassButton) {
         compassButton.style.backgroundColor = "white";
         compassButton.innerHTML =
-          "🧭<div style='font-size: 10px; color: red; margin-top: 2px;'>error</div>";
+          "🧭<div style='font-size: 10px; color: #4285F4; margin-top: 2px;'>error</div>";
       }
+    }
+  } else {
+    console.error(
+      "DeviceOrientationEvent not supported on this device/browser"
+    );
+    const compassButton = document.getElementById("compass-button");
+    if (compassButton) {
+      compassButton.style.backgroundColor = "white";
+      compassButton.innerHTML =
+        "🧭<div style='font-size: 10px; color: #4285F4; margin-top: 2px;'>not supported</div>";
+      // Reset button after 2 seconds
+      setTimeout(() => {
+        compassButton.innerHTML = "🧭";
+      }, 2000);
     }
   }
 }
@@ -988,7 +1000,7 @@ function setupDeviceOrientation(forceSetup = false) {
 // Request iOS permission for orientation
 function requestiOSPermission() {
   if (
-    window.DeviceOrientationEvent &&
+    typeof DeviceOrientationEvent !== "undefined" &&
     typeof DeviceOrientationEvent.requestPermission === "function"
   ) {
     DeviceOrientationEvent.requestPermission()
@@ -998,24 +1010,26 @@ function requestiOSPermission() {
           orientationSupported = true;
           orientationActive = true;
 
-          // Actually set up the orientation handling - this was missing
-          setupDeviceOrientation(true);
+          // Add a small delay before setting up orientation
+          setTimeout(() => {
+            setupDeviceOrientation(true);
 
-          const compassButton = document.getElementById("compass-button");
-          if (compassButton) {
-            compassButton.classList.add("active");
-            compassButton.style.backgroundColor = "#e6f2ff";
-            compassButton.style.borderColor = "#4285F4";
-            compassButton.style.borderWidth = "2px";
-            compassButton.style.borderStyle = "solid";
-          }
+            const compassButton = document.getElementById("compass-button");
+            if (compassButton) {
+              compassButton.classList.add("active");
+              compassButton.style.backgroundColor = "#e6f2ff";
+              compassButton.style.borderColor = "#4285F4";
+              compassButton.style.borderWidth = "2px";
+              compassButton.style.borderStyle = "solid";
+            }
+          }, 500); // Small delay to ensure everything is ready
         } else {
           console.log("❌ iOS orientation permission denied");
           const compassButton = document.getElementById("compass-button");
           if (compassButton) {
             compassButton.style.backgroundColor = "white";
             compassButton.innerHTML =
-              "🧭<div style='font-size: 10px; color: red; margin-top: 2px;'>denied</div>";
+              "🧭<div style='font-size: 10px; color: #4285F4; margin-top: 2px;'>denied</div>";
             // Reset button after 2 seconds
             setTimeout(() => {
               compassButton.innerHTML = "🧭";
@@ -1029,13 +1043,30 @@ function requestiOSPermission() {
         if (compassButton) {
           compassButton.style.backgroundColor = "white";
           compassButton.innerHTML =
-            "🧭<div style='font-size: 10px; color: red; margin-top: 2px;'>error</div>";
+            "🧭<div style='font-size: 10px; color: #4285F4; margin-top: 2px;'>error</div>";
           // Reset button after 2 seconds
           setTimeout(() => {
             compassButton.innerHTML = "🧭";
           }, 2000);
         }
       });
+  } else {
+    // Handle case where DeviceOrientationEvent.requestPermission doesn't exist
+    console.log(
+      "DeviceOrientationEvent.requestPermission not available - trying direct setup"
+    );
+
+    // Try direct setup instead
+    setupDeviceOrientation(true);
+
+    const compassButton = document.getElementById("compass-button");
+    if (compassButton) {
+      compassButton.classList.add("active");
+      compassButton.style.backgroundColor = "#e6f2ff";
+      compassButton.style.borderColor = "#4285F4";
+      compassButton.style.borderWidth = "2px";
+      compassButton.style.borderStyle = "solid";
+    }
   }
 }
 
