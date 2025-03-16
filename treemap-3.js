@@ -16,6 +16,9 @@ let orientationActive = false; // Track if orientation updates are active
 let lastOrientationUpdate = 0; // For throttling updates
 let orientationThrottleTime = 100; // Update orientation no more than once per 100ms
 let locationUpdateInterval = null; // Track the interval for location updates
+let orientationPermissionGranted = false; // Track if orientation permission is explicitly granted
+let isAnimatingBiggestTrees = false; // For debouncing biggest tree animation
+let lastOrientationData = null; // Track if we're actually receiving orientation data
 
 // At the top of the file with other constants
 const DIM_OPACITY = 0.9; // Maximum opacity for dimming effect during tree highlighting
@@ -235,6 +238,12 @@ function addCompassButton() {
 
     // Event listener
     compassButton.addEventListener("click", function () {
+      // Immediate visual feedback when clicked
+      this.style.backgroundColor = "#e6f2ff";
+      this.style.borderColor = "#4285F4";
+      this.style.borderWidth = "2px";
+      this.style.borderStyle = "solid";
+
       // Toggle compass on/off instead of just enabling
       if (orientationActive) {
         // Turn off orientation
@@ -249,19 +258,17 @@ function addCompassButton() {
         // Request permission or turn on orientation if already granted
         if (
           typeof DeviceOrientationEvent.requestPermission === "function" &&
-          !orientationSupported
+          !orientationPermissionGranted
         ) {
-          // iOS
+          // iOS specific flow
+          this.innerHTML =
+            "🧭<div style='font-size: 10px; margin-top: 2px;'>Requesting...</div>";
           requestiOSPermission();
         } else {
           // Android or already has permission
+          this.classList.add("active");
           setupDeviceOrientation(true); // Force setup
           orientationActive = true;
-          this.classList.add("active");
-          this.style.backgroundColor = "#e6f2ff";
-          this.style.borderColor = "#4285F4";
-          this.style.borderWidth = "2px";
-          this.style.borderStyle = "solid";
         }
       }
     });
@@ -883,36 +890,59 @@ function setupDeviceOrientation(forceSetup = false) {
   if (orientationSupported && !forceSetup) return;
 
   if (window.DeviceOrientationEvent) {
-    if (typeof DeviceOrientationEvent.requestPermission === "function") {
-      return;
-    } else {
-      try {
-        window.removeEventListener("deviceorientation", handleOrientation);
-        window.removeEventListener(
-          "deviceorientationabsolute",
-          handleOrientation
-        );
-        window.addEventListener("deviceorientation", handleOrientation);
+    // Fix for iOS permission flow - don't early return
+    if (
+      typeof DeviceOrientationEvent.requestPermission === "function" &&
+      !orientationPermissionGranted
+    ) {
+      console.log("iOS device detected, waiting for explicit permission");
+      return; // Still return, but only if permission hasn't been granted
+    }
 
-        if ("ondeviceorientationabsolute" in window) {
-          window.addEventListener(
-            "deviceorientationabsolute",
-            handleOrientation
-          );
-        }
+    try {
+      // Clean up existing listeners
+      window.removeEventListener("deviceorientation", handleOrientation);
+      window.removeEventListener(
+        "deviceorientationabsolute",
+        handleOrientation
+      );
 
-        orientationSupported = true;
-        orientationActive = true;
-        const compassButton = document.getElementById("compass-button");
-        if (compassButton) {
-          compassButton.classList.add("active");
-          compassButton.style.backgroundColor = "#e6f2ff";
-          compassButton.style.borderColor = "#4285F4";
-          compassButton.style.borderWidth = "2px";
-          compassButton.style.borderStyle = "solid";
+      // Set a timeout to verify we're actually receiving orientation data
+      lastOrientationData = null;
+      setTimeout(() => {
+        if (!lastOrientationData && orientationActive) {
+          console.log("⚠️ No orientation data received after 2 seconds");
+          const compassButton = document.getElementById("compass-button");
+          if (compassButton) {
+            compassButton.innerHTML =
+              "🧭<div style='font-size: 10px; color: orange; margin-top: 2px;'>no data</div>";
+          }
         }
-      } catch (e) {
-        console.error("Error setting up orientation:", e);
+      }, 2000);
+
+      // Add event listeners
+      window.addEventListener("deviceorientation", handleOrientation);
+      if ("ondeviceorientationabsolute" in window) {
+        window.addEventListener("deviceorientationabsolute", handleOrientation);
+      }
+
+      orientationSupported = true;
+      orientationActive = true;
+      const compassButton = document.getElementById("compass-button");
+      if (compassButton) {
+        compassButton.classList.add("active");
+        compassButton.style.backgroundColor = "#e6f2ff";
+        compassButton.style.borderColor = "#4285F4";
+        compassButton.style.borderWidth = "2px";
+        compassButton.style.borderStyle = "solid";
+      }
+    } catch (e) {
+      console.error("Error setting up orientation:", e);
+      const compassButton = document.getElementById("compass-button");
+      if (compassButton) {
+        compassButton.style.backgroundColor = "white";
+        compassButton.innerHTML =
+          "🧭<div style='font-size: 10px; color: red; margin-top: 2px;'>error</div>";
       }
     }
   }
@@ -924,8 +954,13 @@ function requestiOSPermission() {
     DeviceOrientationEvent.requestPermission()
       .then((permissionState) => {
         if (permissionState === "granted") {
+          orientationPermissionGranted = true; // Mark permission as explicitly granted
           orientationSupported = true;
           orientationActive = true;
+
+          // Actually set up the orientation handling - this was missing
+          setupDeviceOrientation(true);
+
           const compassButton = document.getElementById("compass-button");
           if (compassButton) {
             compassButton.classList.add("active");
@@ -936,18 +971,41 @@ function requestiOSPermission() {
           }
         } else {
           console.log("❌ iOS orientation permission denied");
+          const compassButton = document.getElementById("compass-button");
+          if (compassButton) {
+            compassButton.style.backgroundColor = "white";
+            compassButton.innerHTML =
+              "🧭<div style='font-size: 10px; color: red; margin-top: 2px;'>denied</div>";
+            // Reset button after 2 seconds
+            setTimeout(() => {
+              compassButton.innerHTML = "🧭";
+            }, 2000);
+          }
         }
       })
       .catch((error) => {
         console.error("Error requesting permission: " + error.message);
+        const compassButton = document.getElementById("compass-button");
+        if (compassButton) {
+          compassButton.style.backgroundColor = "white";
+          compassButton.innerHTML =
+            "🧭<div style='font-size: 10px; color: red; margin-top: 2px;'>error</div>";
+          // Reset button after 2 seconds
+          setTimeout(() => {
+            compassButton.innerHTML = "🧭";
+          }, 2000);
+        }
       });
   }
 }
 
-// Throttled orientation handler - only update at most once per orientationThrottleTime ms
+// Throttled orientation handler - update to track received data
 function handleOrientation(event) {
   // Skip if orientation is not active
   if (!orientationActive) return;
+
+  // Track that we're receiving orientation data
+  lastOrientationData = event;
 
   // Throttle updates to avoid overwhelming touch controls
   const now = Date.now();
@@ -1126,6 +1184,20 @@ function addFindBiggestTreeButton() {
 }
 
 function highlightBiggestTrees() {
+  // Debounce to prevent multiple animations
+  if (isAnimatingBiggestTrees) return;
+
+  // Immediate visual feedback on button click
+  const findBiggestButton = document.getElementById("find-biggest-button");
+  const originalButtonColor = findBiggestButton.style.backgroundColor;
+  findBiggestButton.style.backgroundColor = "#e6f2ff";
+  findBiggestButton.style.borderColor = "#4285F4";
+  findBiggestButton.style.borderWidth = "2px";
+  findBiggestButton.style.borderStyle = "solid";
+  findBiggestButton.innerHTML = "Finding<br>biggest<br>trees...";
+
+  isAnimatingBiggestTrees = true;
+
   // Get all buttons
   const buttons = [
     document.getElementById("location-button"), // Top-left
@@ -1216,251 +1288,117 @@ function highlightBiggestTrees() {
     }
   });
 
-  if (!features.length) return;
-
-  // Rest of the highlighting logic remains the same
-  const maxDBH = Math.max(...features.map((f) => f.properties.dbh || 0));
-  const biggestTreeFilter = ["==", ["get", "dbh"], maxDBH];
-
-  // Add a dim layer if it doesn't exist
-  if (!map.getLayer("dim-layer")) {
-    map.addLayer(
-      {
-        id: "dim-layer",
-        type: "background",
-        paint: {
-          "background-color": "#000",
-          "background-opacity": 0,
-        },
-      },
-      "unclustered-trees"
-    );
+  if (!features.length) {
+    // Reset button state if no trees found
+    findBiggestButton.style.backgroundColor = originalButtonColor;
+    findBiggestButton.style.borderColor = "";
+    findBiggestButton.style.borderWidth = "";
+    findBiggestButton.style.borderStyle = "";
+    findBiggestButton.innerHTML = "Find<br>biggest<br>tree";
+    isAnimatingBiggestTrees = false;
+    return;
   }
 
-  // Create or update highlighted trees layer
-  if (!map.getLayer("highlighted-trees")) {
+  // Find the biggest trees - get the max DBH
+  const maxDBH = Math.max(...features.map((f) => f.properties.dbh || 0));
+  const biggestTrees = features.filter((f) => f.properties.dbh === maxDBH);
+
+  console.log(
+    `Found ${biggestTrees.length} biggest trees with DBH = ${maxDBH}`
+  );
+
+  // Create radar pulse layer if it doesn't exist
+  if (!map.getLayer("tree-radar-pulse")) {
     map.addLayer({
-      id: "highlighted-trees",
+      id: "tree-radar-pulse",
       type: "circle",
       source: "trees",
       filter: ["==", ["get", "dbh"], -1], // Initially empty
       paint: {
-        "circle-color": ["get", "color"],
-        "circle-radius": map.getPaintProperty(
-          "unclustered-trees",
-          "circle-radius"
-        ),
-        "circle-stroke-width": 1.5,
-        "circle-stroke-color": "#ffffff",
-        "circle-opacity": 0,
-        "circle-stroke-opacity": 0,
-      },
-    });
-
-    // Add highlighted labels layer on top of everything
-    map.addLayer({
-      id: "highlighted-labels",
-      type: "symbol",
-      source: "trees",
-      filter: ["==", ["get", "dbh"], -1],
-      layout: {
-        "text-field": ["get", "displayName"],
-        "text-size": [
-          "interpolate",
-          ["linear"],
-          ["zoom"],
-          17,
-          0,
-          18,
-          12,
-          20,
-          16,
-        ],
-        "text-font": ["DIN Offc Pro Medium", "Arial Unicode MS Bold"],
-        "text-offset": [0, 0],
-        "text-anchor": "center",
-        "text-allow-overlap": true, // Allow labels to overlap for highlighted trees
-        "text-ignore-placement": true, // Ensure labels are always shown
-        "symbol-sort-key": ["*", -1, ["get", "dbh"]],
-      },
-      paint: {
-        "text-color": "#ffffff",
-        "text-halo-color": "#000000",
-        "text-halo-width": 2,
-        "text-opacity": 0,
+        "circle-radius": 0,
+        "circle-color": "transparent",
+        "circle-stroke-width": 3,
+        "circle-stroke-color": "#00ff00",
+        "circle-stroke-opacity": 0.8,
       },
     });
   }
 
-  // Save original opacity values
-  const originalCircleOpacity = map.getPaintProperty(
-    "unclustered-trees",
-    "circle-opacity"
-  );
-  const originalStrokeOpacity =
-    map.getPaintProperty("unclustered-trees", "circle-stroke-opacity") || 1;
-  const originalLabelOpacity = map.getPaintProperty(
-    "tree-labels",
-    "text-opacity"
-  );
+  // Set filter to show just the biggest trees
+  map.setFilter("tree-radar-pulse", ["==", ["get", "dbh"], maxDBH]);
 
-  // Animate the dimming effect
+  // Add temporary highlighting layer for biggest trees
+  if (!map.getLayer("biggest-trees-highlight")) {
+    map.addLayer(
+      {
+        id: "biggest-trees-highlight",
+        type: "circle",
+        source: "trees",
+        filter: ["==", ["get", "dbh"], -1], // Initially empty
+        paint: {
+          "circle-color": ["get", "color"],
+          "circle-radius": map.getPaintProperty(
+            "unclustered-trees",
+            "circle-radius"
+          ),
+          "circle-stroke-width": 3,
+          "circle-stroke-color": "#00ff00",
+          "circle-opacity": 0.9,
+          "circle-stroke-opacity": 1,
+        },
+      },
+      "tree-radar-pulse"
+    );
+  }
+
+  // Set the highlight filter
+  map.setFilter("biggest-trees-highlight", ["==", ["get", "dbh"], maxDBH]);
+
+  // Create 3 radar pulses with different timings
   let startTime = null;
-  const duration = 500;
+  const duration = 3000; // 3 seconds total for all pulses
 
-  function animate(currentTime) {
-    if (!startTime) startTime = currentTime;
-    const elapsed = currentTime - startTime;
-    const phase = Math.floor(elapsed / duration);
-    const phaseProgress = (elapsed % duration) / duration;
+  function animateRadar(timestamp) {
+    if (!startTime) startTime = timestamp;
+    const elapsed = timestamp - startTime;
 
-    if (phase >= 3) {
-      // Reset everything at once
-      map.setPaintProperty("dim-layer", "background-opacity", 0);
-      map.setPaintProperty(
-        "unclustered-trees",
-        "circle-opacity",
-        originalCircleOpacity
-      );
-      map.setPaintProperty(
-        "unclustered-trees",
-        "circle-stroke-opacity",
-        originalStrokeOpacity
-      );
-      map.setPaintProperty("tree-labels", "text-opacity", originalLabelOpacity);
-      map.setFilter("highlighted-trees", ["==", ["get", "dbh"], -1]);
-      map.setFilter("highlighted-labels", ["==", ["get", "dbh"], -1]);
+    if (elapsed > duration) {
+      // Animation complete, clean up
+      map.setFilter("tree-radar-pulse", ["==", ["get", "dbh"], -1]);
+      map.setFilter("biggest-trees-highlight", ["==", ["get", "dbh"], -1]);
+
+      // Reset button
+      findBiggestButton.style.backgroundColor = originalButtonColor;
+      findBiggestButton.style.borderColor = "";
+      findBiggestButton.style.borderWidth = "";
+      findBiggestButton.style.borderStyle = "";
+      findBiggestButton.innerHTML = "Find<br>biggest<br>tree";
+
+      isAnimatingBiggestTrees = false;
       return;
     }
 
-    if (phase === 0) {
-      // Phase 1: Fade in dim effect - everything dims together
-      const dimProgress = phaseProgress;
-      const dimmedOpacity = 0.2;
+    // Calculate pulse sizes for 3 sequential pulses
+    const pulseProgress = (elapsed % 1000) / 1000; // 0-1 for each pulse
+    const pulseSize = pulseProgress * 50; // Maximum radius 50 pixels
 
-      // Dim background
-      map.setPaintProperty(
-        "dim-layer",
-        "background-opacity",
-        dimProgress * DIM_OPACITY
-      );
+    // Set the pulse radius
+    map.setPaintProperty("tree-radar-pulse", "circle-radius", pulseSize);
 
-      // Dim regular trees and their labels at the same rate as background
-      const currentOpacity =
-        originalCircleOpacity * (1 - dimProgress) + dimmedOpacity * dimProgress;
+    // Fade out the pulse as it expands
+    const pulseOpacity = Math.max(0, 1 - pulseProgress);
+    map.setPaintProperty(
+      "tree-radar-pulse",
+      "circle-stroke-opacity",
+      pulseOpacity
+    );
 
-      // Regular trees
-      map.setPaintProperty("unclustered-trees", "circle-opacity", [
-        "case",
-        biggestTreeFilter,
-        0,
-        currentOpacity,
-      ]);
-      map.setPaintProperty("unclustered-trees", "circle-stroke-opacity", [
-        "case",
-        biggestTreeFilter,
-        0,
-        currentOpacity,
-      ]);
-      map.setPaintProperty("tree-labels", "text-opacity", [
-        "case",
-        biggestTreeFilter,
-        0,
-        currentOpacity,
-      ]);
-
-      // Show highlighted trees at full opacity
-      map.setFilter("highlighted-trees", biggestTreeFilter);
-      map.setFilter("highlighted-labels", biggestTreeFilter);
-      map.setPaintProperty(
-        "highlighted-trees",
-        "circle-opacity",
-        originalCircleOpacity
-      );
-      map.setPaintProperty(
-        "highlighted-trees",
-        "circle-stroke-opacity",
-        originalStrokeOpacity
-      );
-      map.setPaintProperty("highlighted-labels", "text-opacity", 1);
-    } else if (phase === 1) {
-      // Phase 2: Hold the effect
-      map.setPaintProperty("dim-layer", "background-opacity", DIM_OPACITY);
-    } else if (phase === 2) {
-      // Phase 3: Fade out dim effect - everything brightens together
-      const brightProgress = phaseProgress;
-      const dimmedOpacity = 0.2;
-
-      // Brighten background
-      map.setPaintProperty(
-        "dim-layer",
-        "background-opacity",
-        DIM_OPACITY * (1 - brightProgress)
-      );
-
-      // Restore regular trees and labels
-      const currentOpacity =
-        dimmedOpacity * (1 - brightProgress) +
-        originalCircleOpacity * brightProgress;
-
-      // Regular trees
-      map.setPaintProperty("unclustered-trees", "circle-opacity", [
-        "case",
-        biggestTreeFilter,
-        0,
-        currentOpacity,
-      ]);
-      map.setPaintProperty("unclustered-trees", "circle-stroke-opacity", [
-        "case",
-        biggestTreeFilter,
-        0,
-        currentOpacity,
-      ]);
-      map.setPaintProperty("tree-labels", "text-opacity", [
-        "case",
-        biggestTreeFilter,
-        0,
-        currentOpacity,
-      ]);
-
-      // Keep highlighted trees fully visible until the very end
-      if (brightProgress < 0.9) {
-        map.setPaintProperty(
-          "highlighted-trees",
-          "circle-opacity",
-          originalCircleOpacity
-        );
-        map.setPaintProperty(
-          "highlighted-trees",
-          "circle-stroke-opacity",
-          originalStrokeOpacity
-        );
-        map.setPaintProperty("highlighted-labels", "text-opacity", 1);
-      } else {
-        // Only fade out highlighted trees in the final 10% of the transition
-        const finalFade = (brightProgress - 0.9) * 10;
-        map.setPaintProperty(
-          "highlighted-trees",
-          "circle-opacity",
-          originalCircleOpacity * (1 - finalFade)
-        );
-        map.setPaintProperty(
-          "highlighted-trees",
-          "circle-stroke-opacity",
-          originalStrokeOpacity * (1 - finalFade)
-        );
-        map.setPaintProperty(
-          "highlighted-labels",
-          "text-opacity",
-          1 - finalFade
-        );
-      }
-    }
-
-    requestAnimationFrame(animate);
+    // Continue animation
+    requestAnimationFrame(animateRadar);
   }
 
-  requestAnimationFrame(animate);
+  // Start the animation
+  requestAnimationFrame(animateRadar);
 }
 
 // Initialize when the page loads
