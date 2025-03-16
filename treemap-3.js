@@ -294,8 +294,9 @@ function addNameToggleButton() {
   nameToggleButton.style.boxShadow = "0 0 10px rgba(0, 0, 0, 0.3)";
   nameToggleButton.style.cursor = "pointer";
   nameToggleButton.style.width = "auto";
-  nameToggleButton.style.height = "44px";
-  nameToggleButton.style.display = "block"; // Changed from flex to block
+  nameToggleButton.style.minHeight = "44px"; // Use min-height instead of fixed height
+  nameToggleButton.style.height = "auto"; // Allow height to adjust to content
+  nameToggleButton.style.display = "block";
   nameToggleButton.style.textAlign = "center";
   nameToggleButton.style.minWidth = "90px";
 
@@ -306,7 +307,10 @@ function addNameToggleButton() {
   contentDiv.style.display = "flex";
   contentDiv.style.alignItems = "center";
   contentDiv.style.justifyContent = "center";
-  contentDiv.style.padding = "10px"; // Add padding here instead of on the button
+  contentDiv.style.padding = "8px"; // Reduce padding to 8px - symmetrical on all sides
+  contentDiv.style.boxSizing = "border-box"; // Make sure padding is included in width/height
+  contentDiv.style.fontSize = "12px"; // Slightly smaller font size to fit better
+  contentDiv.style.lineHeight = "1.2"; // Tighter line height
   contentDiv.innerHTML = displayScientificNames
     ? "Show<br>common<br>names"
     : "Show<br>scientific<br>names";
@@ -1208,8 +1212,9 @@ function addFindBiggestTreeButton() {
   findBiggestButton.style.boxShadow = "0 0 10px rgba(0, 0, 0, 0.3)";
   findBiggestButton.style.cursor = "pointer";
   findBiggestButton.style.width = "auto";
-  findBiggestButton.style.height = "44px";
-  findBiggestButton.style.display = "block"; // Changed from flex to block
+  findBiggestButton.style.minHeight = "44px"; // Use min-height instead of fixed height
+  findBiggestButton.style.height = "auto"; // Allow height to adjust to content
+  findBiggestButton.style.display = "block";
   findBiggestButton.style.textAlign = "center";
   findBiggestButton.style.minWidth = "90px";
 
@@ -1220,7 +1225,10 @@ function addFindBiggestTreeButton() {
   contentDiv.style.display = "flex";
   contentDiv.style.alignItems = "center";
   contentDiv.style.justifyContent = "center";
-  contentDiv.style.padding = "10px"; // Add padding here instead of on the button
+  contentDiv.style.padding = "8px"; // Reduce padding to 8px - symmetrical on all sides
+  contentDiv.style.boxSizing = "border-box"; // Make sure padding is included in width/height
+  contentDiv.style.fontSize = "12px"; // Slightly smaller font size to fit better
+  contentDiv.style.lineHeight = "1.2"; // Tighter line height
   contentDiv.innerHTML = "Find<br>biggest<br>tree";
 
   findBiggestButton.appendChild(contentDiv);
