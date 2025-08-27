@@ -2,11 +2,16 @@
 const CONSTANTS = {
   // Growth parameters
   GROWTH: {
-    BRANCH_CHANCE: 0.03, // 3% chance to branch on diagonal
-    LEAF_CHANCE: 0.5, // 50% chance to create a leaf bud
-    DIAGONAL_GROWTH_WEIGHT: 0.1, // 10% chance to grow diagonally vs straight
-    BUD_GROWTH_DELAY: 5, // Ticks before stem can produce leaf buds
+    BRANCH_CHANCE: 0.5, // Increased for more branching
+    LEAF_CHANCE: 0.9, // 80% chance to create a leaf bud
+    DIAGONAL_GROWTH_WEIGHT: 0.25, // Lowered for less diagonal growth
+    BUD_GROWTH_DELAY: 2, // More frequent leaves
+    BRANCH_BUD_DELAY_MIN: 10, // Minimum delay for branch buds before growing
+    BRANCH_BUD_DELAY_MAX: 30, // Maximum delay for branch buds (10 + 0-20 random)
     TICK_INTERVAL: 40, // Milliseconds between ticks in play mode
+    TENDENCY_CHANGE_CHANCE: 0.08, // 8% chance to flip directional bias
+    BUD_SIZE_LIMIT_MIN: 40, // Minimum particles a bud can create before maturing
+    BUD_SIZE_LIMIT_MAX: 144, // Maximum particles a bud can create before maturing
   },
 
   // Visual parameters
@@ -16,7 +21,7 @@ const CONSTANTS = {
     STEM: { r: 10, g: 100, b: 10, alpha: 1.0 },
     LEAF_BUD: { r: 0, g: 200, b: 0, alpha: 1.0 },
     LEAF: { r: 0, g: 240, b: 0, alpha: 1.0 },
-    GLOW: { r: 255, g: 255, b: 0, alpha: 0.1 },
+    GLOW: { r: 255, g: 255, b: 0, alpha: 0.3 },
   },
 
   SCALE_SIZE: 4, // Size of each cell in pixels
@@ -35,7 +40,7 @@ idCounter = 1;
 frame = 0;
 
 // Number of starter seeds
-const NUM_STARTER_SEEDS = 7;
+const NUM_STARTER_SEEDS = 1;
 
 function addInitialSeeds(numSeeds) {
   const placedPositions = new Set();
@@ -342,7 +347,6 @@ class Seed extends Particle {
     super(x, y, "SEED");
     this.hasGerminated = false;
     occupancyGrid.set(x, y, this);
-    this.lastLeafSide = 0; // 0 = none, -1 = left, 1 = right
   }
 
   update() {
@@ -368,41 +372,129 @@ class Seed extends Particle {
 }
 
 class Bud extends Particle {
-  constructor(x, y, parent) {
+  constructor(x, y, parent, lastLeafSide = null, isBranch = false) {
     super(x, y, "BUD");
     this.parent = parent;
     this.growthTick = 0;
     this.firstMove = parent instanceof Seed; // Track if this is the first move from seed
-    // Growth bias (-1 = left, 1 = right)
     this.directionalBias = Math.random() < 0.5 ? -1 : 1;
+    this.lastLeafSide =
+      lastLeafSide !== null
+        ? lastLeafSide
+        : parent && typeof parent.lastLeafSide !== "undefined"
+        ? parent.lastLeafSide
+        : Math.random() < 0.5
+        ? -1
+        : 1;
+    this.leafDelayCounter = 0; // For delay before creating a leaf
+    this.isBranch = isBranch; // Track if this is a branch bud
+    this.branchDelayCounter = 0; // Delay counter for branch buds
+    this.branchDelayRequired = isBranch
+      ? CONSTANTS.GROWTH.BRANCH_BUD_DELAY_MIN +
+        Math.floor(
+          Math.random() *
+            (CONSTANTS.GROWTH.BRANCH_BUD_DELAY_MAX -
+              CONSTANTS.GROWTH.BRANCH_BUD_DELAY_MIN +
+              1)
+        )
+      : 0;
+    this.lastMoveDirection = null; // Track last movement direction to prevent drastic changes
+    this.particleCount = 0; // Count of particles this bud has created
+    this.sizeLimit =
+      CONSTANTS.GROWTH.BUD_SIZE_LIMIT_MIN +
+      Math.floor(
+        Math.random() *
+          (CONSTANTS.GROWTH.BUD_SIZE_LIMIT_MAX -
+            CONSTANTS.GROWTH.BUD_SIZE_LIMIT_MIN +
+            1)
+      );
+    this.hasMaturedstopped = false; // Track if this bud has stopped growing due to size limit
+    console.log(
+      `[Bud Creation] New ${
+        isBranch ? "branch " : ""
+      }bud at (${x},${y}) with size limit: ${this.sizeLimit}`
+    );
   }
 
   update() {
     this.growthTick++;
+
+    // Check if this bud has reached its size limit
+    if (this.particleCount >= this.sizeLimit) {
+      if (!this.hasMaturedstopped) {
+        console.log(
+          `[Maturity] Bud at (${this.pos.x},${this.pos.y}) has matured after creating ${this.particleCount} particles (limit: ${this.sizeLimit})`
+        );
+        this.hasMaturedstopped = true;
+        // Convert to a final stem
+        this.matureToStem();
+      }
+      return; // Stop all growth
+    }
+
+    // Handle delay for branch buds
+    if (this.isBranch) {
+      this.branchDelayCounter++;
+      if (this.branchDelayCounter < this.branchDelayRequired) {
+        return; // Don't grow yet
+      }
+    }
+
     this.grow();
+    // Wait a configurable number of ticks before attempting to grow a leafBud
+    this.leafDelayCounter++;
+    if (this.leafDelayCounter >= CONSTANTS.GROWTH.BUD_GROWTH_DELAY) {
+      this.tryCreateLeafBud();
+      this.leafDelayCounter = 0;
+    }
   }
 
   grow() {
+    // Occasionally flip directional bias for more lifelike growth
+    if (Math.random() < CONSTANTS.GROWTH.TENDENCY_CHANGE_CHANCE) {
+      this.directionalBias *= -1;
+    }
+
     let directions = [];
     if (this.firstMove) {
-      directions = [{ dx: 0, dy: -1 }]; // Only try moving straight up
+      directions = [{ dx: 0, dy: -1 }];
       this.firstMove = false;
     } else {
-      // Basic directions: straight up, diagonal left, diagonal right
       const straightUp = { dx: 0, dy: -1 };
       const diagLeft = { dx: -1, dy: -1 };
       const diagRight = { dx: 1, dy: -1 };
-      // Determine growth direction based on probabilities and bias
-      if (Math.random() < CONSTANTS.GROWTH.DIAGONAL_GROWTH_WEIGHT) {
-        // Favor diagonal growth with bias
-        if (this.directionalBias === 1) {
-          directions = [diagRight, diagLeft, straightUp];
+
+      // Constrain movement based on last direction to prevent drastic changes
+      if (this.lastMoveDirection) {
+        if (this.lastMoveDirection.dx === -1) {
+          // Last move was up-left, can only go straight up or up-left again
+          directions = [diagLeft, straightUp];
+        } else if (this.lastMoveDirection.dx === 1) {
+          // Last move was up-right, can only go straight up or up-right again
+          directions = [diagRight, straightUp];
         } else {
-          directions = [diagLeft, diagRight, straightUp];
+          // Last move was straight up, can go in any direction
+          if (Math.random() < CONSTANTS.GROWTH.DIAGONAL_GROWTH_WEIGHT) {
+            if (this.directionalBias === 1) {
+              directions = [diagRight, diagLeft, straightUp];
+            } else {
+              directions = [diagLeft, diagRight, straightUp];
+            }
+          } else {
+            directions = [straightUp, diagLeft, diagRight];
+          }
         }
       } else {
-        // Favor straight growth
-        directions = [straightUp, diagLeft, diagRight];
+        // No previous direction recorded, use normal logic
+        if (Math.random() < CONSTANTS.GROWTH.DIAGONAL_GROWTH_WEIGHT) {
+          if (this.directionalBias === 1) {
+            directions = [diagRight, diagLeft, straightUp];
+          } else {
+            directions = [diagLeft, diagRight, straightUp];
+          }
+        } else {
+          directions = [straightUp, diagLeft, diagRight];
+        }
       }
     }
     let moved = false;
@@ -427,10 +519,20 @@ class Bud extends Particle {
         occupancyGrid.set(newX, newY, this);
         this.updateGlow();
         growthDir = dir;
+        this.lastMoveDirection = { dx: dir.dx, dy: dir.dy }; // Record movement direction
+        console.log(
+          `[Growth] Bud moved from (${oldX},${oldY}) to (${newX},${newY}) with direction (${growthDir.dx},${growthDir.dy})`
+        );
         // Create stem in old position
         const stem = new Stem(oldX, oldY, this);
         cells.push(stem);
         occupancyGrid.set(stem.pos.x, stem.pos.y, stem);
+        this.particleCount++; // Count the stem we just created
+        if (this.particleCount % 10 === 0) {
+          console.log(
+            `[Growth Progress] Bud at (${this.pos.x},${this.pos.y}) has created ${this.particleCount}/${this.sizeLimit} particles`
+          );
+        }
         this.checkForBranching(oldX, oldY, growthDir);
         moved = true;
         break;
@@ -441,6 +543,7 @@ class Bud extends Particle {
       const stem = new Stem(this.pos.x, this.pos.y, this);
       cells.push(stem);
       occupancyGrid.set(stem.pos.x, stem.pos.y, stem);
+      this.particleCount++; // Count the final stem
       if (this.sprite.parent) {
         app.stage.removeChild(this.sprite);
       }
@@ -454,68 +557,11 @@ class Bud extends Particle {
     }
   }
 
-  checkForBranching(stemX, stemY, growthDir) {
-    // Only branch if we grew diagonally
-    if (growthDir.dx === 0) return;
-    // Check branching with probability
-    if (Math.random() <= CONSTANTS.GROWTH.BRANCH_CHANCE) {
-      const oppositeDx = -growthDir.dx;
-      const branchX = stemX + oppositeDx;
-      const branchY = stemY - 1;
-      // Check if the position is valid and empty
-      if (
-        branchX >= 0 &&
-        branchX < cols &&
-        branchY >= 0 &&
-        branchY < rows &&
-        !occupancyGrid.get(branchX, branchY)
-      ) {
-        // Create new bud at the branch position
-        const branchBud = new Bud(branchX, branchY, this);
-        cells.push(branchBud);
-        occupancyGrid.set(branchX, branchY, branchBud);
-      }
-    }
-  }
-}
-
-class Stem extends Particle {
-  constructor(x, y, parent) {
-    super(x, y, "STEM");
-    this.parent = parent;
-    this.budDistance = 0;
-    this.hasCheckedForLeaves = false;
-    this.creationFrame = frame;
-    // Find the root seed for alternating leaf sides
-    this.rootSeed = this.findRootSeed(parent);
-  }
-
-  findRootSeed(parent) {
-    // Traverse up the parent chain to find the seed
-    if (!parent) return null;
-    if (parent instanceof Seed) return parent;
-    return this.findRootSeed(parent.parent);
-  }
-
-  update() {
-    // Check if enough time has passed to consider leaf growth
-    if (
-      !this.hasCheckedForLeaves &&
-      frame - this.creationFrame >= CONSTANTS.GROWTH.BUD_GROWTH_DELAY
-    ) {
-      this.checkForLeafGrowth();
-      this.hasCheckedForLeaves = true;
-    }
-  }
-
-  checkForLeafGrowth() {
-    if (!this.rootSeed) return;
-    // Get the next side to grow a leaf (alternate sides)
-    const nextLeafSide = this.rootSeed.lastLeafSide === 1 ? -1 : 1;
-    // Position based on the next leaf side
+  tryCreateLeafBud() {
+    // Alternate side for leaf bud
+    const nextLeafSide = this.lastLeafSide === 1 ? -1 : 1;
     const leafX = this.pos.x + nextLeafSide;
-    const leafY = this.pos.y;
-    // Check if position is valid and empty
+    const leafY = this.pos.y - 1;
     if (
       leafX >= 0 &&
       leafX < cols &&
@@ -523,15 +569,107 @@ class Stem extends Particle {
       leafY < rows &&
       !occupancyGrid.get(leafX, leafY)
     ) {
-      // Chance to create a leaf bud
       if (Math.random() <= CONSTANTS.GROWTH.LEAF_CHANCE) {
         const leafBud = new LeafBud(leafX, leafY, this);
         cells.push(leafBud);
         occupancyGrid.set(leafX, leafY, leafBud);
-        // Update the last leaf side on the root seed
-        this.rootSeed.lastLeafSide = nextLeafSide;
+        this.particleCount++; // Count the leaf bud
+        // Update alternation state
+        this.lastLeafSide = nextLeafSide;
       }
     }
+  }
+
+  checkForBranching(stemX, stemY, growthDir) {
+    if (growthDir.dx === 0) {
+      console.log("[Branching] Not diagonal move, skipping.");
+      return;
+    }
+    const roll = Math.random();
+    console.log(
+      `[Branching] Considering branch: BRANCH_CHANCE=${
+        CONSTANTS.GROWTH.BRANCH_CHANCE
+      }, roll=${roll.toFixed(3)}, direction dx=${growthDir.dx}`
+    );
+    if (roll <= CONSTANTS.GROWTH.BRANCH_CHANCE) {
+      const oppositeDx = -growthDir.dx;
+      const branchX = stemX + oppositeDx;
+      const branchY = stemY - 1;
+      console.log(
+        `[Branching] Attempting branch at (${branchX},${branchY}) from bud at (${this.pos.x},${this.pos.y})`
+      );
+      // Check 3x1 horizontal area: branch position and its left/right neighbors
+      let canBranch = true;
+      for (let dx = -1; dx <= 1; dx++) {
+        const nx = branchX + dx;
+        const ny = branchY;
+        if (nx < 0 || nx >= cols || ny < 0 || ny >= rows) {
+          canBranch = false;
+          break;
+        }
+        const occupied = occupancyGrid.get(nx, ny);
+        console.log(
+          `[Branching] Checking (${nx},${ny}): ${
+            occupied ? "OCCUPIED" : "empty"
+          }`
+        );
+        if (occupied) {
+          canBranch = false;
+          break;
+        }
+      }
+      if (canBranch) {
+        console.log(`[Branching] Branch created at (${branchX},${branchY})`);
+        // Inherit alternation state from this bud, mark as branch
+        const branchBud = new Bud(
+          branchX,
+          branchY,
+          this,
+          this.lastLeafSide,
+          true
+        );
+        cells.push(branchBud);
+        occupancyGrid.set(branchX, branchY, branchBud);
+        this.particleCount++; // Count the branch bud
+      } else {
+        console.log(
+          `[Branching] Branch position (${branchX},${branchY}) or neighbors not empty, branch not created.`
+        );
+      }
+    } else {
+      console.log("[Branching] Roll failed, no branch created.");
+    }
+  }
+
+  matureToStem() {
+    // Convert this bud to a final stem
+    occupancyGrid.remove(this.pos.x, this.pos.y);
+    const stem = new Stem(this.pos.x, this.pos.y, this);
+    cells.push(stem);
+    occupancyGrid.set(stem.pos.x, stem.pos.y, stem);
+
+    // Remove this bud from the cells array and clean up its sprite
+    if (this.sprite.parent) {
+      app.stage.removeChild(this.sprite);
+    }
+    this.glowOverlays.forEach((glow) => {
+      if (glow.parent) {
+        app.stage.removeChild(glow);
+        activeGlows = activeGlows.filter((g) => g !== glow);
+      }
+    });
+    cells = cells.filter((cell) => cell !== this);
+  }
+}
+
+class Stem extends Particle {
+  constructor(x, y, parent) {
+    super(x, y, "STEM");
+    this.parent = parent;
+    // Stems are static
+  }
+  update() {
+    // Stems are static
   }
 }
 
