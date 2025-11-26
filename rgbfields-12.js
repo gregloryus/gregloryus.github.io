@@ -3,19 +3,19 @@ console.log("RGB Fields CA: script loaded");
 function boot() {
   console.log("RGB Fields CA: booting");
   // --- Constants ---
-  const COLS = 10;
-  const ROWS = 10;
+  const COLS = 64;
+  const ROWS = 64;
   const N = COLS * ROWS;
   const MAX_R = 8;
   const MAX_W = 4; // divisible water 0..4
   const WATER_TICK_PROB = 0.1; // donor gate for water; recipient gate for air->water
-  const SHOW_GRIDS = true; // set to true to show grid overlays
+  const SHOW_GRIDS = false; // set to true to show grid overlays
   // URL param "seed" sets PRNG; number of start seeds is a code constant
   const params = new URLSearchParams(window.location.search);
   const seedParam = parseInt(params.get("seed") || "1337", 10);
   const RNG_SEED = (isFinite(seedParam) ? seedParam : 1337) >>> 0;
-  const START_SEEDS = 40; // adjust here in code (single URL param reserved for ?seed)
-  const START_WATERS = 40; // initial water placements (start at 2 units)
+  const START_SEEDS = (COLS * ROWS) / 10; // adjust here in code (single URL param reserved for ?seed)
+  const START_WATERS = (COLS * ROWS) / 10; // initial water placements (start at 2 units)
 
   // --- Container and scale computation (integer fit) ---
   const container = document.getElementById("canvas-div");
@@ -43,6 +43,15 @@ function boot() {
   let LAYOUT = computeBestLayout();
   let SCALE_SIZE = Math.max(1, LAYOUT.scale);
   const SHOW_WATER_NUMBERS_DEFAULT = false; // toggle overlay for water unit counts
+
+  // Combined-only view toggle (show only RB panel at max scale)
+  let combinedOnlyView = false;
+
+  function computeBestScaleSingle() {
+    const maxW = container ? container.clientWidth : window.innerWidth;
+    const maxH = container ? container.clientHeight : window.innerHeight;
+    return Math.floor(Math.min(maxW / COLS, maxH / ROWS));
+  }
 
   // --- PIXI setup (canvas size derived from scale) ---
   const app = new PIXI.Application({
@@ -77,6 +86,20 @@ function boot() {
   // W divisible water field 0..4
   let W0 = new Uint8Array(N);
   let W1 = new Uint8Array(N);
+  // G binary life field 0/1 with double buffer
+  let G0 = new Uint8Array(N);
+  let G1 = new Uint8Array(N);
+
+  // --- Green (Life) knobs ---
+  const ENABLE_SPONTANEOUS_G = false; // v1 off; single seed only
+  const G_BIRTH_R_MIN = 5;
+  const G_BIRTH_B_MIN = 3;
+  const G_BIRTH_P_NEAR = 0.01; // near existing G
+  const G_BIRTH_P_ALONE = 0.001; // no adjacent G
+  const G_GROW_R_COST = 4; // consumed at parent when creating new G
+  const G_GROW_B_COST = 2;
+  const enableGCapillaryForWater = true; // allow B to move within G up/down with bias
+  const gatesBlockAdvectionAcrossBoundary = true; // block R advection across G boundary
 
   // --- Persistent CA state/scratch (allocation-free per tick) ---
   // Outgoing and incoming unit counts planned this tick
@@ -119,6 +142,11 @@ function boot() {
   sprRB.scale.set(SCALE_SIZE, SCALE_SIZE);
   sprB.scale.set(SCALE_SIZE, SCALE_SIZE);
   function positionSpritesByLayout() {
+    if (combinedOnlyView) {
+      sprRB.x = 0;
+      sprRB.y = 0;
+      return;
+    }
     if (LAYOUT.mode === "row") {
       sprR.x = 0;
       sprR.y = 0;
@@ -187,6 +215,11 @@ function boot() {
   function positionOverlaysByLayout() {
     const gridW = COLS * SCALE_SIZE;
     const gridH = ROWS * SCALE_SIZE;
+    if (combinedOnlyView) {
+      overlayRB.x = 0;
+      overlayRB.y = 0;
+      return;
+    }
     if (LAYOUT.mode === "row") {
       overlayR.x = 0;
       overlayR.y = 0;
@@ -247,7 +280,8 @@ function boot() {
     const glyphH = 5 * dot;
     const offsetXInTile = Math.floor((tileSize - glyphW) / 2);
     const offsetYInTile = Math.floor((tileSize - glyphH) / 2);
-    // Draw only on the water-only panel (sprB)
+    // Draw on water-only panel normally; on combined-only view, draw on RB panel
+    const targetPanel = combinedOnlyView ? sprRB : sprB;
     for (let y = 0; y < ROWS; y++) {
       for (let x = 0; x < COLS; x++) {
         const i = y * COLS + x;
@@ -255,8 +289,8 @@ function boot() {
         if (w <= 0) continue;
         const glyph = DIGITS_3x5[w];
         if (!glyph) continue;
-        const baseX = sprB.x + x * tileSize + offsetXInTile;
-        const baseY = sprB.y + y * tileSize + offsetYInTile;
+        const baseX = targetPanel.x + x * tileSize + offsetXInTile;
+        const baseY = targetPanel.y + y * tileSize + offsetYInTile;
         for (let gy = 0; gy < 5; gy++) {
           for (let gx = 0; gx < 3; gx++) {
             if (glyph[gy * 3 + gx]) {
@@ -277,6 +311,44 @@ function boot() {
   // --- Helpers ---
   const IX = (x, y) => y * COLS + x;
 
+  // Per-axis wrapping controls (default: wrap left/right, don't wrap top/bottom)
+  let wrapX = true;
+  let wrapY = false;
+
+  // Toggle: whether heat influences water flow direction selection
+  let heatAffectsWater = true;
+
+  // --- Advection knobs (easy to tweak) ---
+  // Master switch for heat advection (heat carried with water moves)
+  let advectionEnabled = true;
+  // If true, use a fixed probability for advection; otherwise use pCarry(u)
+  let advectionUseFixedProb = true; // default to deterministic advection
+  // Fixed probability used when advectionUseFixedProb is true (0..1)
+  let advectionFixedProb = 1.0; // move heat on every accepted water move
+  // If true, move as many heat units as capacity allows (up to source heat)
+  let advectionMoveAllHeat = true; // move all available heat by default
+  // If advectionMoveAllHeat is false, maximum number of heat units to move per accepted water move
+  let advectionUnitsPerMove = 1;
+
+  // Neighbor indexing with per-axis wrapping
+  function neighborIndex(x, y, dx, dy) {
+    let nx = x + dx;
+    let ny = y + dy;
+    if (wrapX) {
+      if (nx < 0) nx = COLS - 1;
+      else if (nx >= COLS) nx = 0;
+    } else {
+      if (nx < 0 || nx >= COLS) return -1;
+    }
+    if (wrapY) {
+      if (ny < 0) ny = ROWS - 1;
+      else if (ny >= ROWS) ny = 0;
+    } else {
+      if (ny < 0 || ny >= ROWS) return -1;
+    }
+    return IX(nx, ny);
+  }
+
   // Map unit count (0..8) to display value (0,31,63,...,255)
   const UNIT_TO_BYTE = new Uint8Array(9);
   for (let u = 0; u <= 8; u++) UNIT_TO_BYTE[u] = u === 0 ? 0 : u * 32 - 1;
@@ -296,7 +368,7 @@ function boot() {
 
   const WATER_TO_BYTE = new Uint8Array([0, 63, 127, 191, 255]);
 
-  function updateTextures(units, water) {
+  function updateTextures(units, water, green) {
     // Left: R only
     for (let i = 0, j = 0; i < N; i++, j += 4) {
       const u = units[i] & 0xff;
@@ -309,12 +381,12 @@ function boot() {
     if (texR.baseTexture && typeof texR.baseTexture.update === "function") {
       texR.baseTexture.update();
     }
-    // Center: both R and W
+    // Center: R, G, and W
     for (let i = 0, j = 0; i < N; i++, j += 4) {
       const u = units[i] & 0xff;
       const rByte = u >= 8 ? 255 : UNIT_TO_BYTE[u];
       rgbaRB[j + 0] = rByte;
-      rgbaRB[j + 1] = 0;
+      rgbaRB[j + 1] = green && green[i] ? 255 : 0;
       rgbaRB[j + 2] = WATER_TO_BYTE[water[i]];
       rgbaRB[j + 3] = 255;
     }
@@ -336,7 +408,7 @@ function boot() {
   }
 
   // Red diffusion: donor-gated random-walk to one random neighbor if cooler
-  function diffuseRed(src, dst, water) {
+  function diffuseRed(src, dst, water, green) {
     // Reset destination to current state
     dst.set(src);
     // Reset scratch buffers
@@ -353,23 +425,36 @@ function boot() {
         // Donor gate: water donors attempt with WATER_TICK_PROB; air always attempts
         if (water[i] > 0 && rand() >= WATER_TICK_PROB) continue;
 
-        // Pick one random direction: 0=up,1=right,2=down,3=left
-        const dir = (rand() * 4) | 0;
-        let nx = x,
-          ny = y;
-        if (dir === 0) ny = y - 1;
-        else if (dir === 1) nx = x + 1;
-        else if (dir === 2) ny = y + 1;
-        else nx = x - 1;
-        if (nx < 0 || nx >= COLS || ny < 0 || ny >= ROWS) continue;
-
-        const j = ny * COLS + nx;
+        // Pick direction with bias when inside G: favor up over down (~2x)
+        let dir;
+        if (green && green[i]) {
+          const r = rand();
+          dir = r < 0.4 ? 0 : r < 0.7 ? 2 : r < 0.85 ? 1 : 3; // up,down,right,left
+        } else {
+          // 0=up,1=right,2=down,3=left
+          dir = (rand() * 4) | 0;
+        }
+        const j =
+          dir === 0
+            ? neighborIndex(x, y, 0, -1)
+            : dir === 1
+            ? neighborIndex(x, y, 1, 0)
+            : dir === 2
+            ? neighborIndex(x, y, 0, 1)
+            : neighborIndex(x, y, -1, 0);
+        if (j < 0) continue;
         const t = src[j];
         if (t >= s) continue; // only to cooler
 
         // Recipient gate only for air -> water crossings
         if (water[i] === 0 && water[j] > 0 && rand() >= WATER_TICK_PROB)
           continue;
+        // G-aware gating: no leaking from G -> non-G; allow env -> G freely; allow inside G
+        if (green) {
+          const gi = green[i] !== 0;
+          const gj = green[j] !== 0;
+          if (gi && !gj) continue;
+        }
 
         spreadOut[i] += 1;
         spreadIn[j] += 1;
@@ -393,10 +478,7 @@ function boot() {
   function buildDirections(x, y, heat, W_src) {
     const dirs = [];
     function idx(dx, dy) {
-      const nx = x + dx,
-        ny = y + dy;
-      if (nx < 0 || nx >= COLS || ny < 0 || ny >= ROWS) return -1;
-      return ny * COLS + nx;
+      return neighborIndex(x, y, dx, dy);
     }
     function orderPair(a, b) {
       if (a < 0 || b < 0) return [a, b];
@@ -517,7 +599,7 @@ function boot() {
     return Math.min(0.4, 0.05 + 0.04 * u);
   }
 
-  function flowWater(W_src, W_dst, U, tickCount) {
+  function flowWater(W_src, W_dst, U, tickCount, green) {
     W_dst.set(W_src);
     waterOut.fill(0);
     waterIn.fill(0);
@@ -545,33 +627,71 @@ function boot() {
 
         // Quick capacity precheck
         let hasCapacity = false;
-        const neighbors = [
-          i + OFF.D,
-          i + OFF.U,
-          i + OFF.L,
-          i + OFF.R,
-          i + OFF.DL,
-          i + OFF.DR,
-          i + OFF.UL,
-          i + OFF.UR,
+        const neighborDeltas = [
+          [0, 1],
+          [0, -1],
+          [-1, 0],
+          [1, 0],
+          [-1, 1],
+          [1, 1],
+          [-1, -1],
+          [1, -1],
         ];
-        for (let k = 0; k < neighbors.length; k++) {
-          const n = neighbors[k];
-          if (n >= 0 && n < N && W_src[n] < MAX_W) {
+        for (let k = 0; k < neighborDeltas.length; k++) {
+          const [dx, dy] = neighborDeltas[k];
+          const n = neighborIndex(x, y, dx, dy);
+          if (n >= 0 && W_src[n] < MAX_W) {
             hasCapacity = true;
             break;
           }
         }
         if (!hasCapacity) continue;
 
-        const heat = U[i];
-        const dirs = buildDirections(x, y, heat, W_src);
+        const heat = heatAffectsWater ? U[i] : 4; // neutral schedule when off
+        let dirs = buildDirections(x, y, heat, W_src);
+        // Within G, bias schedule to prefer down (twice) and include up early
+        if (green && green[i]) {
+          const up = neighborIndex(x, y, 0, -1);
+          const down = neighborIndex(x, y, 0, 1);
+          const prefer = [];
+          if (down >= 0) {
+            prefer.push(down, down); // 2x down
+          }
+          if (up >= 0) {
+            prefer.push(up); // ensure up appears early
+          }
+          const seen = new Set();
+          const merged = [];
+          for (let k = 0; k < prefer.length; k++) {
+            const v = prefer[k];
+            if (v >= 0 && !seen.has(v)) {
+              merged.push(v);
+              seen.add(v);
+            }
+          }
+          for (let k = 0; k < dirs.length; k++) {
+            const v = dirs[k];
+            if (v >= 0 && !seen.has(v)) {
+              merged.push(v);
+              seen.add(v);
+            }
+          }
+          if (merged.length > 0)
+            dirs = merged.slice(0, Math.min(5, merged.length));
+        }
         for (let k = 0; k < dirs.length; k++) {
           const j = dirs[k];
           if (j < 0) continue;
           const targetW = W_src[j];
+          // G-aware gating: block G->non-G; allow non-G->G
+          if (green) {
+            const gi = green[i] !== 0;
+            const gj = green[j] !== 0;
+            if (gi && !gj) continue;
+          }
           // Relaxed gravity: always allow straight-down if target has capacity
-          if (j === i + OFF.D && targetW < MAX_W) {
+          const downIndex = neighborIndex(x, y, 0, 1);
+          if (j === downIndex && targetW < MAX_W) {
             choice[i] = j;
             wantIn[j]++;
             break;
@@ -600,12 +720,40 @@ function boot() {
           waterOut[i] = 1;
           waterIn[j] += 1;
 
-          // heat advection: accept at most one unit per accepted move
-          if (U[i] > 0 && rand() < pCarry(U[i])) {
-            // ensure target has heat capacity considering already accepted heatIn
-            if (heatIn[j] < MAX_R - U[j]) {
-              heatOut[i] += 1;
-              heatIn[j] += 1;
+          // heat advection: configurable via knobs above
+          if (advectionEnabled && U[i] > 0) {
+            // Optionally block advection across G boundary
+            if (
+              gatesBlockAdvectionAcrossBoundary &&
+              green &&
+              (green[i] !== 0) ^ (green[j] !== 0)
+            ) {
+              // skip advection across G boundary
+            } else {
+              const prob = advectionUseFixedProb
+                ? advectionFixedProb
+                : pCarry(U[i]);
+              if (rand() < prob) {
+                // compute how many units we can move this step
+                const availableSourceHeat = U[i] - heatOut[i];
+                const availableCapacityAtTarget = MAX_R - U[j] - heatIn[j];
+                if (availableSourceHeat > 0 && availableCapacityAtTarget > 0) {
+                  const desiredUnits = advectionMoveAllHeat
+                    ? availableSourceHeat
+                    : Math.max(
+                        0,
+                        Math.min(advectionUnitsPerMove, availableSourceHeat)
+                      );
+                  const unitsToMove = Math.min(
+                    desiredUnits,
+                    availableCapacityAtTarget
+                  );
+                  if (unitsToMove > 0) {
+                    heatOut[i] += unitsToMove;
+                    heatIn[j] += unitsToMove;
+                  }
+                }
+              }
             }
           }
         }
@@ -621,20 +769,75 @@ function boot() {
   }
 
   function advanceTick() {
-    // 1) Water movement with conservative heat advection
-    flowWater(W0, W1, U0, ticks);
+    // Environment first
+    flowWater(W0, W1, U0, ticks, G0);
     [W0, W1] = [W1, W0];
-    // 2) Heat diffusion (use water presence for gating)
-    diffuseRed(U0, U1, W0);
+    diffuseRed(U0, U1, W0, G0);
     [U0, U1] = [U1, U0];
-    // 3) Render
-    updateTextures(U0, W0);
+    // Life (birth/grow/death)
+    birthGreen(U0, W0, G0, G1);
+    growGreen(U0, W0, G0, G1);
+    [G0, G1] = [G1, G0];
+    killGreen(U0, W0, G0);
+    // Render
+    updateTextures(U0, W0, G0);
     ticks++;
+  }
+
+  // --- Green (Life) functions ---
+  function birthGreen(R, B, G_src, G_dst) {
+    if (!ENABLE_SPONTANEOUS_G) return;
+    G_dst.set(G_src);
+    for (let i = 0; i < N; i++) {
+      if (G_src[i]) continue;
+      const r = R[i] | 0;
+      const b = B[i] | 0;
+      if (r < G_BIRTH_R_MIN || b < G_BIRTH_B_MIN) continue;
+      // neighbor check (Moore)
+      let nearG = false;
+      const x = i % COLS;
+      const y = (i / COLS) | 0;
+      for (let dy = -1; dy <= 1 && !nearG; dy++) {
+        for (let dx = -1; dx <= 1 && !nearG; dx++) {
+          if (dx === 0 && dy === 0) continue;
+          const j = neighborIndex(x, y, dx, dy);
+          if (j >= 0 && G_src[j]) nearG = true;
+        }
+      }
+      const p = nearG ? G_BIRTH_P_NEAR : G_BIRTH_P_ALONE;
+      if (rand() < p) G_dst[i] = 1;
+    }
+  }
+
+  function growGreen(R, B, G_src, G_dst) {
+    G_dst.set(G_src);
+    for (let y = 0; y < ROWS; y++) {
+      for (let x = 0; x < COLS; x++) {
+        const i = y * COLS + x;
+        if (!G_src[i]) continue;
+        const below = neighborIndex(x, y, 0, 1);
+        const above = neighborIndex(x, y, 0, -1);
+        if (below < 0 || above < 0) continue;
+        // bud: exactly one G neighbor and it's below; attempt up only (v1)
+        if (G_src[below] && !G_src[above]) {
+          if ((R[i] | 0) >= G_GROW_R_COST && (B[i] | 0) >= G_GROW_B_COST) {
+            // create new cell above, consume at parent
+            G_dst[above] = 1;
+            const rNew = (R[i] | 0) - G_GROW_R_COST;
+            const bNew = (B[i] | 0) - G_GROW_B_COST;
+            R[i] = rNew < 0 ? 0 : rNew > MAX_R ? MAX_R : rNew;
+            B[i] = bNew < 0 ? 0 : bNew > MAX_W ? MAX_W : bNew;
+          }
+        }
+      }
+    }
   }
 
   // --- Initialization ---
   U0.fill(0);
   W0.fill(0);
+  G0.fill(0);
+  G1.fill(0);
   const chosen = new Set();
   const SEEDS_TO_PLACE = Math.min(START_SEEDS, N);
   while (chosen.size < SEEDS_TO_PLACE) {
@@ -662,7 +865,26 @@ function boot() {
     Array.from(waterChosen).slice(0, 50),
     waterChosen.size > 50 ? `... (+${waterChosen.size - 50} more)` : ""
   );
-  updateTextures(U0, W0);
+  // Place a single initial G seed at center
+  {
+    const sx = COLS >> 1;
+    const sy = ROWS >> 1;
+    const si = IX(sx, sy);
+    // Create a parent-bud pair so the upper cell is a bud with a G below
+    const below = neighborIndex(sx, sy, 0, 1);
+    if (below >= 0) {
+      G0[si] = 1; // bud (upper)
+      G0[below] = 1; // parent (lower)
+    } else {
+      G0[si] = 1;
+    }
+    // Ensure the bud has enough resources to grow at least once
+    const needR = G_GROW_R_COST;
+    const needB = G_GROW_B_COST;
+    if ((U0[si] | 0) < needR) U0[si] = needR;
+    if ((W0[si] | 0) < needB) W0[si] = needB;
+  }
+  updateTextures(U0, W0, G0);
 
   // --- Controls ---
   let paused = false;
@@ -674,6 +896,27 @@ function boot() {
     if (e.key === "n" || e.key === "N") {
       showWaterNumbers = !showWaterNumbers;
       drawWaterNumbers(W0);
+    }
+    if (e.key === "h" || e.key === "H") {
+      heatAffectsWater = !heatAffectsWater;
+      console.log(`heatAffectsWater: ${heatAffectsWater ? "ON" : "OFF"}`);
+    }
+    if (e.key === "x" || e.key === "X") {
+      wrapX = !wrapX;
+      console.log(`wrapX (left/right): ${wrapX ? "ON" : "OFF"}`);
+    }
+    if (e.key === "y" || e.key === "Y") {
+      wrapY = !wrapY;
+      console.log(`wrapY (top/bottom): ${wrapY ? "ON" : "OFF"}`);
+    }
+    if (e.key === "v" || e.key === "V") {
+      combinedOnlyView = !combinedOnlyView;
+      // hide/show sprites accordingly
+      sprR.visible = !combinedOnlyView;
+      sprB.visible = !combinedOnlyView;
+      sprRB.visible = true;
+      onResize();
+      console.log(`combinedOnlyView: ${combinedOnlyView ? "ON" : "OFF"}`);
     }
     if (e.key === " ") {
       if (paused) {
@@ -718,7 +961,7 @@ function boot() {
 
   // --- Main loop ---
   // step once per second automatically when not paused
-  const STEP_INTERVAL_MS = 100;
+  const STEP_INTERVAL_MS = 1;
   setInterval(() => {
     if (!paused) {
       advanceTick();
@@ -734,22 +977,26 @@ function boot() {
   // --- Handle resize: recompute integer scale and resize renderer/sprites/overlay ---
   function onResize() {
     const best = computeBestLayout();
-    const newScale = Math.max(1, best.scale);
-    if (newScale === SCALE_SIZE) return;
+    const singleScale = computeBestScaleSingle();
+    const desiredScale = combinedOnlyView ? singleScale : best.scale;
+    const newScale = Math.max(1, desiredScale);
     SCALE_SIZE = newScale;
     LAYOUT = best;
-    app.renderer.resize(
-      (LAYOUT.mode === "row"
-        ? COLS * 3
-        : LAYOUT.mode === "twoRow"
-        ? COLS * 2
-        : COLS) * SCALE_SIZE,
-      (LAYOUT.mode === "row"
-        ? ROWS
-        : LAYOUT.mode === "twoRow"
-        ? ROWS * 2
-        : ROWS * 3) * SCALE_SIZE
-    );
+    const newWidth = combinedOnlyView
+      ? COLS * SCALE_SIZE
+      : (LAYOUT.mode === "row"
+          ? COLS * 3
+          : LAYOUT.mode === "twoRow"
+          ? COLS * 2
+          : COLS) * SCALE_SIZE;
+    const newHeight = combinedOnlyView
+      ? ROWS * SCALE_SIZE
+      : (LAYOUT.mode === "row"
+          ? ROWS
+          : LAYOUT.mode === "twoRow"
+          ? ROWS * 2
+          : ROWS * 3) * SCALE_SIZE;
+    app.renderer.resize(newWidth, newHeight);
     sprR.scale.set(SCALE_SIZE, SCALE_SIZE);
     sprRB.scale.set(SCALE_SIZE, SCALE_SIZE);
     sprB.scale.set(SCALE_SIZE, SCALE_SIZE);
@@ -759,11 +1006,22 @@ function boot() {
       redrawOverlay(overlayRB);
       redrawOverlay(overlayB);
       positionOverlaysByLayout();
+      overlayR.visible = !combinedOnlyView;
+      overlayB.visible = !combinedOnlyView;
+      overlayRB.visible = true;
     }
     // Repaint overlay to match new positions/scale
     drawWaterNumbers(W0);
   }
   window.addEventListener("resize", onResize);
+
+  function killGreen(R, B, G_dst) {
+    for (let i = 0; i < N; i++) {
+      if (G_dst[i] && R[i] === 0 && B[i] === 0) {
+        G_dst[i] = 0;
+      }
+    }
+  }
 }
 
 if (document.readyState === "loading") {

@@ -3,19 +3,19 @@ console.log("RGB Fields CA: script loaded");
 function boot() {
   console.log("RGB Fields CA: booting");
   // --- Constants ---
-  const COLS = 10;
-  const ROWS = 10;
+  const COLS = 1000;
+  const ROWS = 1000;
   const N = COLS * ROWS;
   const MAX_R = 8;
   const MAX_W = 4; // divisible water 0..4
   const WATER_TICK_PROB = 0.1; // donor gate for water; recipient gate for air->water
-  const SHOW_GRIDS = true; // set to true to show grid overlays
+  const SHOW_GRIDS = false; // set to true to show grid overlays
   // URL param "seed" sets PRNG; number of start seeds is a code constant
   const params = new URLSearchParams(window.location.search);
   const seedParam = parseInt(params.get("seed") || "1337", 10);
   const RNG_SEED = (isFinite(seedParam) ? seedParam : 1337) >>> 0;
-  const START_SEEDS = 40; // adjust here in code (single URL param reserved for ?seed)
-  const START_WATERS = 40; // initial water placements (start at 2 units)
+  const START_SEEDS = (COLS * ROWS) / 10; // adjust here in code (single URL param reserved for ?seed)
+  const START_WATERS = (COLS * ROWS) / 10; // initial water placements (start at 2 units)
 
   // --- Container and scale computation (integer fit) ---
   const container = document.getElementById("canvas-div");
@@ -43,6 +43,15 @@ function boot() {
   let LAYOUT = computeBestLayout();
   let SCALE_SIZE = Math.max(1, LAYOUT.scale);
   const SHOW_WATER_NUMBERS_DEFAULT = false; // toggle overlay for water unit counts
+
+  // Combined-only view toggle (show only RB panel at max scale)
+  let combinedOnlyView = false;
+
+  function computeBestScaleSingle() {
+    const maxW = container ? container.clientWidth : window.innerWidth;
+    const maxH = container ? container.clientHeight : window.innerHeight;
+    return Math.floor(Math.min(maxW / COLS, maxH / ROWS));
+  }
 
   // --- PIXI setup (canvas size derived from scale) ---
   const app = new PIXI.Application({
@@ -119,6 +128,11 @@ function boot() {
   sprRB.scale.set(SCALE_SIZE, SCALE_SIZE);
   sprB.scale.set(SCALE_SIZE, SCALE_SIZE);
   function positionSpritesByLayout() {
+    if (combinedOnlyView) {
+      sprRB.x = 0;
+      sprRB.y = 0;
+      return;
+    }
     if (LAYOUT.mode === "row") {
       sprR.x = 0;
       sprR.y = 0;
@@ -187,6 +201,11 @@ function boot() {
   function positionOverlaysByLayout() {
     const gridW = COLS * SCALE_SIZE;
     const gridH = ROWS * SCALE_SIZE;
+    if (combinedOnlyView) {
+      overlayRB.x = 0;
+      overlayRB.y = 0;
+      return;
+    }
     if (LAYOUT.mode === "row") {
       overlayR.x = 0;
       overlayR.y = 0;
@@ -247,7 +266,8 @@ function boot() {
     const glyphH = 5 * dot;
     const offsetXInTile = Math.floor((tileSize - glyphW) / 2);
     const offsetYInTile = Math.floor((tileSize - glyphH) / 2);
-    // Draw only on the water-only panel (sprB)
+    // Draw on water-only panel normally; on combined-only view, draw on RB panel
+    const targetPanel = combinedOnlyView ? sprRB : sprB;
     for (let y = 0; y < ROWS; y++) {
       for (let x = 0; x < COLS; x++) {
         const i = y * COLS + x;
@@ -255,8 +275,8 @@ function boot() {
         if (w <= 0) continue;
         const glyph = DIGITS_3x5[w];
         if (!glyph) continue;
-        const baseX = sprB.x + x * tileSize + offsetXInTile;
-        const baseY = sprB.y + y * tileSize + offsetYInTile;
+        const baseX = targetPanel.x + x * tileSize + offsetXInTile;
+        const baseY = targetPanel.y + y * tileSize + offsetYInTile;
         for (let gy = 0; gy < 5; gy++) {
           for (let gx = 0; gx < 3; gx++) {
             if (glyph[gy * 3 + gx]) {
@@ -276,6 +296,44 @@ function boot() {
 
   // --- Helpers ---
   const IX = (x, y) => y * COLS + x;
+
+  // Per-axis wrapping controls (default: wrap left/right, don't wrap top/bottom)
+  let wrapX = true;
+  let wrapY = false;
+
+  // Toggle: whether heat influences water flow direction selection
+  let heatAffectsWater = true;
+
+  // --- Advection knobs (easy to tweak) ---
+  // Master switch for heat advection (heat carried with water moves)
+  let advectionEnabled = true;
+  // If true, use a fixed probability for advection; otherwise use pCarry(u)
+  let advectionUseFixedProb = true; // default to deterministic advection
+  // Fixed probability used when advectionUseFixedProb is true (0..1)
+  let advectionFixedProb = 1.0; // move heat on every accepted water move
+  // If true, move as many heat units as capacity allows (up to source heat)
+  let advectionMoveAllHeat = true; // move all available heat by default
+  // If advectionMoveAllHeat is false, maximum number of heat units to move per accepted water move
+  let advectionUnitsPerMove = 1;
+
+  // Neighbor indexing with per-axis wrapping
+  function neighborIndex(x, y, dx, dy) {
+    let nx = x + dx;
+    let ny = y + dy;
+    if (wrapX) {
+      if (nx < 0) nx = COLS - 1;
+      else if (nx >= COLS) nx = 0;
+    } else {
+      if (nx < 0 || nx >= COLS) return -1;
+    }
+    if (wrapY) {
+      if (ny < 0) ny = ROWS - 1;
+      else if (ny >= ROWS) ny = 0;
+    } else {
+      if (ny < 0 || ny >= ROWS) return -1;
+    }
+    return IX(nx, ny);
+  }
 
   // Map unit count (0..8) to display value (0,31,63,...,255)
   const UNIT_TO_BYTE = new Uint8Array(9);
@@ -355,15 +413,15 @@ function boot() {
 
         // Pick one random direction: 0=up,1=right,2=down,3=left
         const dir = (rand() * 4) | 0;
-        let nx = x,
-          ny = y;
-        if (dir === 0) ny = y - 1;
-        else if (dir === 1) nx = x + 1;
-        else if (dir === 2) ny = y + 1;
-        else nx = x - 1;
-        if (nx < 0 || nx >= COLS || ny < 0 || ny >= ROWS) continue;
-
-        const j = ny * COLS + nx;
+        const j =
+          dir === 0
+            ? neighborIndex(x, y, 0, -1)
+            : dir === 1
+            ? neighborIndex(x, y, 1, 0)
+            : dir === 2
+            ? neighborIndex(x, y, 0, 1)
+            : neighborIndex(x, y, -1, 0);
+        if (j < 0) continue;
         const t = src[j];
         if (t >= s) continue; // only to cooler
 
@@ -393,10 +451,7 @@ function boot() {
   function buildDirections(x, y, heat, W_src) {
     const dirs = [];
     function idx(dx, dy) {
-      const nx = x + dx,
-        ny = y + dy;
-      if (nx < 0 || nx >= COLS || ny < 0 || ny >= ROWS) return -1;
-      return ny * COLS + nx;
+      return neighborIndex(x, y, dx, dy);
     }
     function orderPair(a, b) {
       if (a < 0 || b < 0) return [a, b];
@@ -545,33 +600,35 @@ function boot() {
 
         // Quick capacity precheck
         let hasCapacity = false;
-        const neighbors = [
-          i + OFF.D,
-          i + OFF.U,
-          i + OFF.L,
-          i + OFF.R,
-          i + OFF.DL,
-          i + OFF.DR,
-          i + OFF.UL,
-          i + OFF.UR,
+        const neighborDeltas = [
+          [0, 1],
+          [0, -1],
+          [-1, 0],
+          [1, 0],
+          [-1, 1],
+          [1, 1],
+          [-1, -1],
+          [1, -1],
         ];
-        for (let k = 0; k < neighbors.length; k++) {
-          const n = neighbors[k];
-          if (n >= 0 && n < N && W_src[n] < MAX_W) {
+        for (let k = 0; k < neighborDeltas.length; k++) {
+          const [dx, dy] = neighborDeltas[k];
+          const n = neighborIndex(x, y, dx, dy);
+          if (n >= 0 && W_src[n] < MAX_W) {
             hasCapacity = true;
             break;
           }
         }
         if (!hasCapacity) continue;
 
-        const heat = U[i];
+        const heat = heatAffectsWater ? U[i] : 4; // neutral schedule when off
         const dirs = buildDirections(x, y, heat, W_src);
         for (let k = 0; k < dirs.length; k++) {
           const j = dirs[k];
           if (j < 0) continue;
           const targetW = W_src[j];
           // Relaxed gravity: always allow straight-down if target has capacity
-          if (j === i + OFF.D && targetW < MAX_W) {
+          const downIndex = neighborIndex(x, y, 0, 1);
+          if (j === downIndex && targetW < MAX_W) {
             choice[i] = j;
             wantIn[j]++;
             break;
@@ -600,12 +657,31 @@ function boot() {
           waterOut[i] = 1;
           waterIn[j] += 1;
 
-          // heat advection: accept at most one unit per accepted move
-          if (U[i] > 0 && rand() < pCarry(U[i])) {
-            // ensure target has heat capacity considering already accepted heatIn
-            if (heatIn[j] < MAX_R - U[j]) {
-              heatOut[i] += 1;
-              heatIn[j] += 1;
+          // heat advection: configurable via knobs above
+          if (advectionEnabled && U[i] > 0) {
+            const prob = advectionUseFixedProb
+              ? advectionFixedProb
+              : pCarry(U[i]);
+            if (rand() < prob) {
+              // compute how many units we can move this step
+              const availableSourceHeat = U[i] - heatOut[i];
+              const availableCapacityAtTarget = MAX_R - U[j] - heatIn[j];
+              if (availableSourceHeat > 0 && availableCapacityAtTarget > 0) {
+                const desiredUnits = advectionMoveAllHeat
+                  ? availableSourceHeat
+                  : Math.max(
+                      0,
+                      Math.min(advectionUnitsPerMove, availableSourceHeat)
+                    );
+                const unitsToMove = Math.min(
+                  desiredUnits,
+                  availableCapacityAtTarget
+                );
+                if (unitsToMove > 0) {
+                  heatOut[i] += unitsToMove;
+                  heatIn[j] += unitsToMove;
+                }
+              }
             }
           }
         }
@@ -675,6 +751,27 @@ function boot() {
       showWaterNumbers = !showWaterNumbers;
       drawWaterNumbers(W0);
     }
+    if (e.key === "h" || e.key === "H") {
+      heatAffectsWater = !heatAffectsWater;
+      console.log(`heatAffectsWater: ${heatAffectsWater ? "ON" : "OFF"}`);
+    }
+    if (e.key === "x" || e.key === "X") {
+      wrapX = !wrapX;
+      console.log(`wrapX (left/right): ${wrapX ? "ON" : "OFF"}`);
+    }
+    if (e.key === "y" || e.key === "Y") {
+      wrapY = !wrapY;
+      console.log(`wrapY (top/bottom): ${wrapY ? "ON" : "OFF"}`);
+    }
+    if (e.key === "v" || e.key === "V") {
+      combinedOnlyView = !combinedOnlyView;
+      // hide/show sprites accordingly
+      sprR.visible = !combinedOnlyView;
+      sprB.visible = !combinedOnlyView;
+      sprRB.visible = true;
+      onResize();
+      console.log(`combinedOnlyView: ${combinedOnlyView ? "ON" : "OFF"}`);
+    }
     if (e.key === " ") {
       if (paused) {
         advanceTick();
@@ -718,7 +815,7 @@ function boot() {
 
   // --- Main loop ---
   // step once per second automatically when not paused
-  const STEP_INTERVAL_MS = 100;
+  const STEP_INTERVAL_MS = 1;
   setInterval(() => {
     if (!paused) {
       advanceTick();
@@ -734,22 +831,26 @@ function boot() {
   // --- Handle resize: recompute integer scale and resize renderer/sprites/overlay ---
   function onResize() {
     const best = computeBestLayout();
-    const newScale = Math.max(1, best.scale);
-    if (newScale === SCALE_SIZE) return;
+    const singleScale = computeBestScaleSingle();
+    const desiredScale = combinedOnlyView ? singleScale : best.scale;
+    const newScale = Math.max(1, desiredScale);
     SCALE_SIZE = newScale;
     LAYOUT = best;
-    app.renderer.resize(
-      (LAYOUT.mode === "row"
-        ? COLS * 3
-        : LAYOUT.mode === "twoRow"
-        ? COLS * 2
-        : COLS) * SCALE_SIZE,
-      (LAYOUT.mode === "row"
-        ? ROWS
-        : LAYOUT.mode === "twoRow"
-        ? ROWS * 2
-        : ROWS * 3) * SCALE_SIZE
-    );
+    const newWidth = combinedOnlyView
+      ? COLS * SCALE_SIZE
+      : (LAYOUT.mode === "row"
+          ? COLS * 3
+          : LAYOUT.mode === "twoRow"
+          ? COLS * 2
+          : COLS) * SCALE_SIZE;
+    const newHeight = combinedOnlyView
+      ? ROWS * SCALE_SIZE
+      : (LAYOUT.mode === "row"
+          ? ROWS
+          : LAYOUT.mode === "twoRow"
+          ? ROWS * 2
+          : ROWS * 3) * SCALE_SIZE;
+    app.renderer.resize(newWidth, newHeight);
     sprR.scale.set(SCALE_SIZE, SCALE_SIZE);
     sprRB.scale.set(SCALE_SIZE, SCALE_SIZE);
     sprB.scale.set(SCALE_SIZE, SCALE_SIZE);
@@ -759,6 +860,9 @@ function boot() {
       redrawOverlay(overlayRB);
       redrawOverlay(overlayB);
       positionOverlaysByLayout();
+      overlayR.visible = !combinedOnlyView;
+      overlayB.visible = !combinedOnlyView;
+      overlayRB.visible = true;
     }
     // Repaint overlay to match new positions/scale
     drawWaterNumbers(W0);
