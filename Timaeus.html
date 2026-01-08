@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Timaeus - Platonic Elements</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pixi.js/7.2.4/pixi.min.js"></script>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      background: #000;
+      overflow: hidden;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      min-height: 100vh;
+    }
+    #canvas-div {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+    }
+    #controls {
+      position: fixed;
+      top: 10px;
+      left: 10px;
+      color: #fff;
+      font-family: monospace;
+      font-size: 12px;
+      background: rgba(0,0,0,0.7);
+      padding: 10px;
+      border-radius: 4px;
+      z-index: 100;
+    }
+    #controls div { margin: 2px 0; }
+    .key {
+      background: #333;
+      padding: 1px 4px;
+      border-radius: 2px;
+      border: 1px solid #555;
+    }
+  </style>
+</head>
+<body>
+  <div id="canvas-div"></div>
+  <div id="controls">
+    <div><span class="key">P</span> Pause/Resume</div>
+    <div><span class="key">Space</span> Step (when paused)</div>
+    <div><span class="key">F</span> Fast-forward toggle</div>
+    <div><span class="key">Q</span> Quadrant init toggle</div>
+    <div><span class="key">R</span> Reset</div>
+    <div><span class="key">X</span> Toggle wrap-X</div>
+    <div><span class="key">Y</span> Toggle wrap-Y</div>
+    <div><span class="key">T</span> Toggle heat overlay</div>
+    <div><span class="key">S</span> Toggle heat sources</div>
+    <div><span class="key">+/-</span> Adjust source strength</div>
+    <div><span class="key">1-0</span> Fill % (10%-100%)</div>
+    <div><span class="key">H</span> Hide controls</div>
+    <div>---</div>
+    <div id="stats">Tick: 0 | Mass: 0</div>
+  </div>
+  <script src="Timaeus-2.js"></script>
+</body>
+</html>

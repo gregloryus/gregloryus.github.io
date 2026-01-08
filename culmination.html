@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Culmination</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pixi.js/7.2.4/pixi.min.js"></script>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { background: #000; overflow: hidden; }
+    #canvas-div { width: 100vw; height: 100vh; }
+    #info {
+      position: fixed;
+      top: 10px;
+      left: 10px;
+      color: #fff;
+      font-family: monospace;
+      font-size: 14px;
+      z-index: 100;
+      background: rgba(0,0,0,0.5);
+      padding: 8px;
+      border-radius: 4px;
+    }
+    #controls {
+      position: fixed;
+      bottom: 10px;
+      left: 10px;
+      color: #fff;
+      font-family: monospace;
+      font-size: 12px;
+      z-index: 100;
+      background: rgba(0,0,0,0.5);
+      padding: 8px;
+      border-radius: 4px;
+    }
+  </style>
+</head>
+<body>
+  <div id="canvas-div"></div>
+  <div id="info">Loading...</div>
+  <div id="controls">
+    [F] Fast-forward | [Space] Pause | [R] Reset
+  </div>
+  <script src="culmination-1.js"></script>
+</body>
+</html>

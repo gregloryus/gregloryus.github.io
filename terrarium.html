@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Terrarium</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { background: #000; overflow: hidden; }
+    canvas { display: block; }
+    #info {
+      position: fixed;
+      top: 10px;
+      left: 10px;
+      color: #fff;
+      font-family: monospace;
+      font-size: 12px;
+      z-index: 100;
+      background: rgba(0,0,0,0.7);
+      padding: 10px;
+      border-radius: 4px;
+      line-height: 1.5;
+    }
+    #controls {
+      position: fixed;
+      bottom: 10px;
+      left: 10px;
+      color: #aaa;
+      font-family: monospace;
+      font-size: 11px;
+      z-index: 100;
+    }
+  </style>
+</head>
+<body>
+  <canvas id="canvas"></canvas>
+  <div id="info">Loading...</div>
+  <div id="controls">[F] Fast-forward | [Space] Pause | [R] Reset | [W] Add Water | [S] Add Seed</div>
+  <script src="terrarium-1.js"></script>
+</body>
+</html>
