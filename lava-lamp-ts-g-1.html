@@ -1,0 +1,392 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Emergent Lava Lamp (WebGL CA) - Fixed</title>
+    <style>
+        body { margin: 0; overflow: hidden; background: #111; }
+        canvas { display: block; width: 100vw; height: 100vh; image-rendering: pixelated; }
+        #controls { position: absolute; top: 10px; left: 10px; color: white; font-family: monospace; background: rgba(0,0,0,0.5); padding: 10px; pointer-events: none; }
+    </style>
+</head>
+<body>
+    <div id="controls">
+        Lava Lamp CA (1024x1024)<br>
+        Track A: Energy Minimization (Fixed)<br>
+        <span id="fps">FPS: 0</span>
+    </div>
+    <canvas id="glcanvas"></canvas>
+
+    <script id="vs" type="x-shader/x-vertex">
+        #version 300 es
+        in vec4 position;
+        out vec2 uv;
+        void main() {
+            uv = position.xy * 0.5 + 0.5;
+            gl_Position = position;
+        }
+    </script>
+
+    <script id="fs-thermal" type="x-shader/x-fragment">
+        #version 300 es
+        precision highp float;
+        uniform sampler2D uState;
+        uniform vec2 uRes;
+        in vec2 uv;
+        out vec4 fragColor;
+
+        // --- HELPER FUNCTION (Moved outside main) ---
+        // If the pixel is Water (phase < 0.1), return the fixed gradient temp (1.0 - y).
+        // If Wax, return its actual stored temp (d.g).
+        float getEffectiveTemp(vec4 d, float y) {
+            if (d.r < 0.1) return 1.0 - y;
+            return d.g;
+        }
+
+        void main() {
+            vec4 data = texture(uState, uv);
+            float phase = data.r; // 1=Wax, 0=Oil
+            float temp = data.g;
+
+            // FIXED BACKGROUND GRADIENT
+            // If I am water, I am instantly the temperature of the background.
+            if (phase < 0.1) {
+                fragColor = vec4(0.0, 1.0 - uv.y, 0.0, 1.0);
+                return;
+            }
+
+            // I AM WAX: I diffuse heat with my neighbors
+            vec2 px = 1.0 / uRes;
+            
+            // Sample neighbors
+            vec4 nN = texture(uState, uv + vec2(0.0, px.y));
+            vec4 nS = texture(uState, uv - vec2(0.0, px.y));
+            vec4 nE = texture(uState, uv + vec2(px.x, 0.0));
+            vec4 nW = texture(uState, uv - vec2(px.x, 0.0));
+
+            // Get effective temperatures
+            float tN = getEffectiveTemp(nN, uv.y + px.y);
+            float tS = getEffectiveTemp(nS, uv.y - px.y);
+            float tE = getEffectiveTemp(nE, uv.y);
+            float tW = getEffectiveTemp(nW, uv.y);
+
+            // Simple Diffusion
+            float avg = (tN + tS + tE + tW) * 0.25;
+            float kDiff = 0.05; // Thermal conductivity
+            float newTemp = temp + (avg - temp) * kDiff;
+
+            // Heating/Cooling Boundaries for Wax
+            if (uv.y < 0.02) newTemp = mix(newTemp, 1.0, 0.1); // Heater
+            if (uv.y > 0.98) newTemp = mix(newTemp, 0.0, 0.05); // Cooler
+
+            fragColor = vec4(phase, newTemp, 0.0, 1.0);
+        }
+    </script>
+
+    <script id="fs-swap" type="x-shader/x-fragment">
+        #version 300 es
+        precision highp float;
+        uniform sampler2D uState;
+        uniform vec2 uRes;
+        uniform int uPass; // 0=HorzEven, 1=HorzOdd, 2=VertEven, 3=VertOdd
+        uniform float uTime;
+        in vec2 uv;
+        out vec4 fragColor;
+
+        // --- TUNING KNOBS ---
+        float K_GRAVITY = 0.001; 
+        float K_BUOYANCY = 0.0025; // Must be > Gravity for lift
+        float K_SURFACE = 0.8;    // Base Surface Tension (High = round)
+        float K_BOUNCE = 2.0;     // Marangoni Bounce (Temp difference penalty)
+        
+        // Random generator
+        float rand(vec2 co){
+            return fract(sin(dot(co, vec2(12.9898, 78.233))) * 43758.5453);
+        }
+
+        // Energy Calculation Function
+        float getEnergy(vec2 pos, vec4 data, vec4 n1, vec4 n2, vec4 n3, vec4 n4) {
+            float phase = data.r;
+            float temp = data.g;
+            
+            // 1. Potential Energy (Gravity vs Buoyancy)
+            float potential = pos.y * (K_GRAVITY - (K_BUOYANCY * temp));
+            float E_pot = phase * potential;
+
+            // 2. Surface Tension Energy
+            float E_surf = 0.0;
+            
+            vec4[4] neighbors = vec4[](n1, n2, n3, n4);
+            
+            for(int i=0; i<4; i++) {
+                vec4 n = neighbors[i];
+                float n_phase = n.r;
+                float n_temp = n.g;
+                
+                if (phase != n_phase) {
+                    // WAX touching OIL -> High Cost
+                    float dynamic_tension = K_SURFACE * (1.0 - 0.5 * temp);
+                    E_surf += dynamic_tension;
+                } else if (phase > 0.5) {
+                    // WAX touching WAX -> Marangoni Bounce
+                    float dt = abs(temp - n_temp);
+                    E_surf += dt * K_BOUNCE;
+                }
+            }
+            
+            return E_pot + E_surf;
+        }
+
+        void main() {
+            vec2 px = 1.0 / uRes;
+            ivec2 coord = ivec2(gl_FragCoord.xy);
+            
+            // Determine partner offset
+            ivec2 partner_offset = ivec2(0,0);
+            
+            if (uPass == 0) { // Horizontal Even
+                if (coord.x % 2 == 0) partner_offset = ivec2(1, 0);
+                else                  partner_offset = ivec2(-1, 0);
+            } else if (uPass == 1) { // Horizontal Odd
+                if ((coord.x + 1) % 2 == 0) partner_offset = ivec2(1, 0);
+                else                        partner_offset = ivec2(-1, 0);
+            } else if (uPass == 2) { // Vertical Even
+                if (coord.y % 2 == 0) partner_offset = ivec2(0, 1);
+                else                  partner_offset = ivec2(0, -1);
+            } else { // Vertical Odd
+                if ((coord.y + 1) % 2 == 0) partner_offset = ivec2(0, 1);
+                else                        partner_offset = ivec2(0, -1);
+            }
+
+            // Boundary check
+            ivec2 partner_coord = coord + partner_offset;
+            if (partner_coord.x < 0 || partner_coord.x >= int(uRes.x) ||
+                partner_coord.y < 0 || partner_coord.y >= int(uRes.y)) {
+                fragColor = texture(uState, uv);
+                return;
+            }
+
+            vec4 me = texture(uState, uv);
+            vec4 partner = texture(uState, uv + vec2(partner_offset) * px);
+
+            if (me.r == partner.r && abs(me.g - partner.g) < 0.01) {
+                fragColor = me;
+                return;
+            }
+
+            // My Neighbors
+            vec4 mn1 = texture(uState, uv + vec2(0, px.y));
+            vec4 mn2 = texture(uState, uv - vec2(0, px.y));
+            vec4 mn3 = texture(uState, uv + vec2(px.x, 0));
+            vec4 mn4 = texture(uState, uv - vec2(px.x, 0));
+
+            // Partner Neighbors
+            vec2 puv = uv + vec2(partner_offset) * px;
+            vec4 pn1 = texture(uState, puv + vec2(0, px.y));
+            vec4 pn2 = texture(uState, puv - vec2(0, px.y));
+            vec4 pn3 = texture(uState, puv + vec2(px.x, 0));
+            vec4 pn4 = texture(uState, puv - vec2(px.x, 0));
+
+            float E_current = getEnergy(uv, me, mn1, mn2, mn3, mn4) + 
+                              getEnergy(puv, partner, pn1, pn2, pn3, pn4);
+
+            float E_swapped = getEnergy(puv, me, pn1, pn2, pn3, pn4) + 
+                              getEnergy(uv, partner, mn1, mn2, mn3, mn4);
+
+            float dE = E_swapped - E_current;
+            bool doSwap = false;
+            
+            if (dE < 0.0) {
+                doSwap = true;
+            } else {
+                float T_noise = 0.05; 
+                if (rand(uv + vec2(uTime, 0.0)) < exp(-dE / T_noise)) {
+                    doSwap = true;
+                }
+            }
+
+            if (doSwap) fragColor = partner;
+            else        fragColor = me;
+        }
+    </script>
+
+    <script id="fs-render" type="x-shader/x-fragment">
+        #version 300 es
+        precision highp float;
+        uniform sampler2D uState;
+        in vec2 uv;
+        out vec4 fragColor;
+
+        void main() {
+            vec4 data = texture(uState, uv);
+            float phase = data.r;
+            float temp = data.g;
+
+            vec3 cOil = vec3(0.05, 0.05, 0.1) * (0.5 + 0.5 * (1.0 - uv.y));
+            
+            vec3 cWaxCold = vec3(0.8, 0.1, 0.1);
+            vec3 cWaxHot = vec3(1.0, 0.9, 0.2);
+            vec3 cWax = mix(cWaxCold, cWaxHot, temp);
+
+            // Simple sharpen for rendering
+            vec3 color = mix(cOil, cWax, step(0.5, phase));
+            fragColor = vec4(color, 1.0);
+        }
+    </script>
+
+    <script>
+        const canvas = document.getElementById('glcanvas');
+        const gl = canvas.getContext('webgl2');
+
+        if (!gl) {
+            alert("WebGL 2.0 needed. Please try Chrome or Firefox on Desktop/Mobile.");
+        }
+        if (!gl.getExtension('EXT_color_buffer_float')) {
+            alert('Your browser does not support EXT_color_buffer_float. Simulation may not work.');
+        }
+
+        function createShader(gl, type, source) {
+            const shader = gl.createShader(type);
+            gl.shaderSource(shader, source);
+            gl.compileShader(shader);
+            if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+                console.error("Shader Error:", gl.getShaderInfoLog(shader));
+                gl.deleteShader(shader);
+                return null;
+            }
+            return shader;
+        }
+
+        function createProgram(gl, vsSrc, fsSrc) {
+            const vs = createShader(gl, gl.VERTEX_SHADER, vsSrc);
+            const fs = createShader(gl, gl.FRAGMENT_SHADER, fsSrc);
+            if (!vs || !fs) return null;
+            
+            const prog = gl.createProgram();
+            gl.attachShader(prog, vs);
+            gl.attachShader(prog, fs);
+            gl.linkProgram(prog);
+            if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) {
+                console.error("Program Link Error:", gl.getProgramInfoLog(prog));
+                return null;
+            }
+            return prog;
+        }
+
+        const vsSrc = document.getElementById('vs').text.trim();
+        const fsThermalSrc = document.getElementById('fs-thermal').text.trim();
+        const fsSwapSrc = document.getElementById('fs-swap').text.trim();
+        const fsRenderSrc = document.getElementById('fs-render').text.trim();
+
+        const progThermal = createProgram(gl, vsSrc, fsThermalSrc);
+        const progSwap = createProgram(gl, vsSrc, fsSwapSrc);
+        const progRender = createProgram(gl, vsSrc, fsRenderSrc);
+
+        const quadBuffer = gl.createBuffer();
+        gl.bindBuffer(gl.ARRAY_BUFFER, quadBuffer);
+        gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([
+            -1, -1, 1, -1, -1, 1,
+            -1, 1, 1, -1, 1, 1,
+        ]), gl.STATIC_DRAW);
+
+        const vao = gl.createVertexArray();
+        gl.bindVertexArray(vao);
+        const posLoc = 0; 
+        gl.enableVertexAttribArray(posLoc);
+        gl.vertexAttribPointer(posLoc, 2, gl.FLOAT, false, 0, 0);
+
+        const SIZE = 1024;
+        canvas.width = SIZE;
+        canvas.height = SIZE;
+
+        function createTexture() {
+            const tex = gl.createTexture();
+            gl.bindTexture(gl.TEXTURE_2D, tex);
+            gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA16F, SIZE, SIZE, 0, gl.RGBA, gl.FLOAT, null);
+            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+            return tex;
+        }
+
+        let texA = createTexture();
+        let texB = createTexture();
+
+        const initialData = new Float32Array(SIZE * SIZE * 4);
+        for (let i = 0; i < SIZE * SIZE; i++) {
+            const y = Math.floor(i / SIZE);
+            let phase = 0.0;
+            if (y < SIZE * 0.1 && Math.random() < 0.4) phase = 1.0; 
+            if (Math.random() < 0.001 && y < SIZE * 0.2) phase = 1.0;
+
+            initialData[i*4 + 0] = phase;
+            initialData[i*4 + 1] = 0.0;
+            initialData[i*4 + 2] = 0.0;
+            initialData[i*4 + 3] = 1.0;
+        }
+        gl.bindTexture(gl.TEXTURE_2D, texA);
+        gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, SIZE, SIZE, gl.RGBA, gl.FLOAT, initialData);
+
+        const fbo = gl.createFramebuffer();
+        let frameCount = 0;
+        let lastTime = performance.now();
+        const fpsElem = document.getElementById('fps');
+
+        function render() {
+            const now = performance.now();
+            const time = now * 0.001;
+            
+            // 1. THERMAL PASS
+            gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
+            gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, texB, 0);
+            gl.viewport(0, 0, SIZE, SIZE);
+            gl.useProgram(progThermal);
+            gl.activeTexture(gl.TEXTURE0);
+            gl.bindTexture(gl.TEXTURE_2D, texA);
+            gl.uniform1i(gl.getUniformLocation(progThermal, "uState"), 0);
+            gl.uniform2f(gl.getUniformLocation(progThermal, "uRes"), SIZE, SIZE);
+            gl.bindVertexArray(vao);
+            gl.drawArrays(gl.TRIANGLES, 0, 6);
+            
+            let temp = texA; texA = texB; texB = temp;
+
+            // 2. KINETIC SWAPS
+            gl.useProgram(progSwap);
+            gl.uniform2f(gl.getUniformLocation(progSwap, "uRes"), SIZE, SIZE);
+            gl.uniform1f(gl.getUniformLocation(progSwap, "uTime"), time);
+
+            for (let p = 0; p < 4; p++) {
+                gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
+                gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, texB, 0);
+                gl.activeTexture(gl.TEXTURE0);
+                gl.bindTexture(gl.TEXTURE_2D, texA);
+                gl.uniform1i(gl.getUniformLocation(progSwap, "uState"), 0);
+                gl.uniform1i(gl.getUniformLocation(progSwap, "uPass"), p);
+                gl.drawArrays(gl.TRIANGLES, 0, 6);
+                
+                temp = texA; texA = texB; texB = temp;
+            }
+
+            // 3. RENDER
+            gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+            gl.viewport(0, 0, canvas.width, canvas.height);
+            gl.useProgram(progRender);
+            gl.activeTexture(gl.TEXTURE0);
+            gl.bindTexture(gl.TEXTURE_2D, texA);
+            gl.uniform1i(gl.getUniformLocation(progRender, "uState"), 0);
+            gl.drawArrays(gl.TRIANGLES, 0, 6);
+
+            frameCount++;
+            if (now - lastTime >= 1000) {
+                fpsElem.innerText = `FPS: ${frameCount}`;
+                frameCount = 0;
+                lastTime = now;
+            }
+            requestAnimationFrame(render);
+        }
+        requestAnimationFrame(render);
+    </script>
+</body>
+</html>

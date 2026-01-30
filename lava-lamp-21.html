@@ -1,0 +1,473 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Lava Lamp v21</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        html, body { height: 100%; overflow: hidden; background: #0a0a12; }
+        #canvas { display: block; image-rendering: pixelated; }
+        #ui { position: absolute; top: 10px; left: 10px; color: #fff; font: 11px monospace; background: rgba(0,0,0,0.8); padding: 8px; border-radius: 4px; }
+        #controls { position: absolute; top: 10px; right: 10px; }
+        #controls button { padding: 8px 14px; margin: 2px; background: #222; color: #fff; border: 1px solid #555; cursor: pointer; font: 12px monospace; }
+    </style>
+</head>
+<body>
+<canvas id="canvas"></canvas>
+<div id="ui">
+    <div>Lava Lamp v21</div>
+    <div id="stats"></div>
+</div>
+<div id="controls">
+    <button id="ff">1x</button>
+    <button id="pp">||</button>
+    <button id="rr">Reset</button>
+</div>
+<script>
+// v21: DISCRETE DENSITIES with COHESION
+//
+// Physics:
+// - 0.5 density = HOT/EXPANDED = less dense than medium = BUOYANT (rises)
+// - 1.0 density = COLD/CONTRACTED = more dense than medium = SINKS
+//
+// Key rule: Cells only move if they stay CONNECTED to other wax.
+// No flying off as gas - blobs stay together.
+
+const CELL = 3;
+
+// Temperature thresholds
+const MELT_TEMP = 0.45;     // Above this, 1.0 can expand to 0.5
+const FREEZE_TEMP = 0.35;   // Below this, 0.5 can contract to 1.0
+
+// Heat
+const HEAT_IN = 0.001;
+const HEAT_DIFF = 0.04;
+const COOL = 0.015;
+const INTENSITY_POWER = 3;
+
+// Movement probability
+const MOVE_CHANCE = 0.4;
+
+// Initial setup
+const WAX_HEIGHT_FRAC = 0.1;
+
+let W, H, grid, frame = 0, paused = false, ff = 1;
+let initialMass;
+
+const canvas = document.getElementById('canvas');
+const ctx = canvas.getContext('2d');
+
+function resize() {
+    canvas.width = innerWidth;
+    canvas.height = innerHeight;
+    W = Math.floor(canvas.width / CELL);
+    H = Math.floor(canvas.height / CELL);
+    reset();
+}
+
+function reset() {
+    grid = new Float32Array(W * H * 2);
+    const wH = Math.floor(H * WAX_HEIGHT_FRAC);
+    for (let y = H - wH; y < H; y++) {
+        for (let x = 0; x < W; x++) {
+            grid[(y * W + x) * 2] = 1.0;
+            grid[(y * W + x) * 2 + 1] = 0.1;
+        }
+    }
+    initialMass = getMass();
+    frame = 0;
+}
+
+function getMass() {
+    let m = 0;
+    for (let i = 0; i < W * H; i++) m += grid[i * 2];
+    return m;
+}
+
+function wrapX(x) { return ((x % W) + W) % W; }
+function idx(x, y) { return (y * W + wrapX(x)) * 2; }
+function D(x, y) { return (y >= 0 && y < H) ? grid[idx(x, y)] : 0; }
+function T(x, y) { return (y >= 0 && y < H) ? grid[idx(x, y) + 1] : 0; }
+function Dn(x, y, next) { return (y >= 0 && y < H) ? next[idx(x, y)] : 0; }
+
+// Count wax neighbors
+function countNeighbors(x, y, next) {
+    let count = 0;
+    if (Dn(x, y-1, next) > 0.2) count++;
+    if (Dn(x, y+1, next) > 0.2) count++;
+    if (Dn(x-1, y, next) > 0.2) count++;
+    if (Dn(x+1, y, next) > 0.2) count++;
+    return count;
+}
+
+function tick() {
+    frame++;
+    const next = new Float32Array(W * H * 2);
+    for (let i = 0; i < next.length; i++) next[i] = grid[i];
+
+    // === HEATING/COOLING ===
+    const bottomThird = Math.floor(H * 2 / 3);
+    const topThird = Math.floor(H / 3);
+    const centerX = W / 2;
+
+    for (let y = 0; y < H; y++) {
+        for (let x = 0; x < W; x++) {
+            const i = idx(x, y);
+            if (next[i] < 0.1) continue;
+
+            // Bottom heats (centralized)
+            if (y >= bottomThird) {
+                const vertI = Math.pow((y - bottomThird) / (H - bottomThird), INTENSITY_POWER);
+                const horizI = Math.pow(1 - Math.abs(x - centerX) / centerX, INTENSITY_POWER);
+                next[i + 1] = Math.min(1, next[i + 1] + HEAT_IN * vertI * horizI);
+            }
+
+            // Top cools
+            if (y < topThird) {
+                const intensity = Math.pow(1 - y / topThird, INTENSITY_POWER);
+                next[i + 1] = Math.max(0, next[i + 1] - COOL * intensity);
+            }
+        }
+    }
+
+    // === HEAT DIFFUSION ===
+    for (let y = 0; y < H; y++) {
+        for (let x = 0; x < W; x++) {
+            const i = idx(x, y);
+            const d = next[i];
+            if (d < 0.1) continue;
+
+            let sum = next[i + 1] * d, wt = d;
+            for (const [dx, dy] of [[-1,0],[1,0],[0,-1],[0,1]]) {
+                const nd = D(x+dx, y+dy);
+                if (nd > 0.1) {
+                    sum += T(x+dx, y+dy) * nd;
+                    wt += nd;
+                }
+            }
+            next[i + 1] += ((sum / wt) - next[i + 1]) * HEAT_DIFF;
+        }
+    }
+
+    // Shuffle cells for random processing order
+    const cells = [];
+    for (let y = 0; y < H; y++) {
+        for (let x = 0; x < W; x++) {
+            cells.push([x, y]);
+        }
+    }
+    shuffle(cells);
+
+    // === EXPANSION: Hot 1.0 → two 0.5 ===
+    // Hot dense wax expands, becoming less dense (more buoyant)
+    for (const [x, y] of cells) {
+        const i = idx(x, y);
+        const d = next[i];
+        const t = next[i + 1];
+
+        if (d < 0.9 || t < MELT_TEMP) continue;
+
+        // Higher temp = higher chance to expand
+        const expandChance = (t - MELT_TEMP) / (1 - MELT_TEMP) * 0.3;
+        if (Math.random() > expandChance) continue;
+
+        // Find empty neighbor to expand into (prefer UP - buoyancy)
+        const dirs = [[0,-1],[-1,0],[1,0],[0,1]];
+        for (const [dx, dy] of dirs) {
+            const ny = y + dy;
+            if (ny < 0 || ny >= H) continue;
+            const ni = idx(x + dx, ny);
+            if (next[ni] < 0.1) {
+                // Expand: both become 0.5
+                next[i] = 0.5;
+                next[ni] = 0.5;
+                next[ni + 1] = t;
+                break;
+            }
+        }
+    }
+
+    // === CONTRACTION: Two cold 0.5 → one 1.0 ===
+    // Cold expanded wax contracts, becoming denser
+    shuffle(cells);
+    for (const [x, y] of cells) {
+        const i = idx(x, y);
+        const d = next[i];
+        const t = next[i + 1];
+
+        if (d < 0.4 || d > 0.6 || t > FREEZE_TEMP) continue;
+
+        const contractChance = (FREEZE_TEMP - t) / FREEZE_TEMP * 0.3;
+        if (Math.random() > contractChance) continue;
+
+        // Find 0.5 neighbor to merge with (prefer DOWN - gravity)
+        const dirs = [[0,1],[1,0],[-1,0],[0,-1]];
+        for (const [dx, dy] of dirs) {
+            const ny = y + dy;
+            if (ny < 0 || ny >= H) continue;
+            const ni = idx(x + dx, ny);
+            const nd = next[ni];
+            const nt = next[ni + 1];
+
+            if (nd >= 0.4 && nd <= 0.6 && nt < FREEZE_TEMP) {
+                // Merge: this becomes 1.0, neighbor gone
+                next[i] = 1.0;
+                next[i + 1] = (t + nt) / 2;
+                next[ni] = 0;
+                next[ni + 1] = 0;
+                break;
+            }
+        }
+    }
+
+    // === THERMAL CONVECTION: Hot wax rises, cold wax sinks ===
+    shuffle(cells);
+    for (const [x, y] of cells) {
+        const i = idx(x, y);
+        const d = next[i];
+        const t = next[i + 1];
+
+        if (d < 0.2) continue;
+        if (y <= 0) continue;
+
+        const above = idx(x, y - 1);
+        const aboveD = next[above];
+        const aboveT = next[above + 1];
+
+        // Temperature difference determines swap probability
+        const tempDiff = t - aboveT;
+        if (tempDiff <= 0.03) continue;
+
+        const swapChance = Math.min(0.6, tempDiff * 2);
+        if (Math.random() > swapChance) continue;
+
+        if (aboveD < 0.1) {
+            // Empty space above - move up
+            // Only VERY hot cells can break cohesion
+            const canBreakAway = t > 0.85;
+
+            if (!canBreakAway) {
+                const neighborsNow = countNeighbors(x, y, next);
+                if (neighborsNow === 0) continue;
+            }
+
+            next[above] = d;
+            next[above + 1] = t;
+            next[i] = 0;
+            next[i + 1] = 0;
+        }
+        else if (aboveD > 0.1) {
+            // Wax above - SWAP
+            next[i] = aboveD;
+            next[i + 1] = aboveT;
+            next[above] = d;
+            next[above + 1] = t;
+        }
+    }
+
+    // === NECK SNAP: Thin vertical connections break ===
+    // Only cold necks snap (hot blob pulling away from cold base)
+    for (const [x, y] of cells) {
+        const i = idx(x, y);
+        const d = next[i];
+        const t = next[i + 1];
+        if (d < 0.2) continue;
+        if (t > 0.5) continue; // Only cold necks snap
+
+        const up = Dn(x, y-1, next);
+        const dn = Dn(x, y+1, next);
+        const lt = Dn(x-1, y, next);
+        const rt = Dn(x+1, y, next);
+
+        // Vertical neck: has up AND down, but NO left or right
+        const isVerticalNeck = up > 0.2 && dn > 0.2 && lt < 0.1 && rt < 0.1;
+
+        if (isVerticalNeck && Math.random() < 0.02) {
+            // Snap! Give mass to the neighbor below (stays with base)
+            const dnIdx = idx(x, y+1);
+            const space = 1 - next[dnIdx];
+            const give = Math.min(d, space);
+            next[dnIdx] += give;
+            next[i] -= give;
+            if (next[i] < 0.1) {
+                next[i] = 0;
+                next[i + 1] = 0;
+            }
+        }
+    }
+
+    // === MERGE: Small isolated pieces consolidate ===
+    for (const [x, y] of cells) {
+        const i = idx(x, y);
+        const d = next[i];
+        if (d < 0.2 || d > 0.6) continue; // Only 0.5 cells
+
+        const neighbors = countNeighbors(x, y, next);
+        if (neighbors >= 2) continue; // Not isolated enough
+
+        // Try to merge with a neighbor
+        for (const [dx, dy] of [[0,1],[1,0],[-1,0],[0,-1]]) {
+            const ny = y + dy;
+            if (ny < 0 || ny >= H) continue;
+            const ni = idx(x + dx, ny);
+            const nd = next[ni];
+            if (nd >= 0.4 && nd <= 0.6) {
+                // Both are 0.5 - merge into 1.0
+                next[ni] = 1.0;
+                next[ni + 1] = (next[i + 1] + next[ni + 1]) / 2;
+                next[i] = 0;
+                next[i + 1] = 0;
+                break;
+            }
+        }
+    }
+
+    // === GRAVITY: All wax falls into empty space below ===
+    shuffle(cells);
+    for (const [x, y] of cells) {
+        const i = idx(x, y);
+        const d = next[i];
+
+        if (d < 0.2) continue;
+        if (y >= H - 1) continue;
+
+        const below = idx(x, y + 1);
+        if (next[below] > 0.1) continue; // Need empty space
+
+        // Cohesion check
+        const neighborsNow = countNeighbors(x, y, next);
+        if (neighborsNow === 0) continue;
+
+        next[i] = 0;
+        next[below] = d;
+        const neighborsAfter = countNeighbors(x, y + 1, next);
+
+        if (neighborsAfter === 0) {
+            next[i] = d;
+            next[below] = 0;
+            continue;
+        }
+        next[below + 1] = next[i + 1];
+        next[i + 1] = 0;
+    }
+
+    // === COHESION: Isolated cells rejoin nearest wax ===
+    shuffle(cells);
+    for (const [x, y] of cells) {
+        const i = idx(x, y);
+        const d = next[i];
+        if (d < 0.2) continue;
+
+        const neighbors = countNeighbors(x, y, next);
+        if (neighbors > 0) continue; // Not isolated
+
+        // Find direction to nearest wax
+        let bestDir = null, bestDist = 999;
+        for (let r = 1; r <= 5; r++) {
+            for (const [dx, dy] of [[-1,0],[1,0],[0,-1],[0,1]]) {
+                const nx = x + dx * r;
+                const ny = y + dy * r;
+                if (ny < 0 || ny >= H) continue;
+                if (Dn(nx, ny, next) > 0.2) {
+                    if (r < bestDist) {
+                        bestDist = r;
+                        bestDir = [dx, dy];
+                    }
+                }
+            }
+            if (bestDir) break;
+        }
+
+        if (bestDir) {
+            const [dx, dy] = bestDir;
+            const ni = idx(x + dx, y + dy);
+            if (y + dy >= 0 && y + dy < H && next[ni] < 0.1) {
+                // Move toward wax
+                next[ni] = d;
+                next[ni + 1] = next[i + 1];
+                next[i] = 0;
+                next[i + 1] = 0;
+            }
+        }
+    }
+
+    grid = next;
+}
+
+function shuffle(arr) {
+    for (let i = arr.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [arr[i], arr[j]] = [arr[j], arr[i]];
+    }
+}
+
+function render() {
+    ctx.fillStyle = '#0a0a12';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    for (let y = 0; y < H; y++) {
+        for (let x = 0; x < W; x++) {
+            const d = grid[idx(x, y)];
+            if (d < 0.1) continue;
+            const t = grid[idx(x, y) + 1];
+
+            let r, g, b;
+            if (t < 0.35) {
+                r = 50 + 120 * (t / 0.35);
+                g = 20 + 40 * (t / 0.35);
+                b = 80 - 40 * (t / 0.35);
+            } else if (t < 0.65) {
+                const f = (t - 0.35) / 0.3;
+                r = 170 + 60 * f;
+                g = 60 + 80 * f;
+                b = 40 - 20 * f;
+            } else {
+                const f = (t - 0.65) / 0.35;
+                r = 230 + 25 * f;
+                g = 140 + 115 * f;
+                b = 20 + 100 * f;
+            }
+
+            // 0.5 = slightly transparent, 1.0 = solid
+            const alpha = d > 0.7 ? 1.0 : 0.75;
+            ctx.fillStyle = `rgba(${r|0},${g|0},${b|0},${alpha})`;
+            ctx.fillRect(x * CELL, y * CELL, CELL, CELL);
+        }
+    }
+
+    ctx.fillStyle = 'rgba(255,80,0,0.6)';
+    ctx.fillRect(0, (H-1) * CELL, W * CELL, 2);
+}
+
+function loop() {
+    if (!paused) for (let i = 0; i < ff; i++) tick();
+    render();
+
+    const mass = getMass();
+    document.getElementById('stats').innerHTML =
+        `Tick: ${frame} | Mass: ${mass.toFixed(1)}/${initialMass.toFixed(1)}`;
+
+    requestAnimationFrame(loop);
+}
+
+document.getElementById('ff').onclick = () => {
+    ff = ff === 1 ? 5 : ff === 5 ? 25 : ff === 25 ? 100 : 1;
+    document.getElementById('ff').textContent = ff + 'x';
+};
+document.getElementById('pp').onclick = () => {
+    paused = !paused;
+    document.getElementById('pp').textContent = paused ? '▶' : '||';
+};
+document.getElementById('rr').onclick = reset;
+addEventListener('resize', resize);
+addEventListener('keydown', e => {
+    if (e.code === 'Space') { paused = !paused; e.preventDefault(); }
+    if (e.code === 'KeyR') reset();
+});
+
+resize();
+loop();
+</script>
+</body>
+</html>

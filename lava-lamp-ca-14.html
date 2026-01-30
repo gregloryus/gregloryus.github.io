@@ -1,0 +1,1004 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Lava Lamp CA v14 - Surface Tension</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        html,
+        body {
+            height: 100%;
+            overflow: hidden;
+            background: #0a0a12;
+        }
+
+        #canvas {
+            display: block;
+            image-rendering: pixelated;
+            width: 100%;
+            height: 100%;
+        }
+
+        #ui {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            color: #fff;
+            font: 10px monospace;
+            background: rgba(0, 0, 0, 0.85);
+            padding: 8px;
+            border-radius: 4px;
+            max-height: 90vh;
+            overflow-y: auto;
+            min-width: 200px;
+        }
+
+        #ui .param-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin: 4px 0;
+        }
+
+        #ui label {
+            display: inline-block;
+            width: 110px;
+        }
+
+        #ui input[type="number"] {
+            width: 70px;
+            background: #222;
+            color: #fff;
+            border: 1px solid #444;
+            font-size: 11px;
+            padding: 2px 4px;
+        }
+
+        #ui .range-hint {
+            color: #666;
+            font-size: 9px;
+            margin-left: 6px;
+        }
+
+        #ui .section {
+            color: #888;
+            margin-top: 8px;
+            border-top: 1px solid #333;
+            padding-top: 4px;
+        }
+
+        #controls {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+        }
+
+        #controls button {
+            padding: 8px 14px;
+            margin: 2px;
+            background: #222;
+            color: #fff;
+            border: 1px solid #555;
+            cursor: pointer;
+            font: 12px monospace;
+        }
+
+        #stats {
+            position: absolute;
+            bottom: 10px;
+            left: 10px;
+            color: #fff;
+            font: 11px monospace;
+            background: rgba(0, 0, 0, 0.8);
+            padding: 8px;
+            border-radius: 4px;
+        }
+    </style>
+</head>
+
+<body>
+    <canvas id="canvas"></canvas>
+    <div id="ui">
+        <div><b>Lava Lamp CA v14</b></div>
+        <div id="params"></div>
+    </div>
+    <div id="controls">
+        <button id="toggleParams">Hide</button>
+        <button id="ff">1x</button>
+        <button id="pp">||</button>
+        <button id="heat">Heat ON</button>
+        <button id="reset">Reset</button>
+    </div>
+    <div id="stats">Initializing WebGPU...</div>
+
+    <script type="module">
+        // ============================================
+        // LAVA LAMP CA v14 - Surface Tension & Diagonals
+        // ============================================
+
+        const PARAMS = {
+            heatRate: 0.08,
+            heatSpread: 0.05,
+            coolRate: 0.005,
+            radiantHeatRate: 0.002,
+            heatSourceWidth: 0.8,
+            buoyancyScale: 0.5,
+            velocityDamping: 0.95,
+            velocityThreshold: 0.001,
+            moveChanceScale: 1.0,
+            alignment: 0.2,
+            cohesion: 2.0,
+            cohesionRadius: 6,
+            surfaceTension: 0.05, // Used for force
+            surfaceEnergy: 2.0,   // New: Used for swap penalty
+            brownianStrength: 0.1,
+            horizontalBias: 0.8,
+            initialWaxHeight: 0.12,
+            cellSize: 5,
+        };
+
+        const PARAM_CONFIG = {
+            heatRate: { section: 'Heat', min: 0.001, max: 0.05, step: 0.001 },
+            heatSpread: { min: 0.01, max: 0.3, step: 0.01 },
+            coolRate: { min: 0.001, max: 0.02, step: 0.001 },
+            radiantHeatRate: { min: 0.000, max: 0.01, step: 0.0001 },
+            heatSourceWidth: { min: 0.1, max: 1.0, step: 0.1 },
+            buoyancyScale: { section: 'Movement', min: 0.01, max: 0.5, step: 0.01 },
+            velocityDamping: { min: 0.5, max: 0.99, step: 0.01 },
+            velocityThreshold: { min: 0.05, max: 0.5, step: 0.01 },
+            moveChanceScale: { min: 0.05, max: 1.0, step: 0.05 },
+            alignment: { section: 'Boids Forces', min: 0, max: 0.9, step: 0.05 },
+            cohesion: { min: 0, max: 1.0, step: 0.05 },
+            cohesionRadius: { min: 1, max: 12, step: 1, round: true },
+            surfaceTension: { section: 'Surface', min: 0, max: 0.2, step: 0.01 },
+            surfaceEnergy: { min: 0, max: 10.0, step: 0.1 },
+            brownianStrength: { section: 'Brownian', min: 0, max: 0.2, step: 0.01 },
+            horizontalBias: { min: 0, max: 1, step: 0.1 },
+            initialWaxHeight: { section: 'Setup', min: 0.05, max: 0.3, step: 0.01 },
+            cellSize: { min: 1, max: 10, step: 1, round: true }
+        };
+
+        // WGSL Shaders
+        const SHADER_CODE = `
+struct Params {
+    width: u32,
+    height: u32,
+    frame: u32,
+    heatOn: u32,
+    
+    heatRate: f32,
+    heatSpread: f32,
+    coolRate: f32,
+    radiantHeatRate: f32,
+    heatSourceWidth: f32,
+    
+    buoyancyScale: f32,
+    velocityDamping: f32,
+    velocityThreshold: f32,
+    moveChanceScale: f32,
+    
+    alignment: f32,
+    cohesion: f32,
+    cohesionRadius: f32,
+    surfaceTension: f32,
+    
+    brownianStrength: f32,
+    horizontalBias: f32,
+    seed: f32,
+    surfaceEnergy: f32, 
+}
+
+struct Cell {
+    units: u32,
+    temp: f32,
+    velX: f32,
+    velY: f32,
+}
+
+@group(0) @binding(0) var<uniform> params: Params;
+@group(0) @binding(1) var<storage, read_write> cellsIn: array<Cell>;
+@group(0) @binding(2) var<storage, read_write> cellsOut: array<Cell>;
+
+// Helper: Pseudo-random generator
+fn rand(co: vec2f) -> f32 {
+    return fract(sin(dot(co, vec2f(12.9898, 78.233))) * 43758.5453);
+}
+
+fn rand_seed(idx: u32, seed: f32) -> f32 {
+    return fract(sin(f32(idx) * 0.123 + seed) * 43758.5453);
+}
+
+fn get_capacity(t: f32) -> u32 {
+    if (t >= 0.5) { return 6u; }
+    if (t >= 0.25) { return 7u; }
+    return 8u;
+}
+
+fn idx(x: i32, y: i32) -> u32 {
+    let w = i32(params.width);
+    let h = i32(params.height);
+    let cx = clamp(x, 0, w - 1);
+    let cy = clamp(y, 0, h - 1);
+    return u32(cy * w + cx);
+}
+
+fn occ(i: u32) -> f32 {
+    return select(0.0, 1.0, cellsIn[i].units > 0u);
+}
+
+fn occ4(x: i32, y: i32) -> vec4f {
+    let oL = occ(idx(x-1, y));
+    let oR = occ(idx(x+1, y));
+    let oU = occ(idx(x, y-1));
+    let oD = occ(idx(x, y+1));
+    return vec4f(oL, oR, oU, oD);
+}
+
+fn grad_occ(x: i32, y: i32) -> vec2f {
+    let o = occ4(x, y);
+    // x: right-left, y: down-up (y+1 is down in index, so D-U is positive y change)
+    return vec2f(o.y - o.x, o.w - o.z);
+}
+
+fn normal_occ(x: i32, y: i32) -> vec2f {
+    let g = grad_occ(x, y);
+    let len = max(1e-5, length(g));
+    return g / len;
+}
+
+fn curvature(x: i32, y: i32) -> f32 {
+    let nC = normal_occ(x, y);
+    let nL = normal_occ(x-1, y);
+    let nR = normal_occ(x+1, y);
+    let nU = normal_occ(x, y-1);
+    let nD = normal_occ(x, y+1);
+
+    // divergence: dnx/dx + dny/dy
+    let dnx = (nR.x - nL.x) * 0.5;
+    let dny = (nD.y - nU.y) * 0.5;
+    return dnx + dny;
+}
+
+// ==========================================================
+// COMPUTE SHADER 1: PHYSICS (Temp, Forces)
+// ==========================================================
+@compute @workgroup_size(16, 16)
+fn updatePhysics(@builtin(global_invocation_id) global_id: vec3u) {
+    let x = i32(global_id.x);
+    let y = i32(global_id.y);
+    let w = i32(params.width);
+    let h = i32(params.height);
+    
+    if (x >= w || y >= h) { return; }
+    
+    let i = idx(x, y);
+    var cell = cellsIn[i];
+    
+    cellsOut[i] = cell; 
+    
+    if (cell.units == 0u) {
+        cellsOut[i].temp = 0.0;
+        cellsOut[i].velX = 0.0;
+        cellsOut[i].velY = 0.0;
+        return;
+    }
+
+    // --- Temperature Update ---
+    var t = cell.temp;
+    
+    if (params.heatOn == 1u && y >= h - 3) {
+        let centerDist = abs(f32(x) / f32(w) - 0.5);
+        if (centerDist < params.heatSourceWidth * 0.5) {
+            let intensity = 1.0 - centerDist / (params.heatSourceWidth * 0.5);
+            t += params.heatRate * intensity;
+        }
+    }
+    
+    if (y <= 3) {
+        t -= params.coolRate * 2.0;
+    }
+    
+    if (params.radiantHeatRate > 0.0) {
+        let relativeY = f32(y) / f32(h);
+        let radiantFactor = (relativeY - 0.5) * 2.0;
+        t += radiantFactor * params.radiantHeatRate;
+    }
+    
+    var tempSum = 0.0;
+    var waxNeighbors = 0.0;
+    
+    for (var dy = -1; dy <= 1; dy++) {
+        for (var dx = -1; dx <= 1; dx++) {
+            if (dx == 0 && dy == 0) { continue; }
+            let ni = idx(x + dx, y + dy);
+            if (cellsIn[ni].units > 0u) {
+                tempSum += cellsIn[ni].temp;
+                waxNeighbors += 1.0;
+            }
+        }
+    }
+    
+    if (waxNeighbors > 0.0) {
+        let avgTemp = tempSum / waxNeighbors;
+        t += (avgTemp - t) * params.heatSpread;
+    }
+    
+    t = clamp(t, 0.0, 1.0);
+    cellsOut[i].temp = t;
+
+    // --- Buoyancy & Cohesion ---
+    let capacity = get_capacity(t);
+    let buoyancy = f32(cell.units) * (7.0 - f32(capacity)) * params.buoyancyScale;
+    
+    var vy = cell.velY - buoyancy; // Negative up
+    var vx = cell.velX;
+    
+    // Surface Tension Force (Curvature)
+    let o = occ4(x, y);
+    let neighborSum = o.x + o.y + o.z + o.w;
+    let isInterface = (neighborSum < 4.0);
+
+    if (isInterface) {
+        let n = normal_occ(x, y);
+        let k = curvature(x, y);
+        let sigma = params.surfaceTension;
+
+        let fx = -sigma * k * n.x;
+        let fy = -sigma * k * n.y;
+
+        vx += fx;
+        vy += fy;
+    }
+
+    var vySum = 0.0;
+    var vxSum = 0.0;
+    var centerOffsetY = 0.0;
+    var centerOffsetX = 0.0;
+    var cohNeighbors = 0.0;
+    let r = i32(params.cohesionRadius);
+            
+    for (var dy = -r; dy <= r; dy++) {
+        for (var dx = -r; dx <= r; dx++) {
+            if (dx == 0 && dy == 0) { continue; }
+            if (f32(dx*dx + dy*dy) > params.cohesionRadius * params.cohesionRadius) { continue; }
+            
+            let nx = x + dx;
+            let ny = y + dy;
+            if (nx < 0 || nx >= w || ny < 0 || ny >= h) { continue; }
+            
+            let ni = idx(nx, ny);
+            if (cellsIn[ni].units > 0u) {
+                let dist = sqrt(f32(dx*dx + dy*dy));
+                let weight = 1.0 / dist;
+                
+                vySum += cellsIn[ni].velY * weight;
+                vxSum += cellsIn[ni].velX * weight;
+                centerOffsetY += f32(dy) * weight;
+                centerOffsetX += f32(dx) * weight;
+                cohNeighbors += 1.0;
+            }
+        }
+    }
+    
+    if (cohNeighbors > 0.0) {
+        if (params.alignment > 0.0) {
+            let avgVy = vySum / cohNeighbors;
+            let avgVx = vxSum / cohNeighbors;
+            vy = vy * (1.0 - params.alignment) + avgVy * params.alignment;
+            vx = vx * (1.0 - params.alignment) + avgVx * params.alignment;
+        }
+        
+        let invN = 1.0 / cohNeighbors;
+        vy += (centerOffsetY * invN) * params.cohesion;
+        vx += (centerOffsetX * invN) * params.cohesion;
+    }
+    
+    vy *= params.velocityDamping;
+    vx *= params.velocityDamping;
+    
+    let seed = params.seed + f32(i) * 0.1;
+    let r1 = rand_seed(u32(i), seed);
+    let r2 = rand_seed(u32(i) + 1u, seed);
+    
+    var noiseY = (r1 - 0.5) * 2.0 * params.brownianStrength * (1.0 - params.horizontalBias);
+    var noiseX = (r2 - 0.5) * 2.0 * params.brownianStrength * (1.0 + params.horizontalBias);
+    
+    if (abs(vy) > 0.05) {
+        noiseX += (rand_seed(u32(i) + 2u, seed) - 0.5) * abs(vy) * 0.2;
+    }
+
+    vy += noiseY;
+    vx += noiseX;
+    
+    cellsOut[i].velY = vy;
+    cellsOut[i].velX = vx;
+}
+
+// ==========================================================
+// COMPUTE SHADER 2: MOVEMENT (Swapping)
+// ==========================================================
+struct MoveParams {
+    passType: u32,
+}
+@group(0) @binding(3) var<uniform> moveParams: MoveParams;
+
+fn isWax(units: u32) -> i32 { return select(0, 1, units > 0u); }
+
+// Helper to get wax state of a neighbor, accounting for the hypothetical swap
+fn wax_at(x: i32, y: i32, 
+          swapping1: u32, val1: i32, 
+          swapping2: u32, val2: i32) -> i32 {
+    let ii = idx(x, y);
+    if (ii == swapping1) { return val1; }
+    if (ii == swapping2) { return val2; }
+    return isWax(cellsOut[ii].units);
+}
+
+fn local_energy(x: i32, y: i32, 
+                i1: u32, v1: i32, 
+                i2: u32, v2: i32) -> i32 {
+    
+    // We want the number of unlike neighbors (wax vs empty)
+    // For cell (x,y), its value is determined by wax_at logic
+    // But we are calling this FOR (x,y). So we know its value is v1 or v2 if it is i1 or i2.
+    // If we call local_energy for i1, 'val' is v1.
+    
+    var centerVal = 0;
+    if (idx(x,y) == i1) { centerVal = v1; }
+    else { centerVal = v2; }
+    
+    let wL = wax_at(x-1, y, i1, v1, i2, v2);
+    let wR = wax_at(x+1, y, i1, v1, i2, v2);
+    let wU = wax_at(x, y-1, i1, v1, i2, v2);
+    let wD = wax_at(x, y+1, i1, v1, i2, v2);
+    
+    return abs(centerVal - wL) + abs(centerVal - wR) + abs(centerVal - wU) + abs(centerVal - wD);
+}
+
+@compute @workgroup_size(16, 16)
+fn updateMovement(@builtin(global_invocation_id) global_id: vec3u) {
+    let x = i32(global_id.x);
+    let y = i32(global_id.y);
+    let w = i32(params.width);
+    let h = i32(params.height);
+    
+    if (x >= w || y >= h) { return; }
+    
+    var tx = x;
+    var ty = y;
+    
+    // 8 Passes:
+    // 0: Vert Even
+    // 1: Vert Odd
+    // 2: Horiz Even
+    // 3: Horiz Odd
+    // 4: Diag R Even (x%2==0 -> x+1, y+1)
+    // 5: Diag R Odd  (x%2==1 -> x+1, y+1)
+    // 6: Diag L Even (x%2==0 -> x-1, y+1)
+    // 7: Diag L Odd  (x%2==1 -> x-1, y+1)
+
+    let pt = moveParams.passType;
+
+    if (pt == 0u) { if ((y % 2) == 0) { ty = y + 1; } }
+    else if (pt == 1u) { if ((y % 2) == 1) { ty = y + 1; } }
+    else if (pt == 2u) { if ((x % 2) == 0) { tx = x + 1; } }
+    else if (pt == 3u) { if ((x % 2) == 1) { tx = x + 1; } }
+    else if (pt == 4u) { if ((x % 2) == 0) { tx = x + 1; ty = y + 1; } }
+    else if (pt == 5u) { if ((x % 2) == 1) { tx = x + 1; ty = y + 1; } }
+    else if (pt == 6u) { if ((x % 2) == 0) { tx = x - 1; ty = y + 1; } }
+    else if (pt == 7u) { if ((x % 2) == 1) { tx = x - 1; ty = y + 1; } }
+    
+    if (tx < 0 || tx >= w || ty < 0 || ty >= h) { return; }
+    if (tx == x && ty == y) { return; } // Not an initiator in this pass
+    
+    let i1 = idx(x, y);
+    let i2 = idx(tx, ty);
+    
+    var c1 = cellsOut[i1];
+    var c2 = cellsOut[i2];
+    
+    // Swap Decision
+    var swap = false;
+    var desire = 0.0;
+    
+    // Threshold
+    let thresh = params.velocityThreshold;
+    
+    // Direction Vector (x->tx, y->ty)
+    let dx = f32(tx - x);
+    let dy = f32(ty - y);
+    // Normalize? No, dx/dy are -1, 0, 1.
+    
+    // Check flow: c1 -> c2
+    if (c1.units > 0u) {
+        // Dot product of velocity and direction
+        // Proj = vx*dx + vy*dy. If > thresh, good.
+        // For diagonals, distance is sqrt(2).
+        // Let's simpler logic:
+        let vProj = c1.velX * dx + c1.velY * dy;
+        // if dx,dy is (1,1), vProj needs to be > thresh * 1.41?
+        // Or just > thresh.
+        if (vProj > thresh) { desire += vProj; }
+    }
+    
+    // Check flow: c2 -> c1 (opposite direction)
+    // Dir is -dx, -dy.
+    if (c2.units > 0u) {
+        let vProj = c2.velX * (-dx) + c2.velY * (-dy);
+        if (vProj > thresh) { desire += vProj; }
+    }
+    
+    if (desire > 0.0) {
+        var chance = min(1.0, desire * params.moveChanceScale);
+        
+        // --- Surface Energy Check ---
+        if (params.surfaceEnergy > 0.0) {
+            let w1 = isWax(c1.units);
+            let w2 = isWax(c2.units);
+            
+            if (w1 != w2) {
+                // Calculate E_before
+                let E_before = local_energy(x, y, i1, w1, i2, w2) + 
+                               local_energy(tx, ty, i1, w1, i2, w2);
+                               
+                // Calculate E_after (swapped)
+                let E_after = local_energy(x, y, i1, w2, i2, w1) + 
+                              local_energy(tx, ty, i1, w2, i2, w1);
+                              
+                let dE = f32(E_after - E_before);
+                
+                // Penalize dE > 0 (bad), reward dE < 0 (good)
+                // chance *= exp(-k * dE)
+                chance *= exp(-params.surfaceEnergy * dE);
+            }
+        }
+        
+        chance = clamp(chance, 0.0, 1.0);
+        
+        if (rand_seed(u32(i1) + params.frame + u32(pt)*10u, params.seed) < chance) {
+            swap = true;
+        }
+    }
+    
+    if (swap) {
+        let tempC = c1;
+        
+        c1 = c2;
+        c1.velX *= 0.95; c1.velY *= 0.95;
+        
+        c2 = tempC;
+        c2.velX *= 0.95; c2.velY *= 0.95;
+        
+        cellsOut[i1] = c1;
+        cellsOut[i2] = c2;
+    }
+}
+
+// ==========================================================
+// RENDER SHADER
+// ==========================================================
+struct VertexOutput {
+    @builtin(position) position: vec4f,
+    @location(0) uv: vec2f,
+}
+
+@vertex
+fn vs_main(@builtin(vertex_index) vertexIndex: u32) -> VertexOutput {
+    var pos = array<vec2f, 6>(
+        vec2f(-1.0, -1.0), vec2f(1.0, -1.0), vec2f(-1.0, 1.0),
+        vec2f(-1.0, 1.0), vec2f(1.0, -1.0), vec2f(1.0, 1.0)
+    );
+    var output: VertexOutput;
+    output.position = vec4f(pos[vertexIndex], 0.0, 1.0);
+    output.uv = pos[vertexIndex] * 0.5 + 0.5;
+    output.uv.y = 1.0 - output.uv.y; 
+    return output;
+}
+
+@fragment
+fn fs_main(@location(0) uv: vec2f) -> @location(0) vec4f {
+    let w = i32(params.width);
+    let h = i32(params.height);
+    let x = i32(uv.x * f32(w));
+    let y = i32(uv.y * f32(h)); 
+    
+    let i = idx(x, y);
+    let cell = cellsOut[i];
+    
+    if (cell.units == 0u) {
+        return vec4f(0.04, 0.04, 0.07, 1.0); 
+    }
+    
+    let t = cell.temp;
+    var color: vec3f;
+    
+    if (t < 0.33) {
+        let f = t / 0.33;
+        color = vec3f(0.24 + 0.39*f, 0.08 + 0.2*f, 0.47 - 0.16*f);
+    } else if (t < 0.66) {
+        let f = (t - 0.33) / 0.33;
+        color = vec3f(0.63 + 0.27*f, 0.27 + 0.27*f, 0.31 - 0.24*f);
+    } else {
+        let f = (t - 0.66) / 0.34;
+        color = vec3f(0.9 + 0.1*f, 0.55 + 0.39*f, 0.08 + 0.24*f);
+    }
+    
+    let brightness = 0.5 + (f32(cell.units) / 8.0) * 0.5;
+    return vec4f(color * brightness, 1.0);
+}
+`;
+
+        // Main Application
+        let device, context;
+        let pipelinePhysics, pipelineMove;
+        let renderPipeline;
+        let bindGroupA, bindGroupB;
+        let paramsBuffer, moveParamsBuffer;
+        let bufferA, bufferB;
+        let bindGroupLayout0; 
+
+        let W, H;
+        let frame = 0;
+        let heatOn = 1;
+        let paused = false;
+        let ff = 1;
+
+        async function init() {
+            if (!navigator.gpu) {
+                document.getElementById('stats').innerHTML = "WebGPU not supported on this browser.";
+                return;
+            }
+
+            const adapter = await navigator.gpu.requestAdapter();
+            device = await adapter.requestDevice();
+            const canvas = document.getElementById('canvas');
+            context = canvas.getContext('webgpu');
+            const presentationFormat = navigator.gpu.getPreferredCanvasFormat();
+            context.configure({
+                device,
+                format: presentationFormat,
+                alphaMode: 'premultiplied',
+            });
+
+            resize();
+            window.addEventListener('resize', resize);
+            setupUI();
+            loop();
+        }
+
+        function resize() {
+            const canvas = document.getElementById('canvas');
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+
+            W = Math.floor(canvas.width / PARAMS.cellSize);
+            H = Math.floor(canvas.height / PARAMS.cellSize);
+
+            initSimulation();
+        }
+
+        function initSimulation() {
+            frame = 0;
+            window.bgMoveA = null;
+            window.bgMoveB = null;
+
+            const size = W * H;
+            const cellStride = 16; 
+            const bufferSize = size * cellStride;
+
+            const initialData = new ArrayBuffer(bufferSize);
+            const dataView = new DataView(initialData);
+            const waxTop = H - Math.floor(H * PARAMS.initialWaxHeight);
+
+            for (let y = 0; y < H; y++) {
+                for (let x = 0; x < W; x++) {
+                    const i = y * W + x;
+                    const offset = i * 16;
+
+                    let units = 0;
+                    let temp = 0;
+
+                    if (y >= waxTop) {
+                        const surfaceNoise = Math.sin(x * 0.15) * 3 + Math.random() * 2;
+                        if (y >= waxTop + surfaceNoise) {
+                            units = 8;
+                            temp = 0.1 + Math.random() * 0.05;
+                        }
+                    }
+
+                    dataView.setUint32(offset, units, true);     
+                    dataView.setFloat32(offset + 4, temp, true); 
+                    dataView.setFloat32(offset + 8, 0, true);    
+                    dataView.setFloat32(offset + 12, 0, true);   
+                }
+            }
+
+            bufferA = device.createBuffer({
+                size: bufferSize,
+                usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST | GPUBufferUsage.COPY_SRC,
+                mappedAtCreation: true
+            });
+            new Uint8Array(bufferA.getMappedRange()).set(new Uint8Array(initialData));
+            bufferA.unmap();
+
+            bufferB = device.createBuffer({
+                size: bufferSize,
+                usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST | GPUBufferUsage.COPY_SRC
+            });
+            const commandEncoder = device.createCommandEncoder();
+            commandEncoder.copyBufferToBuffer(bufferA, 0, bufferB, 0, bufferSize);
+            device.queue.submit([commandEncoder.finish()]);
+
+            paramsBuffer = device.createBuffer({
+                size: 128, 
+                usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST
+            });
+
+            moveParamsBuffer = device.createBuffer({
+                size: 2048, // 8 passes * 256 stride
+                usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST
+            });
+
+            {
+                const moveData = new ArrayBuffer(2048);
+                const moveView = new DataView(moveData);
+                for(let i=0; i<8; i++) {
+                    moveView.setUint32(i * 256, i, true);
+                }
+                device.queue.writeBuffer(moveParamsBuffer, 0, moveData);
+            }
+
+            bindGroupLayout0 = device.createBindGroupLayout({
+                entries: [
+                    { binding: 0, visibility: GPUShaderStage.COMPUTE | GPUShaderStage.FRAGMENT, buffer: { type: 'uniform' } }, 
+                    { binding: 1, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'storage' } }, 
+                    { binding: 2, visibility: GPUShaderStage.COMPUTE | GPUShaderStage.FRAGMENT, buffer: { type: 'storage' } }, 
+                    { binding: 3, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'uniform', hasDynamicOffset: true, minBindingSize: 16 } }  
+                ]
+            });
+
+            const module = device.createShaderModule({ code: SHADER_CODE });
+
+            const pipelineLayout = device.createPipelineLayout({ bindGroupLayouts: [bindGroupLayout0] });
+
+            pipelinePhysics = device.createComputePipeline({
+                layout: pipelineLayout,
+                compute: { module, entryPoint: 'updatePhysics' }
+            });
+
+            pipelineMove = device.createComputePipeline({
+                layout: pipelineLayout,
+                compute: { module, entryPoint: 'updateMovement' }
+            });
+
+            renderPipeline = device.createRenderPipeline({
+                layout: pipelineLayout,
+                vertex: { module, entryPoint: 'vs_main' },
+                fragment: {
+                    module,
+                    entryPoint: 'fs_main',
+                    targets: [{ format: navigator.gpu.getPreferredCanvasFormat() }]
+                },
+                primitive: { topology: 'triangle-list' }
+            });
+
+            bindGroupA = device.createBindGroup({
+                layout: bindGroupLayout0,
+                entries: [
+                    { binding: 0, resource: { buffer: paramsBuffer } },
+                    { binding: 1, resource: { buffer: bufferA } },
+                    { binding: 2, resource: { buffer: bufferB } },
+                    { binding: 3, resource: { buffer: moveParamsBuffer, size: 16 } } 
+                ]
+            });
+
+            bindGroupB = device.createBindGroup({
+                layout: bindGroupLayout0,
+                entries: [
+                    { binding: 0, resource: { buffer: paramsBuffer } },
+                    { binding: 1, resource: { buffer: bufferB } },
+                    { binding: 2, resource: { buffer: bufferA } },
+                    { binding: 3, resource: { buffer: moveParamsBuffer, size: 16 } } 
+                ]
+            });
+        }
+
+        function updateParams() {
+            const data = new ArrayBuffer(128);
+            const view = new DataView(data);
+
+            view.setUint32(0, W, true);
+            view.setUint32(4, H, true);
+            view.setUint32(8, frame, true);
+            view.setUint32(12, heatOn, true);
+
+            view.setFloat32(16, PARAMS.heatRate, true);
+            view.setFloat32(20, PARAMS.heatSpread, true);
+            view.setFloat32(24, PARAMS.coolRate, true);
+            view.setFloat32(28, PARAMS.radiantHeatRate, true);
+            view.setFloat32(32, PARAMS.heatSourceWidth, true);
+
+            view.setFloat32(36, PARAMS.buoyancyScale, true);
+            view.setFloat32(40, PARAMS.velocityDamping, true);
+            view.setFloat32(44, PARAMS.velocityThreshold, true);
+            view.setFloat32(48, PARAMS.moveChanceScale, true);
+
+            view.setFloat32(52, PARAMS.alignment, true);
+            view.setFloat32(56, PARAMS.cohesion, true);
+            view.setFloat32(60, PARAMS.cohesionRadius, true);
+            view.setFloat32(64, PARAMS.surfaceTension, true);
+
+            view.setFloat32(68, PARAMS.brownianStrength, true);
+            view.setFloat32(72, PARAMS.horizontalBias, true);
+            view.setFloat32(76, Math.random() * 1000, true); 
+            view.setFloat32(80, PARAMS.surfaceEnergy, true); 
+
+            device.queue.writeBuffer(paramsBuffer, 0, data);
+        }
+
+        function tick(commandEncoder) {
+            frame++;
+            updateParams();
+
+            let sourceGroup = (frame % 2 === 0) ? bindGroupB : bindGroupA; 
+            let targetGroup = (frame % 2 === 0) ? bindGroupA : bindGroupB; 
+
+            // Physics Pass
+            const pass1 = commandEncoder.beginComputePass();
+            pass1.setPipeline(pipelinePhysics);
+            pass1.setBindGroup(0, targetGroup, [0]); 
+
+            pass1.dispatchWorkgroups(Math.ceil(W / 16), Math.ceil(H / 16));
+            pass1.end();
+
+            // Movement Passes
+            let moveGroup;
+            const destBuffer = (frame % 2 === 0) ? bufferA : bufferB;
+
+            if (!window.bgMoveA) {
+                window.bgMoveA = device.createBindGroup({
+                    layout: bindGroupLayout0,
+                    entries: [
+                        { binding: 0, resource: { buffer: paramsBuffer } },
+                        { binding: 1, resource: { buffer: bufferB } }, 
+                        { binding: 2, resource: { buffer: bufferA } }, 
+                        { binding: 3, resource: { buffer: moveParamsBuffer, size: 16 } } 
+                    ]
+                });
+                window.bgMoveB = device.createBindGroup({
+                    layout: bindGroupLayout0,
+                    entries: [
+                        { binding: 0, resource: { buffer: paramsBuffer } },
+                        { binding: 1, resource: { buffer: bufferA } }, 
+                        { binding: 2, resource: { buffer: bufferB } }, 
+                        { binding: 3, resource: { buffer: moveParamsBuffer, size: 16 } } 
+                    ]
+                });
+            }
+
+            moveGroup = (frame % 2 === 0) ? window.bgMoveB : window.bgMoveA;
+
+            for (let p = 0; p < 8; p++) {
+                const pass = commandEncoder.beginComputePass();
+                pass.setPipeline(pipelineMove);
+                pass.setBindGroup(0, moveGroup, [p * 256]);
+                pass.dispatchWorkgroups(Math.ceil(W / 16), Math.ceil(H / 16));
+                pass.end();
+            }
+        }
+
+        function loop() {
+            if (!device) return;
+
+            const commandEncoder = device.createCommandEncoder();
+
+            if (!paused) {
+                for (let i = 0; i < ff; i++) {
+                    tick(commandEncoder);
+                }
+            }
+
+            const textureView = context.getCurrentTexture().createView();
+            const renderPass = commandEncoder.beginRenderPass({
+                colorAttachments: [{
+                    view: textureView,
+                    clearValue: { r: 0, g: 0, b: 0, a: 1 },
+                    loadOp: 'clear',
+                    storeOp: 'store',
+                }],
+            });
+
+            renderPass.setPipeline(renderPipeline);
+            let renderGroup = (frame % 2 === 0) ? bindGroupA : bindGroupB;
+            renderPass.setBindGroup(0, renderGroup, [0]); 
+
+            renderPass.draw(6);
+            renderPass.end();
+
+            device.queue.submit([commandEncoder.finish()]);
+            document.getElementById('stats').innerHTML = `Tick: ${frame} | Grid: ${W}x${H} | GPU`;
+
+            requestAnimationFrame(loop);
+        }
+
+        // UI Helpers
+        function setupUI() {
+            const paramsContainer = document.getElementById('params');
+            paramsContainer.innerHTML = '';
+
+            for (const key in PARAM_CONFIG) {
+                const config = PARAM_CONFIG[key];
+                if (config.section) {
+                    const section = document.createElement('div');
+                    section.className = 'section';
+                    section.textContent = config.section;
+                    paramsContainer.appendChild(section);
+                }
+
+                const div = document.createElement('div');
+                div.className = 'param-row';
+                const label = document.createElement('label');
+                label.textContent = key;
+
+                const inputsDiv = document.createElement('div');
+                inputsDiv.style.display = 'flex';
+                inputsDiv.style.alignItems = 'center';
+
+                const number = document.createElement('input');
+                number.type = 'number';
+                number.step = config.step;
+                number.value = PARAMS[key];
+
+                const rangeHint = document.createElement('span');
+                rangeHint.className = 'range-hint';
+                rangeHint.textContent = `(${config.min}-${config.max})`;
+
+                number.onchange = () => {
+                    let val = parseFloat(number.value);
+                    if (config.round) val = Math.round(val);
+                    PARAMS[key] = val;
+                    if (key === 'cellSize') resize();
+                    else if (key === 'initialWaxHeight') resize(); 
+                };
+
+                div.appendChild(label);
+                inputsDiv.appendChild(number);
+                inputsDiv.appendChild(rangeHint);
+                div.appendChild(inputsDiv);
+                paramsContainer.appendChild(div);
+            }
+        }
+
+        // Controls
+        document.getElementById('toggleParams').onclick = () => {
+            const p = document.getElementById('params');
+            p.style.display = p.style.display === 'none' ? '' : 'none';
+        };
+        document.getElementById('ff').onclick = () => {
+            ff = ff === 1 ? 10 : ff === 10 ? 100 : 1;
+            document.getElementById('ff').textContent = ff + 'x';
+        };
+        document.getElementById('pp').onclick = () => {
+            paused = !paused;
+            document.getElementById('pp').textContent = paused ? '▶' : '||';
+        };
+        document.getElementById('heat').onclick = () => {
+            heatOn = 1 - heatOn;
+            document.getElementById('heat').textContent = heatOn ? 'Heat ON' : 'Heat OFF';
+        };
+        document.getElementById('reset').onclick = () => initSimulation();
+
+        console.log("WebGPU System Initialized");
+        init();
+
+    </script>
+</body>
+
+</html>

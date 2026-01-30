@@ -1,0 +1,413 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Lava Lamp LBM v5</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        html, body { height: 100%; overflow: hidden; background: #0a0a12; }
+        #canvas { display: block; image-rendering: pixelated; }
+        #ui { position: absolute; top: 4px; left: 6px; color: #fff; font: 9px monospace; background: rgba(0,0,0,0.8); padding: 4px 6px; border-radius: 3px; }
+        #controls { position: absolute; top: 4px; right: 6px; display: flex; gap: 2px; }
+        #controls button { padding: 3px 8px; background: #222; color: #fff; border: 1px solid #555; cursor: pointer; font: 9px monospace; }
+        #params { position: absolute; top: 28px; left: 0; right: 0; color: #ccc; font: 7px monospace; background: rgba(0,0,0,0.9); padding: 4px 8px; display: flex; flex-wrap: wrap; gap: 2px 12px; align-items: center; }
+        #params label { display: flex; align-items: center; gap: 3px; white-space: nowrap; }
+        #params input[type="number"] { width: 45px; background: #222; color: #fff; border: 1px solid #444; padding: 1px 2px; font: 7px monospace; }
+        #params .section { color: #666; font-weight: bold; margin-left: 6px; }
+        #params .section:first-child { margin-left: 0; }
+        #toggleParams { padding: 3px 8px; background: #222; color: #fff; border: 1px solid #555; cursor: pointer; font: 9px monospace; }
+    </style>
+</head>
+<body>
+<canvas id="canvas"></canvas>
+<div id="ui">
+    <div>Lava Lamp LBM v5</div>
+    <div id="stats"></div>
+</div>
+<div id="controls">
+    <button id="ff">1x</button>
+    <button id="pp">||</button>
+    <button id="rr">Reset</button>
+    <button id="toggleParams">Params</button>
+</div>
+<div id="params">
+    <span class="section">LBM</span>
+    <label>TAU<input type="number" id="p_tau" step="0.05" value="0.8"></label>
+    <label>G<input type="number" id="p_g" step="0.5" value="-5.0"></label>
+    <span class="section">Density</span>
+    <label>Wax<input type="number" id="p_rhoWax" step="0.1" value="2.0"></label>
+    <label>Med<input type="number" id="p_rhoMed" step="0.05" value="0.1"></label>
+    <label>WaxH<input type="number" id="p_waxH" step="0.02" value="0.15"></label>
+    <span class="section">Forces</span>
+    <label>Buoy<input type="number" id="p_buoy" step="0.0005" value="0.003"></label>
+    <label>Grav<input type="number" id="p_grav" step="0.0001" value="0.0003"></label>
+    <label>NeutT<input type="number" id="p_neutralT" step="0.05" value="0.45"></label>
+    <span class="section">Temp</span>
+    <label>Heat<input type="number" id="p_heatR" step="0.001" value="0.008"></label>
+    <label>Cool<input type="number" id="p_coolR" step="0.0005" value="0.002"></label>
+    <label>Diff<input type="number" id="p_diffuse" step="0.01" value="0.08"></label>
+    <label>WaxT0<input type="number" id="p_initWaxT" step="0.05" value="0.3"></label>
+    <label>MedT0<input type="number" id="p_initMedT" step="0.05" value="0.5"></label>
+    <span class="section">Zones</span>
+    <label>HeatY<input type="number" id="p_heatZone" step="0.02" value="0.96"></label>
+    <label>HeatVFall<input type="number" id="p_heatVFall" step="0.5" value="1"></label>
+    <label>HeatHFall<input type="number" id="p_heatFall" step="0.5" value="1"></label>
+    <label>CoolY<input type="number" id="p_coolZone" step="0.02" value="0.2"></label>
+    <span class="section">Other</span>
+    <label>Noise<input type="number" id="p_noise" step="0.0005" value="0.001"></label>
+    <label>Cell<input type="number" id="p_cell" step="1" value="4"></label>
+</div>
+<script>
+// Lattice Boltzmann Method with Shan-Chen multi-phase
+// v5: All parameters exposed in UI
+
+// D2Q9 lattice velocities and weights
+const cx = [0, 1, 0, -1, 0, 1, -1, -1, 1];
+const cy = [0, 0, -1, 0, 1, -1, -1, 1, 1];
+const w = [4/9, 1/9, 1/9, 1/9, 1/9, 1/36, 1/36, 1/36, 1/36];
+const opposite = [0, 3, 4, 1, 2, 7, 8, 5, 6];
+
+// All parameters - will be read from UI
+let P = {};
+
+function readParams() {
+    P = {
+        CELL: parseFloat(document.getElementById('p_cell').value),
+        TAU: parseFloat(document.getElementById('p_tau').value),
+        G_INTERACTION: parseFloat(document.getElementById('p_g').value),
+        RHO_WAX: parseFloat(document.getElementById('p_rhoWax').value),
+        RHO_MEDIUM: parseFloat(document.getElementById('p_rhoMed').value),
+        WAX_HEIGHT_FRAC: parseFloat(document.getElementById('p_waxH').value),
+        THERMAL_BUOYANCY: parseFloat(document.getElementById('p_buoy').value),
+        BASE_GRAVITY: parseFloat(document.getElementById('p_grav').value),
+        NEUTRAL_TEMP: parseFloat(document.getElementById('p_neutralT').value),
+        HEAT_RATE: parseFloat(document.getElementById('p_heatR').value),
+        COOL_RATE: parseFloat(document.getElementById('p_coolR').value),
+        TEMP_DIFFUSION: parseFloat(document.getElementById('p_diffuse').value),
+        INIT_WAX_TEMP: parseFloat(document.getElementById('p_initWaxT').value),
+        INIT_MED_TEMP: parseFloat(document.getElementById('p_initMedT').value),
+        HEAT_ZONE_START: parseFloat(document.getElementById('p_heatZone').value),
+        HEAT_VERT_FALLOFF: parseFloat(document.getElementById('p_heatVFall').value),
+        HEAT_HORIZ_FALLOFF: parseFloat(document.getElementById('p_heatFall').value),
+        COOL_ZONE_END: parseFloat(document.getElementById('p_coolZone').value),
+        NOISE_AMPLITUDE: parseFloat(document.getElementById('p_noise').value)
+    };
+}
+
+let W, H;
+let f, fTemp;
+let rho, ux, uy, temp, psi;
+let frame = 0, paused = false, ff = 1;
+let initialMass;
+
+const canvas = document.getElementById('canvas');
+const ctx = canvas.getContext('2d');
+
+function resize() {
+    readParams();
+    canvas.width = innerWidth;
+    canvas.height = innerHeight;
+    W = Math.floor(canvas.width / P.CELL);
+    H = Math.floor(canvas.height / P.CELL);
+    reset();
+}
+
+function reset() {
+    readParams();
+    W = Math.floor(canvas.width / P.CELL);
+    H = Math.floor(canvas.height / P.CELL);
+
+    const size = W * H;
+    f = new Float32Array(size * 9);
+    fTemp = new Float32Array(size * 9);
+    rho = new Float32Array(size);
+    ux = new Float32Array(size);
+    uy = new Float32Array(size);
+    temp = new Float32Array(size);
+    psi = new Float32Array(size);
+
+    const waxTop = H - Math.floor(H * P.WAX_HEIGHT_FRAC);
+
+    for (let y = 0; y < H; y++) {
+        for (let x = 0; x < W; x++) {
+            const i = y * W + x;
+            if (y >= waxTop) {
+                rho[i] = P.RHO_WAX;
+                temp[i] = P.INIT_WAX_TEMP;
+            } else {
+                rho[i] = P.RHO_MEDIUM;
+                temp[i] = P.INIT_MED_TEMP;
+            }
+            initEquilibrium(i, rho[i], 0, 0);
+        }
+    }
+
+    initialMass = getTotalMass();
+    frame = 0;
+}
+
+function initEquilibrium(i, rho0, ux0, uy0) {
+    const usq = ux0 * ux0 + uy0 * uy0;
+    for (let k = 0; k < 9; k++) {
+        const cu = cx[k] * ux0 + cy[k] * uy0;
+        f[i * 9 + k] = w[k] * rho0 * (1 + 3 * cu + 4.5 * cu * cu - 1.5 * usq);
+    }
+}
+
+function getTotalMass() {
+    let mass = 0;
+    for (let i = 0; i < W * H; i++) mass += rho[i];
+    return mass;
+}
+
+function computePsi(rho_val) {
+    const rho0 = 1.0;
+    return rho0 * (1 - Math.exp(-rho_val / rho0));
+}
+
+function tick() {
+    frame++;
+    const size = W * H;
+
+    // Step 1: Compute macroscopic quantities
+    for (let i = 0; i < size; i++) {
+        let r = 0, vx = 0, vy = 0;
+        for (let k = 0; k < 9; k++) {
+            const fk = f[i * 9 + k];
+            r += fk;
+            vx += fk * cx[k];
+            vy += fk * cy[k];
+        }
+        rho[i] = r;
+        ux[i] = r > 0.001 ? vx / r : 0;
+        uy[i] = r > 0.001 ? vy / r : 0;
+        psi[i] = computePsi(r) * (1 + (Math.random() - 0.5) * P.NOISE_AMPLITUDE);
+    }
+
+    // Step 2: Shan-Chen + thermal forces
+    const Fx = new Float32Array(size);
+    const Fy = new Float32Array(size);
+
+    for (let y = 0; y < H; y++) {
+        for (let x = 0; x < W; x++) {
+            const i = y * W + x;
+            const psi_i = psi[i];
+
+            let fx = 0, fy = 0;
+            for (let k = 1; k < 9; k++) {
+                let nx = (x + cx[k] + W) % W;
+                let ny = y + cy[k];
+                if (ny < 0) ny = 0;
+                if (ny >= H) ny = H - 1;
+
+                const psi_n = psi[ny * W + nx];
+                fx += w[k] * psi_n * cx[k];
+                fy += w[k] * psi_n * cy[k];
+            }
+
+            Fx[i] = -P.G_INTERACTION * psi_i * fx;
+            Fy[i] = -P.G_INTERACTION * psi_i * fy;
+
+            const t = temp[i];
+            const r = rho[i];
+
+            if (r > 0.5) {
+                const tempDiff = t - P.NEUTRAL_TEMP;
+                Fy[i] += -P.THERMAL_BUOYANCY * r * tempDiff + P.BASE_GRAVITY * r;
+            }
+        }
+    }
+
+    // Step 3: BGK collision with Guo forcing
+    for (let i = 0; i < size; i++) {
+        const r = rho[i];
+        if (r < 0.001) continue;
+
+        const vx = ux[i] + Fx[i] / r * 0.5;
+        const vy = uy[i] + Fy[i] / r * 0.5;
+        const usq = vx * vx + vy * vy;
+
+        for (let k = 0; k < 9; k++) {
+            const cu = cx[k] * vx + cy[k] * vy;
+            const feq = w[k] * r * (1 + 3 * cu + 4.5 * cu * cu - 1.5 * usq);
+            const Fi = w[k] * (1 - 0.5 / P.TAU) * (
+                3 * (cx[k] - vx) + 9 * cu * cx[k]
+            ) * Fx[i] + w[k] * (1 - 0.5 / P.TAU) * (
+                3 * (cy[k] - vy) + 9 * cu * cy[k]
+            ) * Fy[i];
+
+            f[i * 9 + k] += -(f[i * 9 + k] - feq) / P.TAU + Fi;
+        }
+    }
+
+    // Step 4: Streaming
+    for (let i = 0; i < size * 9; i++) fTemp[i] = 0;
+
+    for (let y = 0; y < H; y++) {
+        for (let x = 0; x < W; x++) {
+            const i = y * W + x;
+            for (let k = 0; k < 9; k++) {
+                let nx = (x + cx[k] + W) % W;
+                let ny = y + cy[k];
+
+                if (ny < 0 || ny >= H) {
+                    fTemp[i * 9 + opposite[k]] += f[i * 9 + k];
+                } else {
+                    fTemp[(ny * W + nx) * 9 + k] += f[i * 9 + k];
+                }
+            }
+        }
+    }
+
+    [f, fTemp] = [fTemp, f];
+
+    // Step 5: Temperature evolution
+    const newTemp = new Float32Array(size);
+
+    for (let y = 0; y < H; y++) {
+        for (let x = 0; x < W; x++) {
+            const i = y * W + x;
+            let t = temp[i];
+
+            // Diffusion
+            let sum = t, count = 1;
+            for (const [dx, dy] of [[-1,0], [1,0], [0,-1], [0,1]]) {
+                const nx = (x + dx + W) % W;
+                const ny = y + dy;
+                if (ny >= 0 && ny < H) {
+                    const ni = ny * W + nx;
+                    const wt = Math.min(rho[i], rho[ni]) / P.RHO_WAX;
+                    sum += temp[ni] * wt;
+                    count += wt;
+                }
+            }
+            t += (sum / count - t) * P.TEMP_DIFFUSION;
+
+            // Bottom heating
+            const bottomZone = H * P.HEAT_ZONE_START;
+            if (y > bottomZone && rho[i] > 0.5) {
+                const vertIntensity = Math.pow((y - bottomZone) / (H - bottomZone), P.HEAT_VERT_FALLOFF);
+                const centerDist = Math.abs(x - W/2) / (W/2);
+                const horizIntensity = Math.pow(1 - centerDist, P.HEAT_HORIZ_FALLOFF);
+                t += P.HEAT_RATE * vertIntensity * horizIntensity;
+            }
+
+            // Top cooling
+            const topZone = H * P.COOL_ZONE_END;
+            if (y < topZone && rho[i] > 0.5) {
+                const intensity = 1 - y / topZone;
+                t -= P.COOL_RATE * intensity;
+            }
+
+            newTemp[i] = Math.max(0, Math.min(1, t));
+        }
+    }
+    temp = newTemp;
+}
+
+function render() {
+    ctx.fillStyle = '#0a0a12';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    const imageData = ctx.createImageData(W, H);
+    const data = imageData.data;
+
+    for (let y = 0; y < H; y++) {
+        for (let x = 0; x < W; x++) {
+            const i = y * W + x;
+            const pi = i * 4;
+            const d = rho[i];
+            const t = temp[i];
+
+            if (d > 0.3) {
+                const dNorm = Math.min(1, (d - P.RHO_MEDIUM) / (P.RHO_WAX - P.RHO_MEDIUM));
+
+                let r, g, b;
+                if (t < 0.35) {
+                    r = 50 + 120 * (t / 0.35);
+                    g = 20 + 40 * (t / 0.35);
+                    b = 80 - 40 * (t / 0.35);
+                } else if (t < 0.65) {
+                    const f = (t - 0.35) / 0.3;
+                    r = 170 + 60 * f;
+                    g = 60 + 80 * f;
+                    b = 40 - 20 * f;
+                } else {
+                    const f = (t - 0.65) / 0.35;
+                    r = 230 + 25 * f;
+                    g = 140 + 115 * f;
+                    b = 20 + 100 * f;
+                }
+
+                const alpha = 0.3 + dNorm * 0.7;
+                data[pi] = r * alpha;
+                data[pi + 1] = g * alpha;
+                data[pi + 2] = b * alpha;
+                data[pi + 3] = 255;
+            } else {
+                data[pi] = 10;
+                data[pi + 1] = 10;
+                data[pi + 2] = 18;
+                data[pi + 3] = 255;
+            }
+        }
+    }
+
+    const tempCanvas = document.createElement('canvas');
+    tempCanvas.width = W;
+    tempCanvas.height = H;
+    tempCanvas.getContext('2d').putImageData(imageData, 0, 0);
+
+    ctx.imageSmoothingEnabled = false;
+    ctx.drawImage(tempCanvas, 0, 0, W * P.CELL, H * P.CELL);
+
+    ctx.fillStyle = 'rgba(255,80,0,0.6)';
+    ctx.fillRect(0, canvas.height - 3, canvas.width, 3);
+}
+
+function loop() {
+    if (!paused) {
+        for (let i = 0; i < ff; i++) tick();
+    }
+    render();
+
+    const mass = getTotalMass();
+    document.getElementById('stats').innerHTML =
+        `Tick: ${frame} | Mass: ${mass.toFixed(0)}/${initialMass.toFixed(0)} | ${W}x${H}`;
+
+    requestAnimationFrame(loop);
+}
+
+// Speed: 1x, 10x, 100x only
+document.getElementById('ff').onclick = () => {
+    ff = ff === 1 ? 10 : ff === 10 ? 100 : 1;
+    document.getElementById('ff').textContent = ff + 'x';
+};
+document.getElementById('pp').onclick = () => {
+    paused = !paused;
+    document.getElementById('pp').textContent = paused ? '>' : '||';
+};
+document.getElementById('rr').onclick = reset;
+
+// Toggle params panel
+let paramsVisible = true;
+document.getElementById('toggleParams').onclick = () => {
+    paramsVisible = !paramsVisible;
+    document.getElementById('params').style.display = paramsVisible ? 'flex' : 'none';
+};
+
+// Any param change triggers reset
+document.getElementById('params').addEventListener('change', reset);
+
+addEventListener('resize', resize);
+addEventListener('keydown', e => {
+    if (e.code === 'Space') { paused = !paused; e.preventDefault(); }
+    if (e.code === 'KeyR') reset();
+});
+
+resize();
+loop();
+</script>
+</body>
+</html>

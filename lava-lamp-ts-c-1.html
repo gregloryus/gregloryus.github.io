@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>WebGL Lava Lamp CA (Plan Scaffold)</title>
+  <style>
+    html, body { margin: 0; padding: 0; height: 100%; background: #0b0b0f; color: #ddd; font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; }
+    #wrap { display: grid; grid-template-rows: auto 1fr; height: 100%; }
+    #bar {
+      display: flex; gap: 10px; align-items: center;
+      padding: 10px 12px; background: #12121a; border-bottom: 1px solid #222;
+      font-size: 14px;
+    }
+    #bar label { display: flex; gap: 6px; align-items: center; }
+    #bar select, #bar input, #bar button { background: #0f0f16; color: #ddd; border: 1px solid #2a2a3a; border-radius: 6px; padding: 4px 8px; }
+    #canvas { width: 100%; height: 100%; display: block; }
+    #status { opacity: 0.85; font-size: 12px; margin-left: auto; }
+  </style>
+</head>
+<body>
+  <div id="wrap">
+    <div id="bar">
+      <strong>WebGL Lava Lamp CA</strong>
+      <label>View
+        <select id="view">
+          <option value="C">C (wax)</option>
+          <option value="Tw">Tw (wax heat)</option>
+          <option value="U">|u| (speed)</option>
+          <option value="Ux">ux</option>
+          <option value="Uy">uy</option>
+        </select>
+      </label>
+      <label>Steps/frame <input id="steps" type="number" min="1" max="32" value="4" style="width:72px"></label>
+      <button id="reset">Reset</button>
+      <span id="status">Loading…</span>
+    </div>
+    <canvas id="canvas"></canvas>
+  </div>
+
+  <script type="module" src="./lava-lamp-ts-c-3.js"></script>
+</body>
+</html>

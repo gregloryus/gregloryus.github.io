@@ -1,0 +1,435 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Lava Lamp - Viscoplastic LBM v3</title>
+    <style>
+        *{margin:0;padding:0;box-sizing:border-box}
+        html,body{height:100%;overflow:hidden;background:#0a0a12}
+        #canvas{display:block}
+        #ui{position:absolute;top:4px;left:6px;color:#fff;font:10px monospace;background:rgba(0,0,0,0.8);padding:4px 6px;border-radius:3px}
+        #controls{position:absolute;top:4px;right:6px;display:flex;gap:2px}
+        #controls button{padding:3px 8px;background:#222;color:#fff;border:1px solid #555;cursor:pointer;font:9px monospace}
+        #params{position:absolute;top:28px;left:0;right:0;color:#ccc;font:8px monospace;background:rgba(0,0,0,0.9);padding:4px 8px;display:flex;flex-wrap:wrap;gap:2px 10px}
+        #params label{display:flex;align-items:center;gap:3px}
+        #params input{width:50px;background:#222;color:#fff;border:1px solid #444;padding:1px 2px;font:8px monospace}
+        .section{color:#888;font-weight:bold;margin-left:8px}
+    </style>
+</head>
+<body>
+<canvas id="canvas"></canvas>
+<div id="ui"><div>Viscoplastic LBM v3 (Bingham Model)</div><div id="stats"></div></div>
+<div id="controls">
+    <button id="ff">1x</button>
+    <button id="pp">||</button>
+    <button id="rr">Reset</button>
+</div>
+<div id="params">
+    <span class="section">Yield</span>
+    <label>τ_max<input type="number" id="p_tauMax" step="0.5" value="8" title="Max tau when solid (cold/low stress)"></label>
+    <label>τ_min<input type="number" id="p_tauMin" step="0.1" value="0.7" title="Min tau when liquid (hot/high stress)"></label>
+    <label>σ_yield<input type="number" id="p_yieldStress" step="0.001" value="0.008" title="Yield stress threshold"></label>
+    <label>T_yield<input type="number" id="p_yieldT" step="0.05" value="0.4"></label>
+    <span class="section">Forces</span>
+    <label>Buoy<input type="number" id="p_buoy" step="0.001" value="0.012"></label>
+    <label>Grav<input type="number" id="p_grav" step="0.0001" value="0.0004"></label>
+    <span class="section">Temp</span>
+    <label>Heat<input type="number" id="p_heat" step="0.001" value="0.006"></label>
+    <label>Cool<input type="number" id="p_cool" step="0.001" value="0.004"></label>
+    <label>Diff<input type="number" id="p_diff" step="0.01" value="0.04"></label>
+    <span class="section">Grid</span>
+    <label>Cell<input type="number" id="p_cell" step="1" value="4"></label>
+</div>
+
+<script>
+const canvas = document.getElementById('canvas');
+const ctx = canvas.getContext('2d');
+
+// D2Q9
+const cx = [0,1,0,-1,0,1,-1,-1,1];
+const cy = [0,0,1,0,-1,1,1,-1,-1];
+const w = [4/9,1/9,1/9,1/9,1/9,1/36,1/36,1/36,1/36];
+const opp = [0,3,4,1,2,7,8,5,6];
+
+let P, W, H, frame=0, paused=false, ff=1;
+let f, f_new, rho, ux, uy, temp;
+let wax, wax_new;            // wax volume fraction [0..1]
+let initialMass = 0;
+let initialWaxMass = 0;
+
+function readP() {
+    P = {
+        CELL: +document.getElementById('p_cell').value,
+        TAU_MAX: +document.getElementById('p_tauMax').value,
+        TAU_MIN: +document.getElementById('p_tauMin').value,
+        YIELD_STRESS: +document.getElementById('p_yieldStress').value,
+        YIELD_T: +document.getElementById('p_yieldT').value,
+        BUOY: +document.getElementById('p_buoy').value,
+        GRAV: +document.getElementById('p_grav').value,
+        HEAT: +document.getElementById('p_heat').value,
+        COOL: +document.getElementById('p_cool').value,
+        DIFF: +document.getElementById('p_diff').value,
+        WATER_TAU: 0.62,
+        WAX_ADVECT: 0.55,
+        WAX_DIFF: 0.02,
+        WAX_SHARP: 0.25,
+        YIELD_BAND: 0.02,
+        SURF: 0.0012,          // surface tension (helps pinch-off)
+        WAX_MOBILITY: 0.15     // minimum wax mobility when cold
+    };
+}
+
+const idx = (x,y) => y*W+x;
+const idx9 = (x,y,k) => (y*W+x)*9+k;
+const sig = x => x>10?1:x<-10?0:1/(1+Math.exp(-x));
+
+function init() {
+    readP();
+    const N = W*H;
+    f = new Float32Array(N*9);
+    f_new = new Float32Array(N*9);
+    rho = new Float32Array(N);
+    ux = new Float32Array(N);
+    uy = new Float32Array(N);
+    temp = new Float32Array(N);
+    wax = new Float32Array(N);
+    wax_new = new Float32Array(N);
+
+    const waxH = Math.floor(H*0.18);
+    for (let y=0; y<H; y++) {
+        for (let x=0; x<W; x++) {
+            const i = idx(x,y);
+            const inWax = y < waxH;
+
+            // Conserved wax fraction field (binary-ish after sharpening)
+            wax[i] = inWax ? 1.0 : 0.0;
+
+            // Temperature: wax starts colder; background slightly warmer
+            temp[i] = inWax ? 0.12 : 0.28;
+
+            // Initialize LBM populations at rest with uniform density ~= 1
+            const r0 = 1.0;
+            for (let k=0; k<9; k++) f[idx9(x,y,k)] = w[k] * r0;
+        }
+    }
+    initialMass = 0;
+    for (let i=0; i<N; i++) { let s=0; for(let k=0;k<9;k++) s+=f[i*9+k]; initialMass+=s; }
+
+    initialWaxMass = 0;
+    for (let i=0; i<N; i++) initialWaxMass += wax[i];
+
+    frame = 0;
+}
+
+function computeMacro() {
+    for (let y=0; y<H; y++) {
+        for (let x=0; x<W; x++) {
+            const i = idx(x,y);
+            let r=0, mx=0, my=0;
+            for (let k=0; k<9; k++) {
+                const fk = f[idx9(x,y,k)];
+                r += fk; mx += fk*cx[k]; my += fk*cy[k];
+            }
+            rho[i] = r;
+            if (r > 1e-6) {
+                ux[i] = mx/r;
+                uy[i] = my/r;
+            } else {
+                ux[i] = 0;
+                uy[i] = 0;
+            }
+        }
+    }
+}
+
+function computeShearRate(x, y) {
+    // Compute strain rate tensor magnitude from velocity gradients
+    const i = idx(x,y);
+    const xm = (x-1+W)%W, xp = (x+1)%W;
+    const ym = Math.max(0,y-1), yp = Math.min(H-1,y+1);
+
+    const dudx = (ux[idx(xp,y)] - ux[idx(xm,y)]) * 0.5;
+    const dudy = (ux[idx(x,yp)] - ux[idx( x,ym)]) * 0.5;
+    const dvdx = (uy[idx(xp,y)] - uy[idx(xm,y)]) * 0.5;
+    const dvdy = (uy[idx(x,yp)] - uy[idx(x,ym)]) * 0.5;
+
+    // Second invariant of strain rate tensor
+    const sxx = dudx, syy = dvdy, sxy = 0.5*(dudy + dvdx);
+    return Math.sqrt(2*(sxx*sxx + syy*syy + 2*sxy*sxy)) + 1e-10;
+}
+
+function clamp01(v){ return v<0?0:v>1?1:v; }
+
+function sampleWax(xf, yf) {
+    // bilinear sample with x wrap, y clamp
+    const x0 = ((Math.floor(xf)%W)+W)%W;
+    const y0 = Math.max(0, Math.min(H-1, Math.floor(yf)));
+    const x1 = (x0 + 1) % W;
+    const y1 = Math.min(H-1, y0 + 1);
+    const tx = xf - Math.floor(xf);
+    const ty = yf - Math.floor(yf);
+    const a = wax[idx(x0,y0)], b = wax[idx(x1,y0)], c = wax[idx(x0,y1)], d = wax[idx(x1,y1)];
+    const ab = a + (b-a)*tx;
+    const cd = c + (d-c)*tx;
+    return ab + (cd-ab)*ty;
+}
+
+function gradWax(x, y) {
+    // central diff gradient of wax (x wrap, y clamp)
+    const xm = (x-1+W)%W, xp = (x+1)%W;
+    const ym = Math.max(0, y-1), yp = Math.min(H-1, y+1);
+    const gx = 0.5 * (wax[idx(xp,y)] - wax[idx(xm,y)]);
+    const gy = 0.5 * (wax[idx(x,yp)] - wax[idx(x,ym)]);
+    return [gx, gy];
+}
+
+function lapWax(x, y) {
+    const xm = (x-1+W)%W, xp = (x+1)%W;
+    const ym = Math.max(0, y-1), yp = Math.min(H-1, y+1);
+    const c = wax[idx(x,y)];
+    return wax[idx(xp,y)] + wax[idx(xm,y)] + wax[idx(x,yp)] + wax[idx(x,ym)] - 4*c;
+}
+
+function updateWax() {
+    // Semi-Lagrangian advection of a conserved scalar (wax), plus mild diffusion and sharpening.
+    // This keeps blobs coherent and prevents “wax from disappearing”.
+
+    // 1) Advect
+    for (let y=0; y<H; y++) {
+        for (let x=0; x<W; x++) {
+            const i = idx(x,y);
+            const hot = sig(18*(temp[i] - P.YIELD_T));
+            const mob = P.WAX_MOBILITY + (1 - P.WAX_MOBILITY) * hot;
+            const u = ux[i] * mob, v = uy[i] * mob;
+            const x0 = x - u * P.WAX_ADVECT;
+            const y0 = y - v * P.WAX_ADVECT;
+            wax_new[i] = sampleWax(x0, y0);
+        }
+    }
+
+    // 2) Diffuse + sharpen
+    for (let y=0; y<H; y++) {
+        const ym = Math.max(0, y-1), yp = Math.min(H-1, y+1);
+        for (let x=0; x<W; x++) {
+            const xm = (x-1+W)%W, xp = (x+1)%W;
+            const i = idx(x,y);
+
+            const c = wax_new[i];
+            const lap = wax_new[idx(xp,y)] + wax_new[idx(xm,y)] + wax_new[idx(x,yp)] + wax_new[idx(x,ym)] - 4*c;
+
+            // Double-well gradient: pushes toward 0 or 1 (keeps crisp blobs)
+            const sharp = (c*(1-c)) * (1 - 2*c);
+
+            let vNew = c + P.WAX_DIFF * lap - P.WAX_SHARP * sharp;
+            wax_new[i] = clamp01(vNew);
+        }
+    }
+
+    // 3) Global mass correction (very important for long runs)
+    let m = 0;
+    for (let i=0; i<W*H; i++) m += wax_new[i];
+    const s = m > 1e-6 ? (initialWaxMass / m) : 1.0;
+    for (let i=0; i<W*H; i++) wax[i] = clamp01(wax_new[i] * s);
+}
+
+function collideAndStream() {
+    // Clear output buffer (safer when we do bounce-back)
+    f_new.fill(0);
+
+    for (let y=0; y<H; y++) {
+        for (let x=0; x<W; x++) {
+            const i = idx(x,y);
+            const r = rho[i];
+
+            // Local fields
+            const t = temp[i];
+            const wFrac = wax[i];
+            const shearRate = computeShearRate(x, y);
+
+            // Temperature gate (0=cold, 1=hot)
+            const hot = sig(18*(t - P.YIELD_T));
+
+            // Yield stress decreases as it gets hotter (easier to flow)
+            const y0 = P.YIELD_STRESS;
+            const yStress = y0 * (1 - 0.9*hot);
+
+            // Shear gate: if shear exceeds yield stress, it yields
+            const shearGate = sig((shearRate - yStress) / Math.max(1e-6, P.YIELD_BAND));
+
+            // Only wax should have yield behavior
+            const isWax = wFrac > 0.05;
+            const liquidness = isWax ? (hot * shearGate) : 1.0;
+
+            // Effective relaxation time
+            const tau = isWax ? (P.TAU_MAX + (P.TAU_MIN - P.TAU_MAX) * liquidness) : P.WATER_TAU;
+            const invTau = 1 / tau;
+
+            // Body forces (apply buoyancy mostly to wax, only when hot)
+            // Gravity is weak so the scene doesn’t churn constantly.
+            let Fx = 0;
+            let Fy = -P.GRAV;
+
+            // Buoyancy: hot wax rises, cold wax sinks (relative to T_yield)
+            if (isWax) {
+                Fy += P.BUOY * wFrac * (t - P.YIELD_T);
+            }
+
+            // Surface tension: encourages rounded blobs and pinch-off of thin necks
+            // Apply only near the interface (wax*(1-wax) peaks at 0.5)
+            const inter = 4 * wFrac * (1 - wFrac);
+            if (inter > 0.02) {
+                const [gx, gy] = gradWax(x, y);
+                const lap = lapWax(x, y);
+                // Simple capillary-like force: -kappa * lap(wax) * grad(wax)
+                Fx += -P.SURF * lap * gx * inter;
+                Fy += -P.SURF * lap * gy * inter;
+            }
+
+            // Guo forcing uses u + F/(2r)
+            const vx0 = ux[i];
+            const vy0 = uy[i];
+            const rr = Math.max(1e-6, r);
+            const vx = vx0 + Fx/(2*rr);
+            const vy = vy0 + Fy/(2*rr);
+
+            // Extra damping for cold/unyielded wax: makes the “solid blobby mass” settle.
+            if (isWax && liquidness < 0.15) {
+                // damp velocities by biasing toward rest
+                // (implemented implicitly by nudging equilibrium later)
+            }
+
+            const usq = vx*vx + vy*vy;
+
+            for (let k=0; k<9; k++) {
+                const cu = cx[k]*vx + cy[k]*vy;
+                const feq = w[k] * r * (1 + 3*cu + 4.5*cu*cu - 1.5*usq);
+                const fk = f[idx9(x,y,k)];
+
+                // BGK collision
+                let fpost = fk - (fk - feq) * invTau;
+
+                // Guo forcing term (general form, here Fx=0)
+                const cF = cx[k]*Fx + cy[k]*Fy;
+                const uF = vx*Fx + vy*Fy;
+                const forceFactor = (1 - 0.5*invTau);
+                fpost += w[k] * forceFactor * (3*cF + 9*cu*cF - 3*uF);
+
+                // Stream with x wrap and y bounce-back
+                let nx = (x + cx[k] + W) % W;
+                let ny = y + cy[k];
+                if (ny < 0 || ny >= H) {
+                    // bounce-back
+                    f_new[idx9(x,y,opp[k])] += fpost;
+                } else {
+                    f_new[idx9(nx,ny,k)] += fpost;
+                }
+            }
+        }
+    }
+
+    [f, f_new] = [f_new, f];
+}
+
+function updateTemp() {
+    const newT = new Float32Array(W*H);
+    for (let y=0; y<H; y++) {
+        const yN = y/H;
+        for (let x=0; x<W; x++) {
+            const i = idx(x,y);
+            const wf = wax[i];
+            if (wf > 0.02) {
+                let sum=temp[i], cnt=1;
+                [[x-1,y],[x+1,y],[x,y-1],[x,y+1]].forEach(([nx,ny]) => {
+                    if (ny>=0 && ny<H) {
+                        const ni = idx((nx+W)%W, ny);
+                        if (wax[ni] > 0.02) { sum += temp[ni]; cnt++; }
+                    }
+                });
+                let t = temp[i];
+                t += (sum/cnt - t) * P.DIFF;
+                if (yN < 0.12 && wf > 0.02) {
+                    const xN = x/W, ctr = 1 - Math.abs(xN-0.5)*2;
+                    t += P.HEAT * wf * (1 - yN/0.12) * ctr*ctr;
+                }
+                if (yN > 0.85 && wf > 0.02) t -= P.COOL * wf * (yN - 0.85)/0.15;
+                newT[i] = Math.max(0, Math.min(1, t));
+            } else {
+                newT[i] = temp[i];
+            }
+        }
+    }
+    temp.set(newT);
+}
+
+function tick() {
+    frame++;
+    computeMacro();
+    updateTemp();
+    updateWax();
+    collideAndStream();
+}
+
+function render() {
+    const img = ctx.createImageData(W,H), d = img.data;
+    for (let y=0; y<H; y++) {
+        for (let x=0; x<W; x++) {
+            const i = idx(x,y), cy = H-1-y, pi = (cy*W+x)*4;
+            const r = wax[i], t = temp[i];
+            let R=10,G=12,B=25;
+            if (r > 0.02) {
+                let wR,wG,wB;
+                if (t<0.35) { const f=t/0.35; wR=50+80*f; wG=15+25*f; wB=100+20*f; }
+                else if (t<0.55) { const f=(t-0.35)/0.2; wR=130+80*f; wG=40+50*f; wB=120-80*f; }
+                else { const f=(t-0.55)/0.45; wR=210+45*f; wG=90+165*f; wB=40-20*f; }
+                const a = Math.min(1, Math.max(0, r));
+                R=R*(1-a)+wR*a; G=G*(1-a)+wG*a; B=B*(1-a)+wB*a;
+            }
+            if (y/H < 0.02) { const g=1-y/H/0.02; R=R*0.4+255*0.6*g; G=G*0.4+50*0.6*g; }
+            d[pi]=R; d[pi+1]=G; d[pi+2]=B; d[pi+3]=255;
+        }
+    }
+    const tc = document.createElement('canvas'); tc.width=W; tc.height=H;
+    tc.getContext('2d').putImageData(img,0,0);
+    ctx.imageSmoothingEnabled = false;
+    ctx.drawImage(tc,0,0,canvas.width,canvas.height);
+}
+
+function getStats() {
+    let maxT = 0;
+    let waxM = 0;
+    for (let i=0; i<W*H; i++) {
+        waxM += wax[i];
+        if (wax[i] > 0.3 && temp[i] > maxT) maxT = temp[i];
+    }
+    const waxPct = (waxM / Math.max(1e-6, initialWaxMass) * 100).toFixed(1);
+    return { waxPct, maxT: maxT.toFixed(2) };
+}
+
+function loop() {
+    if (!paused) for (let i=0; i<ff; i++) tick();
+    render();
+    if (frame%10===0) {
+        const s=getStats();
+        document.getElementById('stats').innerHTML=`Tick:${frame} Wax:${s.waxPct}% MaxT:${s.maxT} ${W}x${H}`;
+    }
+    requestAnimationFrame(loop);
+}
+
+function resize() {
+    canvas.width=innerWidth; canvas.height=innerHeight;
+    readP(); W=Math.floor(canvas.width/P.CELL); H=Math.floor(canvas.height/P.CELL);
+    init();
+}
+
+document.getElementById('ff').onclick = () => { ff=ff===1?5:ff===5?20:1; document.getElementById('ff').textContent=ff+'x'; };
+document.getElementById('pp').onclick = () => { paused=!paused; document.getElementById('pp').textContent=paused?'>':'||'; };
+document.getElementById('rr').onclick = init;
+document.getElementById('params').addEventListener('change', init);
+addEventListener('resize', resize);
+addEventListener('keydown', e => { if(e.code==='Space'){paused=!paused;e.preventDefault();} if(e.code==='KeyR')init(); });
+
+resize(); loop();
+</script>
+</body>
+</html>

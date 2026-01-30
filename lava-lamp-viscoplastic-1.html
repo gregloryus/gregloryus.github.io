@@ -1,0 +1,596 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Lava Lamp - Viscoplastic Particles v1</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        html,
+        body {
+            height: 100%;
+            overflow: hidden;
+            background: #0a0a12;
+        }
+
+        #canvas {
+            display: block;
+        }
+
+        #ui {
+            position: absolute;
+            top: 4px;
+            left: 6px;
+            color: #fff;
+            font: 10px monospace;
+            background: rgba(0, 0, 0, 0.8);
+            padding: 4px 6px;
+            border-radius: 3px;
+        }
+
+        #controls {
+            position: absolute;
+            top: 4px;
+            right: 6px;
+            display: flex;
+            gap: 2px;
+        }
+
+        #controls button {
+            padding: 3px 8px;
+            background: #222;
+            color: #fff;
+            border: 1px solid #555;
+            cursor: pointer;
+            font: 9px monospace;
+        }
+
+        #params {
+            position: absolute;
+            top: 28px;
+            left: 0;
+            right: 0;
+            color: #ccc;
+            font: 8px monospace;
+            background: rgba(0, 0, 0, 0.9);
+            padding: 4px 8px;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 2px 10px;
+            align-items: center;
+        }
+
+        #params label {
+            display: flex;
+            align-items: center;
+            gap: 3px;
+            white-space: nowrap;
+        }
+
+        #params input[type="number"] {
+            width: 50px;
+            background: #222;
+            color: #fff;
+            border: 1px solid #444;
+            padding: 1px 2px;
+            font: 8px monospace;
+        }
+
+        #params .section {
+            color: #888;
+            font-weight: bold;
+            margin-left: 8px;
+        }
+
+        #params .section:first-child {
+            margin-left: 0;
+        }
+    </style>
+</head>
+
+<body>
+    <canvas id="canvas"></canvas>
+    <div id="ui">
+        <div>Viscoplastic Particles v1</div>
+        <div id="stats"></div>
+    </div>
+    <div id="controls">
+        <button id="ff">1x</button>
+        <button id="pp">||</button>
+        <button id="rr">Reset</button>
+        <button id="toggleParams">Params</button>
+    </div>
+    <div id="params">
+        <span class="section">Particles</span>
+        <label>Count<input type="number" id="p_count" step="100" value="2000"></label>
+        <label>Radius<input type="number" id="p_radius" step="0.5" value="3"></label>
+        <span class="section">Cohesion</span>
+        <label>Strength<input type="number" id="p_cohesion" step="0.1" value="0.8"
+                title="Surface tension - pulls particles together"></label>
+        <label>Range<input type="number" id="p_cohesionRange" step="1" value="25"
+                title="Max distance for cohesion"></label>
+        <label>Repel<input type="number" id="p_repulsion" step="0.1" value="1.5"
+                title="Close-range repulsion strength"></label>
+        <span class="section">Yield Stress</span>
+        <label>σ_cold<input type="number" id="p_yieldCold" step="0.1" value="2.0"
+                title="Yield stress when cold (high = solid)"></label>
+        <label>σ_hot<input type="number" id="p_yieldHot" step="0.1" value="0.1"
+                title="Yield stress when hot (low = liquid)"></label>
+        <label>TransT<input type="number" id="p_transT" step="0.05" value="0.45"></label>
+        <label>Sharp<input type="number" id="p_sharp" step="1" value="12"></label>
+        <span class="section">Damping</span>
+        <label>Cold<input type="number" id="p_dampCold" step="0.01" value="0.95"
+                title="Velocity damping when cold (high = solid)"></label>
+        <label>Hot<input type="number" id="p_dampHot" step="0.01" value="0.98"
+                title="Velocity damping when hot (low = fluid)"></label>
+        <span class="section">Forces</span>
+        <label>Buoy<input type="number" id="p_buoy" step="0.01" value="0.15"></label>
+        <label>Grav<input type="number" id="p_grav" step="0.01" value="0.08"></label>
+        <label>BuoyT<input type="number" id="p_buoyT" step="0.05" value="0.5"></label>
+        <span class="section">Temp</span>
+        <label>Heat<input type="number" id="p_heatR" step="0.001" value="0.003"></label>
+        <label>Cool<input type="number" id="p_coolR" step="0.001" value="0.002"></label>
+        <label>Diff<input type="number" id="p_diffuse" step="0.01" value="0.05"></label>
+        <span class="section">Zones</span>
+        <label>HeatY<input type="number" id="p_heatZone" step="0.02" value="0.15"></label>
+        <label>CoolY<input type="number" id="p_coolZone" step="0.02" value="0.85"></label>
+    </div>
+
+    <script>
+        // ============================================================
+        // Viscoplastic Particle Simulation
+        //
+        // Each particle represents a bit of wax. Key physics:
+        // - Cohesion: particles attract each other (surface tension)
+        // - Repulsion: prevents overlap
+        // - Yield stress: cold = solid (resists flow), hot = liquid (flows freely)
+        // - Buoyancy: hot particles rise
+        // - Temperature: diffuses, heated at bottom, cooled at top
+        //
+        // No rendering tricks - every particle is drawn as a simple circle.
+        // Clean edges emerge from the physics (cohesion creates dense blobs).
+        // ============================================================
+
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+
+        let P = {};  // Parameters
+        let W, H;    // Canvas dimensions
+        let frame = 0, paused = false, ff = 1;
+
+        // Particles
+        let particles = [];
+
+        // Spatial hash for efficient neighbor queries
+        let spatialHash = {};
+        let cellSize = 30;
+
+        function readParams() {
+            P = {
+                PARTICLE_COUNT: parseInt(document.getElementById('p_count').value),
+                PARTICLE_RADIUS: parseFloat(document.getElementById('p_radius').value),
+                COHESION: parseFloat(document.getElementById('p_cohesion').value),
+                COHESION_RANGE: parseFloat(document.getElementById('p_cohesionRange').value),
+                REPULSION: parseFloat(document.getElementById('p_repulsion').value),
+                YIELD_COLD: parseFloat(document.getElementById('p_yieldCold').value),
+                YIELD_HOT: parseFloat(document.getElementById('p_yieldHot').value),
+                TRANSITION_TEMP: parseFloat(document.getElementById('p_transT').value),
+                SHARPNESS: parseFloat(document.getElementById('p_sharp').value),
+                DAMP_COLD: parseFloat(document.getElementById('p_dampCold').value),
+                DAMP_HOT: parseFloat(document.getElementById('p_dampHot').value),
+                BUOYANCY: parseFloat(document.getElementById('p_buoy').value),
+                GRAVITY: parseFloat(document.getElementById('p_grav').value),
+                BUOY_THRESHOLD: parseFloat(document.getElementById('p_buoyT').value),
+                HEAT_RATE: parseFloat(document.getElementById('p_heatR').value),
+                COOL_RATE: parseFloat(document.getElementById('p_coolR').value),
+                TEMP_DIFFUSION: parseFloat(document.getElementById('p_diffuse').value),
+                HEAT_ZONE: parseFloat(document.getElementById('p_heatZone').value),
+                COOL_ZONE: parseFloat(document.getElementById('p_coolZone').value)
+            };
+            cellSize = P.COHESION_RANGE;
+        }
+
+        function sigmoid(x) {
+            if (x > 15) return 1;
+            if (x < -15) return 0;
+            return 1 / (1 + Math.exp(-x));
+        }
+
+        function hashKey(x, y) {
+            const cx = Math.floor(x / cellSize);
+            const cy = Math.floor(y / cellSize);
+            return `${cx},${cy}`;
+        }
+
+        function buildSpatialHash() {
+            spatialHash = {};
+            for (let i = 0; i < particles.length; i++) {
+                const p = particles[i];
+                const key = hashKey(p.x, p.y);
+                if (!spatialHash[key]) spatialHash[key] = [];
+                spatialHash[key].push(i);
+            }
+        }
+
+        function getNeighbors(x, y, range) {
+            const neighbors = [];
+            const cellRange = Math.ceil(range / cellSize);
+            const cx = Math.floor(x / cellSize);
+            const cy = Math.floor(y / cellSize);
+
+            for (let dx = -cellRange; dx <= cellRange; dx++) {
+                for (let dy = -cellRange; dy <= cellRange; dy++) {
+                    const key = `${cx + dx},${cy + dy}`;
+                    if (spatialHash[key]) {
+                        for (const i of spatialHash[key]) {
+                            neighbors.push(i);
+                        }
+                    }
+                }
+            }
+            return neighbors;
+        }
+
+        function initialize() {
+            readParams();
+            particles = [];
+
+            // Create particles in a blob at the bottom
+            const blobCenterX = W / 2;
+            const blobBottomY = H - 20;
+            const blobWidth = W * 0.6;
+            const blobHeight = H * 0.18;
+
+            // Pack particles in the blob region
+            const spacing = P.PARTICLE_RADIUS * 2.2;
+            const cols = Math.floor(blobWidth / spacing);
+            const rows = Math.floor(blobHeight / spacing);
+
+            for (let row = 0; row < rows; row++) {
+                for (let col = 0; col < cols; col++) {
+                    if (particles.length >= P.PARTICLE_COUNT) break;
+
+                    // Offset every other row for hexagonal packing
+                    const xOffset = (row % 2) * spacing * 0.5;
+                    const x = blobCenterX - blobWidth / 2 + col * spacing + xOffset + spacing / 2;
+                    const y = blobBottomY - row * spacing * 0.866;  // 0.866 = sqrt(3)/2 for hex packing
+
+                    // Add some noise
+                    const nx = x + (Math.random() - 0.5) * spacing * 0.3;
+                    const ny = y + (Math.random() - 0.5) * spacing * 0.3;
+
+                    if (ny > 10 && ny < H - 10 && nx > 10 && nx < W - 10) {
+                        particles.push({
+                            x: nx,
+                            y: ny,
+                            vx: 0,
+                            vy: 0,
+                            temp: 0.2 + Math.random() * 0.05,  // Start cool
+                            // For yield stress calculation
+                            restX: nx,
+                            restY: ny
+                        });
+                    }
+                }
+                if (particles.length >= P.PARTICLE_COUNT) break;
+            }
+
+            frame = 0;
+        }
+
+        function computeForces() {
+            const n = particles.length;
+
+            // Reset accelerations
+            for (let i = 0; i < n; i++) {
+                particles[i].ax = 0;
+                particles[i].ay = 0;
+            }
+
+            // Compute pairwise forces
+            for (let i = 0; i < n; i++) {
+                const pi = particles[i];
+                const neighbors = getNeighbors(pi.x, pi.y, P.COHESION_RANGE);
+
+                // Yield stress determines how "solid" or "liquid" this particle behaves
+                const hotness = sigmoid(P.SHARPNESS * (pi.temp - P.TRANSITION_TEMP));
+                const yieldStress = P.YIELD_COLD * (1 - hotness) + P.YIELD_HOT * hotness;
+
+                let localStress = 0;  // Measure of local deformation
+                let cohesionFx = 0, cohesionFy = 0;
+                let neighborCount = 0;
+
+                for (const j of neighbors) {
+                    if (i === j) continue;
+
+                    const pj = particles[j];
+                    const dx = pj.x - pi.x;
+                    const dy = pj.y - pi.y;
+                    const distSq = dx * dx + dy * dy;
+                    const dist = Math.sqrt(distSq);
+
+                    if (dist < 0.1) continue;  // Avoid division by zero
+                    if (dist > P.COHESION_RANGE) continue;
+
+                    const nx = dx / dist;
+                    const ny = dy / dist;
+
+                    // ===== REPULSION (close range) =====
+                    const minDist = P.PARTICLE_RADIUS * 2.5;
+                    if (dist < minDist) {
+                        const overlap = minDist - dist;
+                        const repelForce = P.REPULSION * overlap * overlap;
+                        pi.ax -= nx * repelForce;
+                        pi.ay -= ny * repelForce;
+                    }
+
+                    // ===== COHESION (medium range) =====
+                    // Attractive force that creates surface tension
+                    // Stronger at optimal distance, weaker very close or far
+                    if (dist > minDist && dist < P.COHESION_RANGE) {
+                        const optimalDist = P.PARTICLE_RADIUS * 4;
+                        const cohesionDist = dist - optimalDist;
+
+                        // Linear falloff with distance
+                        const rangeFactor = 1 - (dist - minDist) / (P.COHESION_RANGE - minDist);
+                        const cohesionForce = P.COHESION * cohesionDist * 0.1 * rangeFactor;
+
+                        cohesionFx += nx * cohesionForce;
+                        cohesionFy += ny * cohesionForce;
+                        neighborCount++;
+                    }
+
+                    // ===== LOCAL STRESS =====
+                    // Measure how much neighbors are moving relative to us
+                    const dvx = pj.vx - pi.vx;
+                    const dvy = pj.vy - pi.vy;
+                    const relVel = Math.sqrt(dvx * dvx + dvy * dvy);
+                    localStress += relVel / (dist + 1);
+                }
+
+                // Apply cohesion
+                if (neighborCount > 0) {
+                    pi.ax += cohesionFx;
+                    pi.ay += cohesionFy;
+                }
+
+                // ===== YIELD STRESS BEHAVIOR =====
+                // If local stress < yield stress, resist motion (solid behavior)
+                // If local stress > yield stress, allow flow (liquid behavior)
+                const stressRatio = localStress / (yieldStress + 0.01);
+
+                if (stressRatio < 1) {
+                    // SOLID: Apply restoring force toward rest position
+                    // (This is what makes cold wax hold its shape)
+                    const solidness = 1 - stressRatio;
+                    const restoreFactor = solidness * 0.02 * (1 - hotness);
+
+                    // Update rest position slowly when liquid
+                    pi.restX += (pi.x - pi.restX) * hotness * 0.1;
+                    pi.restY += (pi.y - pi.restY) * hotness * 0.1;
+
+                    const toRestX = pi.restX - pi.x;
+                    const toRestY = pi.restY - pi.y;
+                    pi.ax += toRestX * restoreFactor;
+                    pi.ay += toRestY * restoreFactor;
+                }
+
+                // ===== GRAVITY =====
+                pi.ay += P.GRAVITY;
+
+                // ===== BUOYANCY =====
+                // Hot particles rise
+                if (pi.temp > P.BUOY_THRESHOLD) {
+                    const buoyFactor = sigmoid(10 * (pi.temp - P.BUOY_THRESHOLD));
+                    const excessTemp = pi.temp - P.BUOY_THRESHOLD;
+                    pi.ay -= P.BUOYANCY * buoyFactor * (1 + excessTemp * 2);
+                }
+            }
+        }
+
+        function integrate() {
+            const dt = 1;
+
+            for (const p of particles) {
+                // Temperature-dependent damping
+                const hotness = sigmoid(P.SHARPNESS * (p.temp - P.TRANSITION_TEMP));
+                const damp = P.DAMP_COLD * (1 - hotness) + P.DAMP_HOT * hotness;
+
+                // Update velocity with damping
+                p.vx = (p.vx + p.ax * dt) * damp;
+                p.vy = (p.vy + p.ay * dt) * damp;
+
+                // Clamp velocity
+                const vMag = Math.sqrt(p.vx * p.vx + p.vy * p.vy);
+                if (vMag > 5) {
+                    p.vx *= 5 / vMag;
+                    p.vy *= 5 / vMag;
+                }
+
+                // Update position
+                p.x += p.vx * dt;
+                p.y += p.vy * dt;
+
+                // Boundary collisions
+                const margin = P.PARTICLE_RADIUS;
+                if (p.x < margin) { p.x = margin; p.vx *= -0.5; }
+                if (p.x > W - margin) { p.x = W - margin; p.vx *= -0.5; }
+                if (p.y < margin) { p.y = margin; p.vy *= -0.5; }
+                if (p.y > H - margin) { p.y = H - margin; p.vy *= -0.5; }
+            }
+        }
+
+        function updateTemperature() {
+            const n = particles.length;
+            const newTemps = new Float32Array(n);
+
+            for (let i = 0; i < n; i++) {
+                const pi = particles[i];
+                let t = pi.temp;
+
+                // Temperature diffusion with neighbors
+                const neighbors = getNeighbors(pi.x, pi.y, P.COHESION_RANGE * 0.7);
+                let sum = t;
+                let count = 1;
+
+                for (const j of neighbors) {
+                    if (i === j) continue;
+                    const pj = particles[j];
+                    const dx = pj.x - pi.x;
+                    const dy = pj.y - pi.y;
+                    const distSq = dx * dx + dy * dy;
+                    if (distSq < P.COHESION_RANGE * P.COHESION_RANGE * 0.5) {
+                        const weight = 1 - Math.sqrt(distSq) / (P.COHESION_RANGE * 0.7);
+                        sum += pj.temp * weight;
+                        count += weight;
+                    }
+                }
+
+                t += (sum / count - t) * P.TEMP_DIFFUSION;
+
+                // Heat zone (bottom)
+                const yNorm = pi.y / H;
+                if (yNorm > 1 - P.HEAT_ZONE) {
+                    const intensity = (yNorm - (1 - P.HEAT_ZONE)) / P.HEAT_ZONE;
+                    // Stronger heat in center
+                    const xNorm = pi.x / W;
+                    const centerDist = Math.abs(xNorm - 0.5) * 2;
+                    const horizFactor = 1 - centerDist * centerDist;
+                    t += P.HEAT_RATE * intensity * horizFactor;
+                }
+
+                // Cool zone (top)
+                if (yNorm < P.COOL_ZONE) {
+                    const intensity = (P.COOL_ZONE - yNorm) / P.COOL_ZONE;
+                    t -= P.COOL_RATE * intensity;
+                }
+
+                newTemps[i] = Math.max(0, Math.min(1, t));
+            }
+
+            // Apply new temperatures
+            for (let i = 0; i < n; i++) {
+                particles[i].temp = newTemps[i];
+            }
+        }
+
+        function tick() {
+            frame++;
+
+            // Build spatial hash for neighbor queries
+            buildSpatialHash();
+
+            // Compute forces
+            computeForces();
+
+            // Integrate positions
+            integrate();
+
+            // Update temperature
+            updateTemperature();
+        }
+
+        function render() {
+            // Clear with dark background
+            ctx.fillStyle = '#0a0a14';
+            ctx.fillRect(0, 0, W, H);
+
+            // Draw heat zone glow
+            const gradient = ctx.createLinearGradient(0, H, 0, H - H * P.HEAT_ZONE * 2);
+            gradient.addColorStop(0, 'rgba(255, 60, 0, 0.3)');
+            gradient.addColorStop(1, 'rgba(255, 60, 0, 0)');
+            ctx.fillStyle = gradient;
+            ctx.fillRect(0, H - H * P.HEAT_ZONE * 2, W, H * P.HEAT_ZONE * 2);
+
+            // Draw each particle
+            for (const p of particles) {
+                // Color based on temperature
+                let r, g, b;
+                const t = p.temp;
+
+                if (t < 0.35) {
+                    // Cold: deep purple
+                    const f = t / 0.35;
+                    r = 60 + 90 * f;
+                    g = 20 + 30 * f;
+                    b = 120 - 20 * f;
+                } else if (t < 0.55) {
+                    // Warm: red-orange
+                    const f = (t - 0.35) / 0.2;
+                    r = 150 + 70 * f;
+                    g = 50 + 60 * f;
+                    b = 100 - 80 * f;
+                } else {
+                    // Hot: bright yellow-orange
+                    const f = (t - 0.55) / 0.45;
+                    r = 220 + 35 * f;
+                    g = 110 + 145 * f;
+                    b = 20 + 50 * f;
+                }
+
+                ctx.fillStyle = `rgb(${Math.floor(r)}, ${Math.floor(g)}, ${Math.floor(b)})`;
+                ctx.beginPath();
+                ctx.arc(p.x, p.y, P.PARTICLE_RADIUS, 0, Math.PI * 2);
+                ctx.fill();
+            }
+
+            // Draw stats
+            document.getElementById('stats').innerHTML =
+                `Tick: ${frame} | Particles: ${particles.length} | ${W}x${H}`;
+        }
+
+        function loop() {
+            if (!paused) {
+                for (let i = 0; i < ff; i++) tick();
+            }
+            render();
+            requestAnimationFrame(loop);
+        }
+
+        function resize() {
+            canvas.width = W = innerWidth;
+            canvas.height = H = innerHeight;
+            initialize();
+        }
+
+        // Event handlers
+        document.getElementById('ff').onclick = () => {
+            ff = ff === 1 ? 5 : ff === 5 ? 20 : 1;
+            document.getElementById('ff').textContent = ff + 'x';
+        };
+
+        document.getElementById('pp').onclick = () => {
+            paused = !paused;
+            document.getElementById('pp').textContent = paused ? '>' : '||';
+        };
+
+        document.getElementById('rr').onclick = initialize;
+
+        let paramsVisible = true;
+        document.getElementById('toggleParams').onclick = () => {
+            paramsVisible = !paramsVisible;
+            document.getElementById('params').style.display = paramsVisible ? 'flex' : 'none';
+        };
+
+        document.getElementById('params').addEventListener('change', initialize);
+
+        addEventListener('resize', resize);
+        addEventListener('keydown', e => {
+            if (e.code === 'Space') { paused = !paused; e.preventDefault(); }
+            if (e.code === 'KeyR') initialize();
+        });
+
+        // Start
+        readParams();
+        resize();
+        loop();
+    </script>
+</body>
+
+</html>

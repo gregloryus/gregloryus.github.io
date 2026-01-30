@@ -1,0 +1,461 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Simplant Evolution Analysis</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <style>
+    body {
+      font-family: 'Courier New', monospace;
+      background: #1a1a2e;
+      color: #eee;
+      padding: 20px;
+      max-width: 1400px;
+      margin: 0 auto;
+    }
+    h1, h2, h3 { color: #00ff88; }
+    .chart-container {
+      background: #16213e;
+      border-radius: 8px;
+      padding: 20px;
+      margin: 20px 0;
+    }
+    .morphology-grid {
+      display: inline-grid;
+      gap: 1px;
+      background: #333;
+      padding: 2px;
+      margin: 10px;
+      vertical-align: top;
+    }
+    .morphology-grid .cell {
+      width: 12px;
+      height: 12px;
+    }
+    .cell.empty { background: #1a1a2e; }
+    .cell.seed { background: #ff6b6b; }
+    .cell.stem { background: #4ecdc4; }
+    .cell.tip { background: #ffe66d; }
+    .config-section {
+      background: #16213e;
+      border-radius: 8px;
+      padding: 15px;
+      margin: 15px 0;
+      display: inline-block;
+      vertical-align: top;
+      min-width: 280px;
+    }
+    .config-section h3 { margin-top: 0; font-size: 14px; }
+    .stats { font-size: 12px; color: #aaa; margin-bottom: 10px; }
+    .genome-str { font-size: 10px; color: #888; word-break: break-all; }
+    table { border-collapse: collapse; width: 100%; margin: 20px 0; }
+    th, td { padding: 8px 12px; text-align: left; border-bottom: 1px solid #333; }
+    th { background: #16213e; color: #00ff88; }
+    tr:hover { background: #16213e; }
+    .legend { display: flex; gap: 20px; margin: 10px 0; }
+    .legend-item { display: flex; align-items: center; gap: 5px; }
+    .legend-box { width: 16px; height: 16px; border-radius: 2px; }
+  </style>
+</head>
+<body>
+  <h1>Simplant Evolution Analysis</h1>
+  <p>1,000,000 ticks on 100x100 grid</p>
+
+  <h2>Summary Table</h2>
+  <table>
+    <tr>
+      <th>Configuration</th>
+      <th>Avg Genome</th>
+      <th>Max Genome</th>
+      <th>Avg Cells</th>
+      <th>Plants</th>
+      <th>Reproductions</th>
+    </tr>
+    <tr>
+      <td>Baseline (3+ cardinals)</td>
+      <td>21.71</td>
+      <td>26</td>
+      <td>14.87</td>
+      <td>173</td>
+      <td>15,710</td>
+    </tr>
+    <tr>
+      <td>2+ cardinals, proportional</td>
+      <td>25.37</td>
+      <td>30</td>
+      <td>19.96</td>
+      <td>167</td>
+      <td>12,193</td>
+    </tr>
+    <tr>
+      <td>2+ cardinals, radius=1</td>
+      <td>22.77</td>
+      <td>34</td>
+      <td>4.55</td>
+      <td>807</td>
+      <td>162,297</td>
+    </tr>
+    <tr>
+      <td>2+ cardinals, mutation=0.5</td>
+      <td>32.84</td>
+      <td>41</td>
+      <td>21.12</td>
+      <td>165</td>
+      <td>9,134</td>
+    </tr>
+    <tr style="background: #1a3a1a;">
+      <td><strong>2+ cardinals, radius=2, mutation=0.4</strong></td>
+      <td><strong>34.17</strong></td>
+      <td><strong>45</strong></td>
+      <td>12.25</td>
+      <td>309</td>
+      <td>17,484</td>
+    </tr>
+    <tr>
+      <td>2+ cardinals, longer life</td>
+      <td>19.35</td>
+      <td>24</td>
+      <td>16.18</td>
+      <td>168</td>
+      <td>5,591</td>
+    </tr>
+  </table>
+
+  <h2>Genome Length Over Time</h2>
+  <div class="chart-container">
+    <canvas id="genomeLengthChart" height="100"></canvas>
+  </div>
+
+  <h2>Dominant Morphologies</h2>
+  <div class="legend">
+    <div class="legend-item"><div class="legend-box" style="background:#ff6b6b"></div> Seed</div>
+    <div class="legend-item"><div class="legend-box" style="background:#4ecdc4"></div> Stem</div>
+    <div class="legend-item"><div class="legend-box" style="background:#ffe66d"></div> Tip (3+ open cardinals)</div>
+  </div>
+
+  <div id="morphologies"></div>
+
+  <script>
+    // Data from experiments
+    const timeSeriesData = {
+      baseline: [
+        {tick: 50000, avg: 6.52}, {tick: 100000, avg: 8.37}, {tick: 150000, avg: 9.70},
+        {tick: 200000, avg: 11.19}, {tick: 250000, avg: 11.46}, {tick: 300000, avg: 12.22},
+        {tick: 350000, avg: 12.54}, {tick: 400000, avg: 13.23}, {tick: 450000, avg: 13.95},
+        {tick: 500000, avg: 14.96}, {tick: 550000, avg: 16.14}, {tick: 600000, avg: 16.71},
+        {tick: 650000, avg: 18.02}, {tick: 700000, avg: 19.10}, {tick: 750000, avg: 19.97},
+        {tick: 800000, avg: 20.75}, {tick: 850000, avg: 20.93}, {tick: 900000, avg: 21.13},
+        {tick: 950000, avg: 21.66}, {tick: 1000000, avg: 21.71}
+      ],
+      prop2card: [
+        {tick: 50000, avg: 8.04}, {tick: 100000, avg: 10.75}, {tick: 150000, avg: 13.34},
+        {tick: 200000, avg: 14.44}, {tick: 250000, avg: 15.39}, {tick: 300000, avg: 16.55},
+        {tick: 350000, avg: 17.14}, {tick: 400000, avg: 17.87}, {tick: 450000, avg: 18.29},
+        {tick: 500000, avg: 19.62}, {tick: 550000, avg: 20.17}, {tick: 600000, avg: 20.53},
+        {tick: 650000, avg: 20.95}, {tick: 700000, avg: 21.44}, {tick: 750000, avg: 22.25},
+        {tick: 800000, avg: 22.89}, {tick: 850000, avg: 23.85}, {tick: 900000, avg: 24.37},
+        {tick: 950000, avg: 24.45}, {tick: 1000000, avg: 25.37}
+      ],
+      lowRadius: [
+        {tick: 50000, avg: 7.74}, {tick: 100000, avg: 9.42}, {tick: 150000, avg: 11.03},
+        {tick: 200000, avg: 11.98}, {tick: 250000, avg: 13.07}, {tick: 300000, avg: 13.97},
+        {tick: 350000, avg: 14.69}, {tick: 400000, avg: 15.60}, {tick: 450000, avg: 16.22},
+        {tick: 500000, avg: 16.79}, {tick: 550000, avg: 17.35}, {tick: 600000, avg: 17.96},
+        {tick: 650000, avg: 18.89}, {tick: 700000, avg: 19.40}, {tick: 750000, avg: 19.98},
+        {tick: 800000, avg: 20.62}, {tick: 850000, avg: 21.31}, {tick: 900000, avg: 21.82},
+        {tick: 950000, avg: 22.35}, {tick: 1000000, avg: 22.77}
+      ],
+      highMutation: [
+        {tick: 50000, avg: 10.47}, {tick: 100000, avg: 13.53}, {tick: 150000, avg: 15.66},
+        {tick: 200000, avg: 18.76}, {tick: 250000, avg: 20.69}, {tick: 300000, avg: 21.57},
+        {tick: 350000, avg: 22.91}, {tick: 400000, avg: 23.61}, {tick: 450000, avg: 24.82},
+        {tick: 500000, avg: 25.81}, {tick: 550000, avg: 26.69}, {tick: 600000, avg: 27.38},
+        {tick: 650000, avg: 28.52}, {tick: 700000, avg: 30.07}, {tick: 750000, avg: 30.64},
+        {tick: 800000, avg: 31.02}, {tick: 850000, avg: 31.11}, {tick: 900000, avg: 31.85},
+        {tick: 950000, avg: 32.39}, {tick: 1000000, avg: 32.84}
+      ],
+      combo: [
+        {tick: 50000, avg: 10.71}, {tick: 100000, avg: 13.75}, {tick: 150000, avg: 15.87},
+        {tick: 200000, avg: 17.57}, {tick: 250000, avg: 19.21}, {tick: 300000, avg: 20.63},
+        {tick: 350000, avg: 21.80}, {tick: 400000, avg: 23.30}, {tick: 450000, avg: 24.69},
+        {tick: 500000, avg: 25.84}, {tick: 550000, avg: 26.79}, {tick: 600000, avg: 28.27},
+        {tick: 650000, avg: 29.12}, {tick: 700000, avg: 30.18}, {tick: 750000, avg: 30.13},
+        {tick: 800000, avg: 31.00}, {tick: 850000, avg: 31.66}, {tick: 900000, avg: 32.57},
+        {tick: 950000, avg: 33.47}, {tick: 1000000, avg: 34.17}
+      ],
+      longerLife: [
+        {tick: 50000, avg: 7.25}, {tick: 100000, avg: 8.57}, {tick: 150000, avg: 9.69},
+        {tick: 200000, avg: 10.63}, {tick: 250000, avg: 11.20}, {tick: 300000, avg: 12.48},
+        {tick: 350000, avg: 13.22}, {tick: 400000, avg: 14.06}, {tick: 450000, avg: 14.80},
+        {tick: 500000, avg: 15.54}, {tick: 550000, avg: 16.18}, {tick: 600000, avg: 16.67},
+        {tick: 650000, avg: 16.82}, {tick: 700000, avg: 17.59}, {tick: 750000, avg: 18.30},
+        {tick: 800000, avg: 18.40}, {tick: 850000, avg: 18.74}, {tick: 900000, avg: 18.78},
+        {tick: 950000, avg: 19.03}, {tick: 1000000, avg: 19.35}
+      ]
+    };
+
+    // All genomes from final iteration - Most Common AND Longest for each config
+    const allGenomes = {
+      baseline_common: {
+        name: "Baseline - MOST COMMON",
+        genome: "010,010,111,000,000,010,111,000,010,011,000,101,101,001,010,000,000,001,000,010,011,000,000",
+        stats: "23 genes | 15 clones"
+      },
+      baseline_longest: {
+        name: "Baseline - LONGEST",
+        genome: "010,010,111,000,000,010,111,010,000,010,011,010,010,000,101,110,000,100,000,001,001,000,010,011,000,000",
+        stats: "26 genes"
+      },
+      prop2card_common: {
+        name: "2+ cardinals - MOST COMMON",
+        genome: "010,010,110,010,010,000,011,000,100,010,011,010,100,000,100,001,110,010,100,010,000,010,100,000",
+        stats: "24 genes | 10 clones"
+      },
+      prop2card_longest: {
+        name: "2+ cardinals - LONGEST",
+        genome: "010,010,110,010,000,010,111,000,010,100,000,010,010,011,110,000,000,110,111,000,000,001,000,110,100,100,100,000,001,000",
+        stats: "30 genes"
+      },
+      lowRadius_common: {
+        name: "radius=1 - MOST COMMON",
+        genome: "010,111,001,000,010,001,010,000,110,010,000,011,000,010,010,100,001,100,000",
+        stats: "19 genes | 22 clones"
+      },
+      lowRadius_longest: {
+        name: "radius=1 - LONGEST",
+        genome: "010,111,010,100,000,011,011,000,000,010,101,001,100,000,010,000,110,101,000,000,111,101,000,000,111,010,101,000,000,010,100,000,000,000",
+        stats: "34 genes"
+      },
+      highMutation_common: {
+        name: "mutation=0.5 - MOST COMMON",
+        genome: "010,011,010,101,000,011,000,100,000,100,011,000,110,011,001,010,100,000,000,010,111,000,000,001,101,111,100,101,001,000,000,000,000,000",
+        stats: "34 genes | 5 clones"
+      },
+      highMutation_longest: {
+        name: "mutation=0.5 - LONGEST",
+        genome: "010,011,010,101,000,001,000,100,111,111,000,000,000,010,101,101,000,001,111,000,000,001,000,110,110,100,011,000,001,001,001,010,000,000,001,010,000,011,000,010,000",
+        stats: "41 genes"
+      },
+      combo_common: {
+        name: "WINNER (r=2,m=0.4) - MOST COMMON",
+        genome: "010,111,001,000,010,111,000,100,001,000,001,100,001,010,000,010,101,010,001,010,000,011,100,100,110,001,000,000,110,000,000",
+        stats: "31 genes | 13 clones"
+      },
+      combo_longest: {
+        name: "WINNER (r=2,m=0.4) - LONGEST",
+        genome: "010,111,010,001,000,010,110,101,010,000,000,010,110,000,000,110,101,101,001,000,001,100,000,010,001,000,111,111,000,111,010,000,000,000,010,110,000,000,011,000,010,000,110,000,000",
+        stats: "45 genes"
+      },
+      longerLife_common: {
+        name: "longer life - MOST COMMON",
+        genome: "010,110,001,111,000,010,100,001,000,010,101,000,000,100,010,101,000,000",
+        stats: "18 genes | 8 clones"
+      },
+      longerLife_longest: {
+        name: "longer life - LONGEST",
+        genome: "010,110,001,110,011,001,000,110,000,000,010,000,101,100,000,110,110,011,000,000,000,001,010,000",
+        stats: "24 genes"
+      }
+    };
+
+    // Chart
+    const ctx = document.getElementById('genomeLengthChart').getContext('2d');
+    new Chart(ctx, {
+      type: 'line',
+      data: {
+        labels: timeSeriesData.baseline.map(d => (d.tick/1000) + 'k'),
+        datasets: [
+          {
+            label: 'Baseline',
+            data: timeSeriesData.baseline.map(d => d.avg),
+            borderColor: '#ff6b6b',
+            tension: 0.3,
+            fill: false
+          },
+          {
+            label: '2+ cardinals',
+            data: timeSeriesData.prop2card.map(d => d.avg),
+            borderColor: '#4ecdc4',
+            tension: 0.3,
+            fill: false
+          },
+          {
+            label: 'radius=1',
+            data: timeSeriesData.lowRadius.map(d => d.avg),
+            borderColor: '#95e1d3',
+            tension: 0.3,
+            fill: false
+          },
+          {
+            label: 'mutation=0.5',
+            data: timeSeriesData.highMutation.map(d => d.avg),
+            borderColor: '#f38181',
+            tension: 0.3,
+            fill: false
+          },
+          {
+            label: 'radius=2, mut=0.4 (WINNER)',
+            data: timeSeriesData.combo.map(d => d.avg),
+            borderColor: '#00ff88',
+            borderWidth: 3,
+            tension: 0.3,
+            fill: false
+          },
+          {
+            label: 'longer life',
+            data: timeSeriesData.longerLife.map(d => d.avg),
+            borderColor: '#aa96da',
+            tension: 0.3,
+            fill: false
+          }
+        ]
+      },
+      options: {
+        responsive: true,
+        plugins: {
+          title: { display: true, text: 'Average Genome Length Over Time', color: '#00ff88' },
+          legend: { labels: { color: '#eee' } }
+        },
+        scales: {
+          x: { title: { display: true, text: 'Ticks', color: '#aaa' }, ticks: { color: '#aaa' }, grid: { color: '#333' } },
+          y: { title: { display: true, text: 'Avg Genome Length', color: '#aaa' }, ticks: { color: '#aaa' }, grid: { color: '#333' } }
+        }
+      }
+    });
+
+    // Decode genome and render morphology
+    function decodeAndRender(genomeStr, containerId) {
+      const genes = genomeStr.split(',').map(s => parseInt(s.trim(), 2));
+
+      // Build tree
+      let idx = 0;
+      function buildNode() {
+        if (idx >= genes.length) return null;
+        const bits = genes[idx++];
+        const node = { bits, children: [null, null, null] };
+        for (let slot = 0; slot < 3; slot++) {
+          if ((bits >> slot) & 1) {
+            node.children[slot] = buildNode();
+          }
+        }
+        return node;
+      }
+      const root = buildNode();
+
+      // Render to grid (place cells)
+      const grid = {};
+      const cells = [];
+
+      function placeCell(node, x, y, facing, parent) {
+        const key = `${x},${y}`;
+        if (grid[key]) return; // collision
+
+        const cell = { x, y, node, facing, parent, children: [] };
+        grid[key] = cell;
+        cells.push(cell);
+
+        if (parent) parent.children.push(cell);
+
+        // Direction mappings
+        const dirMap = {
+          N: [{dx:-1,dy:0}, {dx:0,dy:-1}, {dx:1,dy:0}],
+          E: [{dx:0,dy:-1}, {dx:1,dy:0}, {dx:0,dy:1}],
+          S: [{dx:1,dy:0}, {dx:0,dy:1}, {dx:-1,dy:0}],
+          W: [{dx:0,dy:1}, {dx:-1,dy:0}, {dx:0,dy:-1}]
+        };
+        const rotations = {
+          N: ['W','N','E'], E: ['N','E','S'], S: ['E','S','W'], W: ['S','W','N']
+        };
+
+        for (let slot = 0; slot < 3; slot++) {
+          if (node.children[slot]) {
+            const d = dirMap[facing][slot];
+            const newFacing = rotations[facing][slot];
+            placeCell(node.children[slot], x + d.dx, y + d.dy, newFacing, cell);
+          }
+        }
+      }
+
+      if (root) placeCell(root, 0, 0, 'N', null);
+
+      // Find bounds
+      let minX = 0, maxX = 0, minY = 0, maxY = 0;
+      cells.forEach(c => {
+        minX = Math.min(minX, c.x);
+        maxX = Math.max(maxX, c.x);
+        minY = Math.min(minY, c.y);
+        maxY = Math.max(maxY, c.y);
+      });
+
+      // Add padding
+      minX -= 1; maxX += 1; minY -= 1; maxY += 1;
+      const width = maxX - minX + 1;
+      const height = maxY - minY + 1;
+
+      // Determine tips (cells with no children placed)
+      cells.forEach(c => {
+        c.isTip = c.children.length === 0;
+        c.isSeed = c.parent === null;
+      });
+
+      // Create grid element
+      const container = document.getElementById(containerId);
+      const gridEl = document.createElement('div');
+      gridEl.className = 'morphology-grid';
+      gridEl.style.gridTemplateColumns = `repeat(${width}, 12px)`;
+
+      for (let y = minY; y <= maxY; y++) {
+        for (let x = minX; x <= maxX; x++) {
+          const cellEl = document.createElement('div');
+          cellEl.className = 'cell';
+          const key = `${x},${y}`;
+          if (grid[key]) {
+            if (grid[key].isSeed) cellEl.classList.add('seed');
+            else if (grid[key].isTip) cellEl.classList.add('tip');
+            else cellEl.classList.add('stem');
+          } else {
+            cellEl.classList.add('empty');
+          }
+          gridEl.appendChild(cellEl);
+        }
+      }
+
+      container.appendChild(gridEl);
+      return cells.length;
+    }
+
+    // Render all morphologies - grouped by config
+    const morphContainer = document.getElementById('morphologies');
+    const configs = ['baseline', 'prop2card', 'lowRadius', 'highMutation', 'combo', 'longerLife'];
+
+    for (const config of configs) {
+      const row = document.createElement('div');
+      row.style.marginBottom = '20px';
+      row.style.borderBottom = '1px solid #333';
+      row.style.paddingBottom = '20px';
+
+      // Most common
+      const commonData = allGenomes[config + '_common'];
+      const commonSection = document.createElement('div');
+      commonSection.className = 'config-section';
+      commonSection.innerHTML = `<h3>${commonData.name}</h3><div class="stats">${commonData.stats}</div><div id="morph-${config}-common"></div>`;
+      row.appendChild(commonSection);
+
+      // Longest
+      const longestData = allGenomes[config + '_longest'];
+      const longestSection = document.createElement('div');
+      longestSection.className = 'config-section';
+      longestSection.style.borderLeft = '2px solid #00ff88';
+      longestSection.innerHTML = `<h3>${longestData.name}</h3><div class="stats">${longestData.stats}</div><div id="morph-${config}-longest"></div>`;
+      row.appendChild(longestSection);
+
+      morphContainer.appendChild(row);
+
+      const commonCells = decodeAndRender(commonData.genome, `morph-${config}-common`);
+      commonSection.querySelector('.stats').innerHTML += ` | ${commonCells} cells rendered`;
+
+      const longestCells = decodeAndRender(longestData.genome, `morph-${config}-longest`);
+      longestSection.querySelector('.stats').innerHTML += ` | ${longestCells} cells rendered`;
+    }
+  </script>
+</body>
+</html>

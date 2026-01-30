@@ -1,0 +1,601 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Lava Lamp v10 - Attraction Forces</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        html, body { width: 100%; height: 100%; overflow: hidden; background: #0a0a12; }
+        #canvas { display: block; image-rendering: pixelated; image-rendering: crisp-edges; }
+        #ui {
+            position: absolute; top: 10px; left: 10px;
+            color: #fff; font-family: monospace; font-size: 11px;
+            background: rgba(0,0,0,0.85); padding: 10px; border-radius: 4px; z-index: 100;
+            max-width: 240px;
+        }
+        #ui div { margin: 2px 0; }
+        .section { margin-top: 8px; padding-top: 6px; border-top: 1px solid #333; }
+        .section-title { color: #888; font-size: 10px; margin-bottom: 4px; }
+        #controls { position: absolute; top: 10px; right: 10px; z-index: 100; }
+        #controls button {
+            padding: 8px 16px; margin: 2px; background: #222; color: #fff;
+            border: 1px solid #555; cursor: pointer; font-family: monospace;
+        }
+        #controls button:hover { background: #444; }
+        #controls button.active { background: #a00; }
+        input[type="number"] { width: 50px; background: #111; color: #fff; border: 1px solid #444; padding: 2px; }
+        label { display: inline-block; width: 100%; margin: 1px 0; }
+    </style>
+</head>
+<body>
+    <canvas id="canvas"></canvas>
+    <div id="ui">
+        <div style="font-size:13px; margin-bottom:6px;">Lava Lamp v10</div>
+        <div id="fps">FPS: 0</div>
+        <div id="ticks">Ticks: 0</div>
+        <div id="temp-stats">Temp: --</div>
+        <div id="swap-stats">Swaps: 0</div>
+
+        <div class="section">
+            <div class="section-title">HEAT</div>
+            <label>Input: <input type="number" id="p-heat-input" step="0.01"></label>
+            <label>Avg factor: <input type="number" id="p-heat-avg" step="0.01"></label>
+            <label>Cool rate: <input type="number" id="p-cool-rate" step="0.01"></label>
+        </div>
+
+        <div class="section">
+            <div class="section-title">FORCES</div>
+            <label>Buoyancy: <input type="number" id="p-buoyancy" step="0.05"></label>
+            <label>Attract: <input type="number" id="p-attract" step="0.1"></label>
+            <label>Similarity T: <input type="number" id="p-similarity" step="0.05"></label>
+        </div>
+
+        <div class="section">
+            <div class="section-title">MOVEMENT</div>
+            <label>Liquid T: <input type="number" id="p-liquid" step="0.05"></label>
+            <label>Move prob: <input type="number" id="p-move-prob" step="0.05"></label>
+        </div>
+
+        <button id="apply-btn" style="margin-top:8px; padding:4px 10px; width:100%;">Apply & Reset</button>
+    </div>
+
+    <div id="controls">
+        <button id="ff-btn">1x</button>
+        <button id="pause-btn">||</button>
+        <button id="heater-btn">Heater ON</button>
+        <button id="reset-btn">Reset</button>
+    </div>
+
+<script>
+// ============================================================
+// LAVA LAMP v10 - Attraction Forces (Fixed)
+// ============================================================
+// Key mechanics:
+// 1. Temperature averaging for heat spread
+// 2. Buoyancy: hot rises, cold sinks
+// 3. ATTRACTION: wax cells pull toward similar-temp wax
+// 4. Isolated cells actively seek nearest wax mass
+// 5. Pressure transfers between wax, pushing warm wax to move
+// ============================================================
+
+const CONFIG = {
+    CELL_SIZE: 3,
+
+    // Heat
+    HEAT_INPUT: 0.1,
+    HEAT_AVERAGING: 0.15,
+    COOL_RATE: 0.02,
+
+    // Forces
+    BUOYANCY_FACTOR: 0.3,
+    ATTRACTION_STRENGTH: 2.0,
+    TEMP_SIMILARITY: 0.3,       // Temps within this range attract
+
+    // Movement
+    LIQUID_THRESHOLD: 0.2,
+    MOVE_PROBABILITY: 0.3,
+
+    // Geometry
+    HEATER_WIDTH_FRAC: 0.4,
+    COOLER_HEIGHT_FRAC: 0.12,
+    WAX_HEIGHT_FRAC: 0.12,
+    WAX_WIDTH_FRAC: 0.85,
+};
+
+let canvas, ctx, cols, rows;
+let grid;
+let frame = 0, paused = false, heaterOn = true;
+let ffLevels = [1, 5, 20, 100], ffIndex = 0, ffFactor = 1;
+let lastTime = 0;
+let heaterLeft, heaterRight, coolerHeight;
+let swapsThisTick = 0, totalSwaps = 0;
+
+let rngState = 12345;
+function rand() {
+    rngState ^= rngState << 13;
+    rngState ^= rngState >>> 17;
+    rngState ^= rngState << 5;
+    return (rngState >>> 0) / 4294967296;
+}
+
+function init() {
+    canvas = document.getElementById('canvas');
+    ctx = canvas.getContext('2d');
+    resize();
+    window.addEventListener('resize', resize);
+    setupUI();
+    resetSimulation();
+    requestAnimationFrame(loop);
+}
+
+function resize() {
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+    cols = Math.floor(canvas.width / CONFIG.CELL_SIZE);
+    rows = Math.floor(canvas.height / CONFIG.CELL_SIZE);
+
+    const heaterWidth = Math.floor(cols * CONFIG.HEATER_WIDTH_FRAC);
+    heaterLeft = Math.floor((cols - heaterWidth) / 2);
+    heaterRight = heaterLeft + heaterWidth;
+    coolerHeight = Math.floor(rows * CONFIG.COOLER_HEIGHT_FRAC);
+
+    resetSimulation();
+}
+
+function resetSimulation() {
+    grid = new Array(cols * rows);
+    for (let i = 0; i < grid.length; i++) {
+        grid[i] = { isWax: false, temp: 0 };
+    }
+
+    const waxH = Math.floor(rows * CONFIG.WAX_HEIGHT_FRAC);
+    const waxW = Math.floor(cols * CONFIG.WAX_WIDTH_FRAC);
+    const waxL = Math.floor((cols - waxW) / 2);
+    const waxR = waxL + waxW;
+    const waxT = rows - waxH;
+
+    for (let y = waxT; y < rows; y++) {
+        for (let x = waxL; x < waxR; x++) {
+            grid[y * cols + x].isWax = true;
+            grid[y * cols + x].temp = 0.05;
+        }
+    }
+
+    frame = 0;
+    totalSwaps = 0;
+    rngState = Date.now() & 0xFFFFFFFF;
+}
+
+function setupUI() {
+    document.getElementById('p-heat-input').value = CONFIG.HEAT_INPUT;
+    document.getElementById('p-heat-avg').value = CONFIG.HEAT_AVERAGING;
+    document.getElementById('p-cool-rate').value = CONFIG.COOL_RATE;
+    document.getElementById('p-buoyancy').value = CONFIG.BUOYANCY_FACTOR;
+    document.getElementById('p-attract').value = CONFIG.ATTRACTION_STRENGTH;
+    document.getElementById('p-similarity').value = CONFIG.TEMP_SIMILARITY;
+    document.getElementById('p-liquid').value = CONFIG.LIQUID_THRESHOLD;
+    document.getElementById('p-move-prob').value = CONFIG.MOVE_PROBABILITY;
+
+    document.getElementById('ff-btn').onclick = () => {
+        ffIndex = (ffIndex + 1) % ffLevels.length;
+        ffFactor = ffLevels[ffIndex];
+        document.getElementById('ff-btn').textContent = ffFactor + 'x';
+    };
+
+    document.getElementById('pause-btn').onclick = () => {
+        paused = !paused;
+        document.getElementById('pause-btn').textContent = paused ? '▶' : '||';
+    };
+
+    document.getElementById('heater-btn').onclick = () => {
+        heaterOn = !heaterOn;
+        document.getElementById('heater-btn').textContent = heaterOn ? 'Heater ON' : 'Heater OFF';
+        document.getElementById('heater-btn').classList.toggle('active', !heaterOn);
+    };
+
+    document.getElementById('reset-btn').onclick = resetSimulation;
+
+    document.getElementById('apply-btn').onclick = () => {
+        CONFIG.HEAT_INPUT = parseFloat(document.getElementById('p-heat-input').value) || 0;
+        CONFIG.HEAT_AVERAGING = parseFloat(document.getElementById('p-heat-avg').value) || 0;
+        CONFIG.COOL_RATE = parseFloat(document.getElementById('p-cool-rate').value) || 0;
+        CONFIG.BUOYANCY_FACTOR = parseFloat(document.getElementById('p-buoyancy').value) || 0;
+        CONFIG.ATTRACTION_STRENGTH = parseFloat(document.getElementById('p-attract').value) || 0;
+        CONFIG.TEMP_SIMILARITY = parseFloat(document.getElementById('p-similarity').value) || 0;
+        CONFIG.LIQUID_THRESHOLD = parseFloat(document.getElementById('p-liquid').value) || 0;
+        CONFIG.MOVE_PROBABILITY = parseFloat(document.getElementById('p-move-prob').value) || 0;
+        resetSimulation();
+    };
+
+    document.addEventListener('keydown', (e) => {
+        if (e.code === 'Space') { paused = !paused; e.preventDefault(); }
+        if (e.code === 'KeyR') resetSimulation();
+    });
+}
+
+// ============================================================
+// HELPERS
+// ============================================================
+
+function idx(x, y) { return y * cols + x; }
+function inBounds(x, y) { return x >= 0 && x < cols && y >= 0 && y < rows; }
+function getCell(x, y) { return inBounds(x, y) ? grid[idx(x, y)] : null; }
+
+function countWaxNeighbors(x, y) {
+    let count = 0;
+    for (const [dx, dy] of [[-1,0], [1,0], [0,-1], [0,1]]) {
+        const c = getCell(x + dx, y + dy);
+        if (c && c.isWax) count++;
+    }
+    return count;
+}
+
+// Find nearest wax cell within search radius
+function findNearestWax(x, y, radius) {
+    let nearest = null;
+    let nearestDist = Infinity;
+
+    for (let dy = -radius; dy <= radius; dy++) {
+        for (let dx = -radius; dx <= radius; dx++) {
+            if (dx === 0 && dy === 0) continue;
+            const c = getCell(x + dx, y + dy);
+            if (c && c.isWax) {
+                const dist = Math.abs(dx) + Math.abs(dy);
+                if (dist < nearestDist) {
+                    nearestDist = dist;
+                    nearest = { x: x + dx, y: y + dy, dist };
+                }
+            }
+        }
+    }
+    return nearest;
+}
+
+// ============================================================
+// SIMULATION
+// ============================================================
+
+function tick() {
+    frame++;
+    swapsThisTick = 0;
+
+    applyHeat();
+    averageTemperatures();
+
+    // Main movement pass with buoyancy
+    movementPass();
+
+    // Cohesion pass: isolated wax seeks nearby wax
+    cohesionPass();
+
+    totalSwaps += swapsThisTick;
+}
+
+function applyHeat() {
+    for (let y = 0; y < rows; y++) {
+        for (let x = 0; x < cols; x++) {
+            const cell = grid[idx(x, y)];
+            if (!cell.isWax) continue;
+
+            // Heater
+            if (heaterOn && y >= rows - 3 && x >= heaterLeft && x < heaterRight) {
+                const intensity = 1 - (rows - 1 - y) / 3;
+                cell.temp = Math.min(1, cell.temp + CONFIG.HEAT_INPUT * intensity);
+            }
+
+            // Cooler
+            if (y < coolerHeight) {
+                const intensity = 1 - y / coolerHeight;
+                cell.temp = Math.max(0, cell.temp - CONFIG.COOL_RATE * intensity);
+            }
+        }
+    }
+}
+
+function averageTemperatures() {
+    const newTemps = new Float32Array(cols * rows);
+    for (let i = 0; i < grid.length; i++) newTemps[i] = grid[i].temp;
+
+    for (let y = 0; y < rows; y++) {
+        for (let x = 0; x < cols; x++) {
+            const cell = grid[idx(x, y)];
+            if (!cell.isWax) continue;
+
+            let total = cell.temp;
+            let count = 1;
+
+            for (const [dx, dy] of [[-1,0], [1,0], [0,-1], [0,1]]) {
+                const n = getCell(x + dx, y + dy);
+                if (n && n.isWax) {
+                    total += n.temp;
+                    count++;
+                }
+            }
+
+            const avg = total / count;
+            newTemps[idx(x, y)] = cell.temp + (avg - cell.temp) * CONFIG.HEAT_AVERAGING;
+        }
+    }
+
+    for (let i = 0; i < grid.length; i++) {
+        if (grid[i].isWax) {
+            grid[i].temp = Math.max(0, Math.min(1, newTemps[i]));
+        }
+    }
+}
+
+function movementPass() {
+    // Process in checkerboard pattern
+    for (let parity = 0; parity < 2; parity++) {
+        // Rising pass (hot wax) - bottom to top
+        for (let y = rows - 1; y >= 0; y--) {
+            for (let x = 0; x < cols; x++) {
+                if ((x + y) % 2 !== parity) continue;
+                tryBuoyancyMove(x, y);
+            }
+        }
+    }
+}
+
+function tryBuoyancyMove(x, y) {
+    const cell = grid[idx(x, y)];
+    if (!cell.isWax) return;
+
+    // Calculate buoyancy direction
+    // Hot (temp > 0.5) wants to rise (dy = -1)
+    // Cold (temp < 0.5) wants to sink (dy = +1)
+    const buoyancy = (cell.temp - 0.5) * CONFIG.BUOYANCY_FACTOR;
+
+    // Need significant buoyancy to attempt movement
+    if (Math.abs(buoyancy) < 0.05) return;
+
+    // Movement probability scales with temperature (hotter = more fluid)
+    const fluidness = Math.max(0, (cell.temp - CONFIG.LIQUID_THRESHOLD) / (1 - CONFIG.LIQUID_THRESHOLD));
+    if (rand() > fluidness * CONFIG.MOVE_PROBABILITY) return;
+
+    const dy = buoyancy < 0 ? -1 : 1;
+    const ty = y + dy;
+    if (!inBounds(x, ty)) return;
+
+    const target = grid[idx(x, ty)];
+
+    if (!target.isWax) {
+        // Moving into water
+        tryWaxWaterSwap(x, y, x, ty);
+    } else {
+        // Moving into wax - internal convection if both liquid
+        tryInternalConvection(x, y, x, ty, dy);
+    }
+}
+
+function tryWaxWaterSwap(wx, wy, waterX, waterY) {
+    const waxCell = grid[idx(wx, wy)];
+
+    // Must have at least 2 wax neighbors to prevent single-particle breakoff
+    const neighbors = countWaxNeighbors(wx, wy);
+    if (neighbors < 2) return;
+
+    // Calculate attraction score at current vs target position
+    // This makes cells prefer staying near similar-temp wax
+    const attractionHere = calcAttractionScore(wx, wy, waxCell.temp);
+    const attractionThere = calcAttractionScore(waterX, waterY, waxCell.temp);
+
+    // Only move if attraction at target is reasonable (not moving into isolation)
+    // Or if there's strong buoyancy force
+    const buoyancyForce = Math.abs(waxCell.temp - 0.5) * CONFIG.BUOYANCY_FACTOR;
+
+    if (attractionThere < attractionHere * 0.3 && buoyancyForce < 0.15) {
+        return; // Would be too isolated, and not enough force to overcome
+    }
+
+    // Perform swap
+    const waterCell = grid[idx(waterX, waterY)];
+    waterCell.isWax = true;
+    waterCell.temp = waxCell.temp;
+
+    waxCell.isWax = false;
+    waxCell.temp = 0;
+
+    swapsThisTick++;
+}
+
+function tryInternalConvection(x1, y1, x2, y2, direction) {
+    const cell1 = grid[idx(x1, y1)];
+    const cell2 = grid[idx(x2, y2)];
+
+    // Both must be liquid for internal flow
+    if (cell1.temp < CONFIG.LIQUID_THRESHOLD || cell2.temp < CONFIG.LIQUID_THRESHOLD) {
+        // Blocked by solid/cold wax - transfer heat instead (pressure/conduction)
+        const heatTransfer = (cell1.temp - cell2.temp) * 0.1;
+        cell1.temp -= heatTransfer;
+        cell2.temp += heatTransfer;
+        return;
+    }
+
+    // For rising (dy=-1): cell1 should be hotter than cell2
+    // For sinking (dy=+1): cell1 should be cooler than cell2
+    const shouldSwap = (direction < 0 && cell1.temp > cell2.temp + 0.05) ||
+                       (direction > 0 && cell1.temp < cell2.temp - 0.05);
+
+    if (!shouldSwap) return;
+
+    const tempDiff = Math.abs(cell1.temp - cell2.temp);
+    if (rand() > tempDiff * 2) return;
+
+    // Swap contents
+    const tmp = cell1.temp;
+    cell1.temp = cell2.temp;
+    cell2.temp = tmp;
+
+    swapsThisTick++;
+}
+
+// Calculate how attracted a cell would be at position (x,y) given its temperature
+function calcAttractionScore(x, y, temp) {
+    let score = 0;
+
+    for (let dy = -3; dy <= 3; dy++) {
+        for (let dx = -3; dx <= 3; dx++) {
+            if (dx === 0 && dy === 0) continue;
+
+            const n = getCell(x + dx, y + dy);
+            if (!n || !n.isWax) continue;
+
+            const dist = Math.sqrt(dx*dx + dy*dy);
+            const tempDiff = Math.abs(temp - n.temp);
+
+            if (tempDiff < CONFIG.TEMP_SIMILARITY) {
+                // Similar temp = attraction
+                score += (1 - tempDiff / CONFIG.TEMP_SIMILARITY) * CONFIG.ATTRACTION_STRENGTH / dist;
+            }
+        }
+    }
+
+    return score;
+}
+
+function cohesionPass() {
+    // Isolated wax cells (0-1 neighbors) actively try to rejoin the nearest wax mass
+    // This is the key mechanism that prevents fragmentation
+
+    for (let parity = 0; parity < 2; parity++) {
+        for (let y = 0; y < rows; y++) {
+            for (let x = 0; x < cols; x++) {
+                if ((x + y) % 2 !== parity) continue;
+
+                const cell = grid[idx(x, y)];
+                if (!cell.isWax) continue;
+
+                const neighbors = countWaxNeighbors(x, y);
+
+                // Only isolated cells (0-1 neighbors) need cohesion help
+                if (neighbors >= 2) continue;
+
+                // Find nearest wax within radius 5
+                const nearest = findNearestWax(x, y, 5);
+                if (!nearest) continue;
+
+                // Move toward nearest wax
+                const dx = Math.sign(nearest.x - x);
+                const dy = Math.sign(nearest.y - y);
+
+                // Try to move in the direction of nearest wax
+                // Prefer vertical movement, then horizontal
+                const moves = dy !== 0 ?
+                    [[0, dy], [dx, 0], [dx, dy]] :
+                    [[dx, 0], [0, -1], [0, 1]];
+
+                for (const [mx, my] of moves) {
+                    if (mx === 0 && my === 0) continue;
+
+                    const tx = x + mx;
+                    const ty = y + my;
+                    const target = getCell(tx, ty);
+
+                    if (target && !target.isWax) {
+                        // Move into water toward the wax mass
+                        target.isWax = true;
+                        target.temp = cell.temp;
+                        cell.isWax = false;
+                        cell.temp = 0;
+                        swapsThisTick++;
+                        break;
+                    }
+                }
+            }
+        }
+    }
+}
+
+// ============================================================
+// RENDERING
+// ============================================================
+
+function render() {
+    ctx.fillStyle = '#0a0a12';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    const size = CONFIG.CELL_SIZE;
+
+    for (let y = 0; y < rows; y++) {
+        for (let x = 0; x < cols; x++) {
+            const cell = grid[idx(x, y)];
+            if (!cell.isWax) continue;
+
+            const t = cell.temp;
+            let r, g, b;
+
+            if (t < 0.25) {
+                const f = t / 0.25;
+                r = Math.floor(60 + 80 * f);
+                g = Math.floor(20 + 30 * f);
+                b = Math.floor(80 - 30 * f);
+            } else if (t < 0.5) {
+                const f = (t - 0.25) / 0.25;
+                r = Math.floor(140 + 80 * f);
+                g = Math.floor(50 - 10 * f);
+                b = Math.floor(50 - 30 * f);
+            } else if (t < 0.75) {
+                const f = (t - 0.5) / 0.25;
+                r = Math.floor(220 + 35 * f);
+                g = Math.floor(40 + 120 * f);
+                b = 20;
+            } else {
+                const f = (t - 0.75) / 0.25;
+                r = 255;
+                g = Math.floor(160 + 95 * f);
+                b = Math.floor(20 + 100 * f);
+            }
+
+            ctx.fillStyle = `rgb(${r},${g},${b})`;
+            ctx.fillRect(x * size, y * size, size, size);
+        }
+    }
+
+    if (heaterOn) {
+        ctx.fillStyle = 'rgba(255, 100, 0, 0.6)';
+        ctx.fillRect(heaterLeft * size, (rows - 1) * size + size - 2,
+                     (heaterRight - heaterLeft) * size, 2);
+    }
+}
+
+function updateUI() {
+    let waxCount = 0, tempSum = 0, tempMax = 0, tempMin = 1;
+
+    for (let i = 0; i < grid.length; i++) {
+        if (grid[i].isWax) {
+            waxCount++;
+            tempSum += grid[i].temp;
+            tempMax = Math.max(tempMax, grid[i].temp);
+            tempMin = Math.min(tempMin, grid[i].temp);
+        }
+    }
+
+    document.getElementById('ticks').textContent = `Ticks: ${frame}`;
+    document.getElementById('temp-stats').textContent = waxCount > 0
+        ? `T: ${tempMin.toFixed(2)} / ${(tempSum/waxCount).toFixed(2)} / ${tempMax.toFixed(2)}`
+        : 'No wax';
+    document.getElementById('swap-stats').textContent = `Swaps: ${swapsThisTick}/tick (${totalSwaps} total)`;
+}
+
+function loop(timestamp) {
+    const dt = timestamp - lastTime;
+    lastTime = timestamp;
+    document.getElementById('fps').textContent = `FPS: ${dt > 0 ? Math.round(1000/dt) : 0}`;
+
+    if (!paused) {
+        for (let i = 0; i < ffFactor; i++) {
+            tick();
+        }
+    }
+
+    render();
+    updateUI();
+    requestAnimationFrame(loop);
+}
+
+window.addEventListener('DOMContentLoaded', init);
+</script>
+</body>
+</html>

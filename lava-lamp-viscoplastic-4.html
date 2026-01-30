@@ -1,0 +1,825 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Lava Lamp - GPU Viscoplastic LBM</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box
+        }
+
+        html,
+        body {
+            height: 100%;
+            overflow: hidden;
+            background: #0a0a12
+        }
+
+        canvas {
+            display: block;
+            width: 100%;
+            height: 100%
+        }
+
+        #ui {
+            position: absolute;
+            top: 4px;
+            left: 6px;
+            color: #fff;
+            font: 10px monospace;
+            background: rgba(0, 0, 0, 0.8);
+            padding: 4px 6px;
+            border-radius: 3px;
+            pointer-events: none
+        }
+
+        #controls {
+            position: absolute;
+            top: 4px;
+            right: 6px;
+            display: flex;
+            gap: 2px
+        }
+
+        #controls button {
+            padding: 3px 8px;
+            background: #222;
+            color: #fff;
+            border: 1px solid #555;
+            cursor: pointer;
+            font: 9px monospace
+        }
+
+        #params {
+            position: absolute;
+            top: 28px;
+            left: 0;
+            right: 0;
+            color: #ccc;
+            font: 8px monospace;
+            background: rgba(0, 0, 0, 0.9);
+            padding: 4px 8px;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 2px 10px
+        }
+
+        #params label {
+            display: flex;
+            align-items: center;
+            gap: 3px
+        }
+
+        #params input {
+            width: 50px;
+            background: #222;
+            color: #fff;
+            border: 1px solid #444;
+            padding: 1px 2px;
+            font: 8px monospace
+        }
+
+        .section {
+            color: #888;
+            font-weight: bold;
+            margin-left: 8px
+        }
+    </style>
+</head>
+
+<body>
+    <canvas id="canvas"></canvas>
+    <div id="ui">
+        <div>GPU Viscoplastic LBM (Bingham)</div>
+        <div id="stats"></div>
+    </div>
+    <div id="controls">
+        <button id="ff">1x</button>
+        <button id="pp">||</button>
+        <button id="rr">Reset</button>
+    </div>
+    <div id="params">
+        <span class="section">Yield</span>
+        <label>τ_max<input type="number" id="p_tauMax" step="0.5" value="8"></label>
+        <label>τ_min<input type="number" id="p_tauMin" step="0.1" value="0.7"></label>
+        <label>σ_yield<input type="number" id="p_yieldStress" step="0.001" value="0.008"></label>
+        <label>T_yield<input type="number" id="p_yieldT" step="0.05" value="0.4"></label>
+        <span class="section">Forces</span>
+        <label>Buoy<input type="number" id="p_buoy" step="0.001" value="0.012"></label>
+        <label>Grav<input type="number" id="p_grav" step="0.0001" value="0.0004"></label>
+        <span class="section">Temp</span>
+        <label>Heat<input type="number" id="p_heat" step="0.001" value="0.006"></label>
+        <label>Cool<input type="number" id="p_cool" step="0.001" value="0.004"></label>
+        <label>Diff<input type="number" id="p_diff" step="0.01" value="0.04"></label>
+        <span class="section">Grid</span>
+        <label>Cell<input type="number" id="p_cell" step="1" value="2"></label>
+    </div>
+
+    <script>
+        // --- Configuration & State ---
+        const canvas = document.getElementById('canvas');
+        let gl;
+        let P;
+        let W, H;
+        let frame = 0, paused = false, ff = 1;
+
+        // WebGL Objects
+        const textures = {};
+        const fbos = {};
+        const programs = {};
+        let quadVBO;
+
+        // Ping-pong indices
+        let idxRead = 0, idxWrite = 1;
+
+        function readP() {
+            P = {
+                CELL: +document.getElementById('p_cell').value || 4,
+                TAU_MAX: 2.5,          // High viscosity (Lava)
+                TAU_MIN: 0.9,          // Viscous even when hot
+                YIELD_STRESS: 0.005,
+                YIELD_T: 0.4,
+                BUOY: 0.04,            // Gentle rise
+                GRAV: 0.0006,
+                HEAT: 0.02,
+                COOL: 0.003,
+                DIFF: 0.08,
+                WATER_TAU: 0.7,
+                WAX_ADVECT: 1.0,
+                WAX_DIFF: 0.000,       // No explicit diffusion
+                WAX_SHARP: 0.15,       // Moderate sharpening
+                YIELD_BAND: 0.1,
+                SURF: 0.08,            // Strong surface tension
+                WAX_MOBILITY: 1.0
+            };
+        }
+
+        // --- Shaders ---
+
+        const vsFull = `#version 300 es
+layout(location=0) in vec2 aPos;
+out vec2 vUV;
+void main(){
+    vUV = aPos*0.5 + 0.5;
+    gl_Position = vec4(aPos, 0.0, 1.0);
+}`;
+
+        // Scalar Shader: Updates Wax (Advection+Diff) and Temp (Diff+Source)
+        const fsScal = `#version 300 es
+precision highp float;
+uniform sampler2D uScal; // r=wax, g=temp
+uniform sampler2D uVel;  // rg=vel
+uniform vec2 px;
+uniform float waxAdvect, waxDiff, waxSharp, waxMobility;
+uniform float heat, cool, tempDiff, yieldT;
+
+out vec4 outScal;
+
+float sig(float x) { return 1.0 / (1.0 + exp(-clamp(x, -10.0, 10.0))); }
+
+void main(){
+    vec2 uv = gl_FragCoord.xy * px;
+    vec4 s = texture(uScal, uv);
+    float wax = s.r;
+    float temp = s.g;
+    
+    // --- Wax Advection (Semi-Lagrangian) ---
+    float hot = sig(18.0 * (temp - yieldT));
+    float mob = waxMobility + (1.0 - waxMobility) * hot;
+    
+    // Gradient for compression (Interface Normal)
+    float wL = texture(uScal, uv + vec2(-px.x, 0)).r;
+    float wR = texture(uScal, uv + vec2( px.x, 0)).r;
+    float wD = texture(uScal, uv + vec2(0, -px.y)).r;
+    float wU = texture(uScal, uv + vec2(0,  px.y)).r;
+    vec2 gradW = vec2(wR - wL, wU - wD); // Unnormalized gradient
+    
+    // Compression Velocity: Moves mass towards the interface center (0.5 contour)
+    // Effectively anti-diffusion. Conservative!
+    // Acts only at interface: 4*w*(1-w)
+    float interfaceVal = 4.0 * wax * (1.0 - wax);
+    // Direction: Up gradient if w < 0.5 (fill hole), Down gradient if w > 0.5 (consolidate)?
+    // No. We want to steepen the gradient.
+    // We want to move HIGH values towards peaks and LOW values towards valleys?
+    // Actually, Cahn-Hilliard separation is complex.
+    // Simple compression: Move towards 0.5? No.
+    
+    // Let's stick to the previous fix: Remove the Mass Sinks.
+    // AND: Remove the advection boost (1.0).
+    // AND: Increase viscosity.
+    
+    vec2 vel = texture(uVel, uv).xy;
+    vec2 src = uv - vel * mob * waxAdvect * px;
+    float waxAdv = texture(uScal, src).r;
+    
+    // --- Wax Diffusion & Sharpening ---
+    // Sample neighbors at SOURCE (Advected) for Lagrangian-ish diffusion? 
+    // No, Eulerian diffusion is better for stability.
+    
+    // Re-sample neighbors at current UV for diffusion step
+    float center = waxAdv; // Use the advected value as base
+    // Note: We need to sample the *advected* field for correct diffusion, 
+    // but we can't afford 5 more advected lookups.
+    // Using current field neighbors for Laplacian of Advected field is wrong.
+    // BUT: Diffusion is small.
+    // Let's just apply sharpening to the advected result without explicit diffusion.
+    // The linear interpolation IS diffusion.
+    
+    // Reaction-Diffusion Sharpening (Mass Conservative-ish)
+    // We use a weaker term to avoid eating tails.
+    float sharp = waxAdv * (1.0 - waxAdv) * (waxAdv - 0.5);
+    
+    // No explicit diffusion (let Linear Interp do it)
+    float waxNew = waxAdv + waxSharp * sharp;
+    
+    // Clamp
+    waxNew = clamp(waxNew, 0.0, 1.0);
+    
+    // --- Temperature Update ---
+    float tL = texture(uScal, uv + vec2(-px.x, 0)).g;
+    float tR = texture(uScal, uv + vec2( px.x, 0)).g;
+    float tD = texture(uScal, uv + vec2(0, -px.y)).g;
+    float tU = texture(uScal, uv + vec2(0,  px.y)).g;
+    
+    // Masked diffusion (mostly in wax)
+    // Original JS used complex neighbor checking. Here we simplify to global diffusion
+    // but we can weigh it by wax if needed. For now, standard diffusion:
+    float lapT = tL + tR + tD + tU - 4.0 * temp;
+    
+    // Conditional diffusion (only significant if wax present? JS logic was strict)
+    // Emulating JS: if (wax > 0.02) evolve temp, else keep old.
+    // But heat diffuses in water too in reality. Let's stick to JS logic roughly:
+    float tNew = temp;
+    if (wax > 0.01) {
+        tNew += lapT * tempDiff;
+        
+        // Heat source at bottom (Gaussian)
+        if (uv.y < 0.15) {
+            float dist = distance(uv, vec2(0.5, 0.05)); // Center bottom source
+            float g = exp(-dist*dist * 20.0); // Gaussian
+            tNew += heat * wax * g;
+        }
+        // Cool at top
+        if (uv.y > 0.85) {
+            tNew -= cool * wax * (uv.y - 0.85)/0.15;
+        }
+    }
+    
+    outScal = vec4(waxNew, clamp(tNew,0.0,1.0), 0.0, 1.0);
+}`;
+
+        // Collision & Stream Shader
+        // D2Q9 Indices:
+        // 0:(0,0), 1:(1,0), 2:(0,1), 3:(-1,0), 4:(0,-1), 5:(1,1), 6:(-1,1), 7:(-1,-1), 8:(1,-1)
+        // Textures:
+        // Tex0: 0,1,2,3
+        // Tex1: 4,5,6,7
+        // Tex2: 8, x, x, x
+        const fsLBM = `#version 300 es
+precision highp float;
+uniform sampler2D uF0, uF1, uF2; // Previous distributions
+uniform sampler2D uScal;         // Scalars
+uniform sampler2D uVel;          // Previous velocity & shear
+uniform vec2 px;
+uniform float tauMax, tauMin, yieldStress, yieldT, yieldBand, waterTau, surfTension, gravity, buoyancy;
+
+// MRT Outputs
+layout(location=0) out vec4 outF0;
+layout(location=1) out vec4 outF1;
+layout(location=2) out vec4 outF2;
+
+float sig(float x) { return 1.0 / (1.0 + exp(-clamp(x, -10.0, 10.0))); }
+
+void main(){
+    vec2 uv = gl_FragCoord.xy * px;
+    
+    // Read previous macroscopic
+    vec4 velData = texture(uVel, uv);
+    vec2 u = velData.xy;
+    float shear = velData.w;
+    
+    vec4 scal = texture(uScal, uv);
+    float wax = scal.r;
+    float temp = scal.g;
+    
+    // --- Compute Forces ---
+    float Fx = 0.0;
+    float Fy = -gravity;
+    
+    // Buoyancy
+    if (wax > 0.05) {
+        Fy += buoyancy * wax * (temp - yieldT);
+    }
+    
+    // Surface Tension
+    float wL = texture(uScal, uv + vec2(-px.x, 0)).r;
+    float wR = texture(uScal, uv + vec2( px.x, 0)).r;
+    float wD = texture(uScal, uv + vec2(0, -px.y)).r;
+    float wU = texture(uScal, uv + vec2(0,  px.y)).r;
+    vec2 gradW = vec2(wR - wL, wU - wD) * 0.5;
+    float lapW = wL + wR + wD + wU - 4.0 * wax;
+    float inter = 4.0 * wax * (1.0 - wax);
+    if (inter > 0.02) {
+        Fx += -surfTension * lapW * gradW.x * inter;
+        Fy += -surfTension * lapW * gradW.y * inter;
+    }
+    
+    // Clamp Forces to prevent explosion
+    Fx = clamp(Fx, -0.05, 0.05);
+    Fy = clamp(Fy, -0.05, 0.05);
+    
+    // --- Rheology ---
+    float hot = sig(18.0 * (temp - yieldT));
+    float yStr = yieldStress * (1.0 - 0.9 * hot);
+    float shearGate = sig((shear - yStr) / max(1e-6, yieldBand));
+    
+    // Force liquidness if hot, ignoring shear (gets things moving)
+    float liquidness = (wax > 0.05) ? (hot * 0.9 + 0.1 * shearGate) : 1.0;
+    
+    // Clamp tau to safe range
+    float tau = (wax > 0.05) ? (tauMax + (tauMin - tauMax) * liquidness) : waterTau;
+    
+    // STABILITY CLAMP
+    tau = max(0.55, tau);
+    float invTau = 1.0 / tau;
+    
+    // --- Stream (Pull from neighbors) ---
+    vec2 c[9];
+    c[0]=vec2(0,0); c[1]=vec2(1,0); c[2]=vec2(0,1); c[3]=vec2(-1,0);
+    c[4]=vec2(0,-1); c[5]=vec2(1,1); c[6]=vec2(-1,1); c[7]=vec2(-1,-1); c[8]=vec2(1,-1);
+    
+    float w[9];
+    w[0]=4.0/9.0; w[1]=1.0/9.0; w[2]=1.0/9.0; w[3]=1.0/9.0;
+    w[4]=1.0/9.0; w[5]=1.0/36.0; w[6]=1.0/36.0; w[7]=1.0/36.0; w[8]=1.0/36.0;
+    
+    int opp[9];
+    opp[0]=0; opp[1]=3; opp[2]=4; opp[3]=1; 
+    opp[4]=2; opp[5]=7; opp[6]=8; opp[7]=5; opp[8]=6;
+
+    float f[9];
+    
+    // Read self for bounce-back
+    vec4 s0 = texture(uF0, uv);
+    vec4 s1 = texture(uF1, uv);
+    vec4 s2 = texture(uF2, uv);
+    float fSelf[9];
+    fSelf[0]=s0.x; fSelf[1]=s0.y; fSelf[2]=s0.z; fSelf[3]=s0.w;
+    fSelf[4]=s1.x; fSelf[5]=s1.y; fSelf[6]=s1.z; fSelf[7]=s1.w;
+    fSelf[8]=s2.x;
+    
+    // Fetch streamed values
+    for(int k=0; k<9; k++) {
+        vec2 src = uv - c[k] * px;
+        
+        // Bounce-Back Boundary Condition
+        if (src.y < 0.0 || src.y > 1.0) {
+            f[k] = fSelf[opp[k]];
+        } else {
+            src.x = fract(src.x);
+            vec4 t0 = texture(uF0, src);
+            vec4 t1 = texture(uF1, src);
+            vec4 t2 = texture(uF2, src);
+            if(k==0) f[k]=t0.x; else if(k==1) f[k]=t0.y; else if(k==2) f[k]=t0.z; else if(k==3) f[k]=t0.w;
+            else if(k==4) f[k]=t1.x; else if(k==5) f[k]=t1.y; else if(k==6) f[k]=t1.z; else if(k==7) f[k]=t1.w;
+            else f[k]=t2.x;
+        }
+    }
+
+    // Recalculate rho, u
+    float rho = 0.0;
+    vec2 m = vec2(0.0);
+    for(int k=0; k<9; k++){
+        rho += f[k];
+        m += f[k] * c[k];
+    }
+    
+    // Safety Clamps to prevent NaN explosion
+    rho = clamp(rho, 0.1, 5.0);
+    if (isnan(rho)) rho = 1.0;
+    
+    vec2 uEq = m / rho;
+    vec2 uForce = uEq + vec2(Fx, Fy)/(2.0 * rho);
+    
+    // Clamp velocity
+    if (length(uForce) > 0.5) uForce = normalize(uForce) * 0.5;
+    
+    float usq = dot(uForce, uForce);
+    
+    // Collision
+    float fNew[9];
+    for(int k=0; k<9; k++){
+        float cu = dot(c[k], uForce);
+        float feq = w[k] * rho * (1.0 + 3.0*cu + 4.5*cu*cu - 1.5*usq);
+        
+        float cF = dot(c[k], vec2(Fx,Fy));
+        float uF = dot(uForce, vec2(Fx,Fy));
+        float forceTerm = w[k] * (1.0 - 0.5*invTau) * (3.0*cF + 9.0*cu*cF - 3.0*uF);
+        
+        fNew[k] = f[k] - (f[k] - feq) * invTau + forceTerm;
+        
+        // Sanity Check
+        if (isnan(fNew[k])) fNew[k] = w[k] * 1.0;
+    }
+    
+    outF0 = vec4(fNew[0], fNew[1], fNew[2], fNew[3]);
+    outF1 = vec4(fNew[4], fNew[5], fNew[6], fNew[7]);
+    outF2 = vec4(fNew[8], 0.0, 0.0, 1.0);
+}`;
+
+        // Velocity & Shear Calc
+        const fsVel = `#version 300 es
+precision highp float;
+uniform sampler2D uF0, uF1, uF2;
+uniform sampler2D uVel;
+uniform vec2 px;
+out vec4 outVel; // r=ux, g=uy, b=rho, a=shear
+
+void main(){
+    vec2 uv = gl_FragCoord.xy * px;
+    vec4 t0 = texture(uF0, uv);
+    vec4 t1 = texture(uF1, uv);
+    vec4 t2 = texture(uF2, uv);
+    
+    float f[9];
+    f[0]=t0.x; f[1]=t0.y; f[2]=t0.z; f[3]=t0.w;
+    f[4]=t1.x; f[5]=t1.y; f[6]=t1.z; f[7]=t1.w;
+    f[8]=t2.x;
+    
+    float rho = 0.0;
+    vec2 m = vec2(0.0);
+    
+    // c vectors
+    vec2 c[9];
+    c[0]=vec2(0,0); c[1]=vec2(1,0); c[2]=vec2(0,1); c[3]=vec2(-1,0);
+    c[4]=vec2(0,-1); c[5]=vec2(1,1); c[6]=vec2(-1,1); c[7]=vec2(-1,-1); c[8]=vec2(1,-1);
+
+    for(int k=0; k<9; k++){
+        rho += f[k];
+        m += f[k] * c[k];
+    }
+    
+    // Safety Clamps for Output
+    rho = clamp(rho, 0.1, 5.0);
+    if (isnan(rho)) rho = 1.0;
+    
+    vec2 u = (rho > 1e-6) ? m/rho : vec2(0.0);
+    if (length(u) > 0.5) u = normalize(u) * 0.5;
+    
+    // Shear Calculation (Gradients)
+    vec2 uL = texture(uVel, uv + vec2(-px.x, 0)).xy;
+    vec2 uR = texture(uVel, uv + vec2( px.x, 0)).xy;
+    vec2 uD = texture(uVel, uv + vec2(0, -px.y)).xy;
+    vec2 uU = texture(uVel, uv + vec2(0,  px.y)).xy;
+    
+    float dudx = (uR.x - uL.x) * 0.5;
+    float dvdy = (uU.y - uD.y) * 0.5;
+    float dudy = (uU.x - uD.x) * 0.5;
+    float dvdx = (uR.y - uL.y) * 0.5;
+    float sxx = dudx; 
+    float syy = dvdy; 
+    float sxy = 0.5 * (dudy + dvdx);
+    float shearRate = sqrt(2.0*(sxx*sxx + syy*syy + 2.0*sxy*sxy)) + 1e-10;
+    
+    outVel = vec4(u, rho, shearRate);
+}`;
+
+        // Render Shader (Visualization)
+        const fsRender = `#version 300 es
+precision highp float;
+uniform sampler2D uScal;
+uniform sampler2D uVel; 
+in vec2 vUV;
+out vec4 outColor;
+void main(){
+    vec4 s = texture(uScal, vUV);
+    float wax = s.r;
+    float temp = s.g;
+    
+    vec4 vData = texture(uVel, vUV);
+    vec2 vel = vData.xy;
+    float speed = length(vel);
+    
+    vec3 col = vec3(0.04, 0.05, 0.1); // bg
+    
+    if (wax > 0.02) {
+        vec3 wc;
+        if (temp < 0.35) {
+            float f = temp/0.35;
+            wc = mix(vec3(0.2,0.06,0.4), vec3(0.5,0.15,0.47), f);
+        } else if (temp < 0.55) {
+            float f = (temp-0.35)/0.2;
+            wc = mix(vec3(0.51,0.16,0.47), vec3(0.82,0.35,0.15), f);
+        } else {
+            float f = (temp-0.55)/0.45;
+            wc = mix(vec3(0.82,0.35,0.15), vec3(0.16,0.65,0.08), f);
+        }
+        float a = clamp(wax, 0.0, 1.0);
+        col = mix(col, wc, a);
+    }
+    
+    // Heat glow
+    float glow = 1.0 - vUV.y/0.02;
+    if (glow > 0.0) {
+        col = mix(col, vec3(1.0, 0.2, 0.0), glow * 0.6);
+    }
+    
+    // Debug: Velocity Visualization (Blue overlay)
+    // Scale speed for visibility (e.g. 0.01 is fast)
+    // col += vec3(0.0, 0.2, 1.0) * smoothstep(0.0, 0.05, speed);
+    
+    outColor = vec4(col, 1.0);
+}`;
+
+        // --- WebGL Helpers ---
+
+        function createShader(gl, type, src) {
+            const s = gl.createShader(type);
+            gl.shaderSource(s, src);
+            gl.compileShader(s);
+            if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) {
+                console.error(gl.getShaderInfoLog(s));
+                return null;
+            }
+            return s;
+        }
+
+        function createProgram(gl, vsSrc, fsSrc) {
+            const p = gl.createProgram();
+            const vs = createShader(gl, gl.VERTEX_SHADER, vsSrc);
+            const fs = createShader(gl, gl.FRAGMENT_SHADER, fsSrc);
+            gl.attachShader(p, vs);
+            gl.attachShader(p, fs);
+            gl.linkProgram(p);
+            if (!gl.getProgramParameter(p, gl.LINK_STATUS)) {
+                console.error(gl.getProgramInfoLog(p));
+                return null;
+            }
+            return p;
+        }
+
+        function createTexture(w, h, data, filterType) {
+            const t = gl.createTexture();
+            gl.bindTexture(gl.TEXTURE_2D, t);
+            // Use RGBA32F for precision
+            gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA32F, w, h, 0, gl.RGBA, gl.FLOAT, data);
+            const filter = filterType || gl.NEAREST;
+            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, filter);
+            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, filter);
+            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.REPEAT); // X wrap
+            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE); // Y clamp
+            return t;
+        }
+
+        function initGL() {
+            gl = canvas.getContext('webgl2', { premultipliedAlpha: false });
+            if (!gl) return alert("WebGL2 required");
+            if (!gl.getExtension('EXT_color_buffer_float')) return alert("Need EXT_color_buffer_float");
+            gl.getExtension('OES_texture_float_linear'); // Try to enable linear filtering
+
+            // Programs
+            programs.scal = createProgram(gl, vsFull, fsScal);
+            programs.lbm = createProgram(gl, vsFull, fsLBM);
+            programs.vel = createProgram(gl, vsFull, fsVel);
+            programs.render = createProgram(gl, vsFull, fsRender);
+
+            // Quad
+            quadVBO = gl.createBuffer();
+            gl.bindBuffer(gl.ARRAY_BUFFER, quadVBO);
+            gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 1, -1, -1, 1, 1, 1]), gl.STATIC_DRAW);
+        }
+
+        function initState() {
+            W = Math.floor(canvas.width / P.CELL);
+            H = Math.floor(canvas.height / P.CELL);
+
+            // Initial Data
+            const N = W * H;
+            const f0Data = new Float32Array(N * 4);
+            const f1Data = new Float32Array(N * 4);
+            const f2Data = new Float32Array(N * 4);
+            const scalData = new Float32Array(N * 4); // r=wax, g=temp
+            const velData = new Float32Array(N * 4);  // r=ux, g=uy, b=rho, a=shear
+
+            // Weights
+            const w = [4 / 9, 1 / 9, 1 / 9, 1 / 9, 1 / 9, 1 / 36, 1 / 36, 1 / 36, 1 / 36];
+
+            const waxH = Math.floor(H * 0.18);
+            for (let y = 0; y < H; y++) {
+                for (let x = 0; x < W; x++) {
+                    const i = y * W + x;
+                    const inWax = y < waxH;
+
+                    // Wax/Temp
+                    scalData[i * 4 + 0] = inWax ? 1.0 : 0.0;
+                    scalData[i * 4 + 1] = inWax ? 0.12 : 0.28;
+
+                    // Density/Vel
+                    velData[i * 4 + 0] = 0;
+                    velData[i * 4 + 1] = 0;
+                    velData[i * 4 + 2] = 1.0;
+                    velData[i * 4 + 3] = 0;
+
+                    // F (Equilibrium at u=0, rho=1)
+                    const rho = 1.0;
+                    // 0,1,2,3 -> f0
+                    f0Data[i * 4 + 0] = w[0] * rho;
+                    f0Data[i * 4 + 1] = w[1] * rho;
+                    f0Data[i * 4 + 2] = w[2] * rho;
+                    f0Data[i * 4 + 3] = w[3] * rho;
+                    // 4,5,6,7 -> f1
+                    f1Data[i * 4 + 0] = w[4] * rho;
+                    f1Data[i * 4 + 1] = w[5] * rho;
+                    f1Data[i * 4 + 2] = w[6] * rho;
+                    f1Data[i * 4 + 3] = w[7] * rho;
+                    // 8 -> f2
+                    f2Data[i * 4 + 0] = w[8] * rho;
+                }
+            }
+
+            // Create Ping-Pong Textures
+            // Check for linear float filtering support
+            const canLinear = gl.getExtension('OES_texture_float_linear');
+            const linear = canLinear ? gl.LINEAR : gl.NEAREST;
+
+            // F dists need NEAREST to preserve data exactly
+            textures.f0 = [createTexture(W, H, f0Data, gl.NEAREST), createTexture(W, H, null, gl.NEAREST)];
+            textures.f1 = [createTexture(W, H, f1Data, gl.NEAREST), createTexture(W, H, null, gl.NEAREST)];
+            textures.f2 = [createTexture(W, H, f2Data, gl.NEAREST), createTexture(W, H, null, gl.NEAREST)];
+            // Scalar and Vel benefit from LINEAR for smooth advection/gradients
+            textures.scal = [createTexture(W, H, scalData, linear), createTexture(W, H, null, linear)];
+            textures.vel = [createTexture(W, H, velData, linear), createTexture(W, H, null, linear)];
+
+            // Create FBOs
+            // 1. Scal FBOs (Ping Pong)
+            fbos.scal = [gl.createFramebuffer(), gl.createFramebuffer()];
+            for (let i = 0; i < 2; i++) {
+                gl.bindFramebuffer(gl.FRAMEBUFFER, fbos.scal[i]);
+                gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, textures.scal[i], 0);
+            }
+
+            // 2. LBM FBOs (Ping Pong, MRT)
+            fbos.lbm = [gl.createFramebuffer(), gl.createFramebuffer()];
+            for (let i = 0; i < 2; i++) {
+                gl.bindFramebuffer(gl.FRAMEBUFFER, fbos.lbm[i]);
+                gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, textures.f0[i], 0);
+                gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT1, gl.TEXTURE_2D, textures.f1[i], 0);
+                gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT2, gl.TEXTURE_2D, textures.f2[i], 0);
+                gl.drawBuffers([gl.COLOR_ATTACHMENT0, gl.COLOR_ATTACHMENT1, gl.COLOR_ATTACHMENT2]);
+            }
+
+            // 3. Vel FBOs (Ping Pong)
+            fbos.vel = [gl.createFramebuffer(), gl.createFramebuffer()];
+            for (let i = 0; i < 2; i++) {
+                gl.bindFramebuffer(gl.FRAMEBUFFER, fbos.vel[i]);
+                gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, textures.vel[i], 0);
+            }
+
+            gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+
+            // Stats calc buffer
+            fbos.readBuf = new Float32Array(W * H * 4);
+        }
+
+        function setUniforms(prog) {
+            gl.useProgram(prog);
+            gl.uniform2f(gl.getUniformLocation(prog, "px"), 1 / W, 1 / H);
+            gl.uniform1f(gl.getUniformLocation(prog, "tauMax"), P.TAU_MAX);
+            gl.uniform1f(gl.getUniformLocation(prog, "tauMin"), P.TAU_MIN);
+            gl.uniform1f(gl.getUniformLocation(prog, "yieldStress"), P.YIELD_STRESS);
+            gl.uniform1f(gl.getUniformLocation(prog, "yieldT"), P.YIELD_T);
+            gl.uniform1f(gl.getUniformLocation(prog, "buoyancy"), P.BUOY);
+            gl.uniform1f(gl.getUniformLocation(prog, "gravity"), P.GRAV);
+            gl.uniform1f(gl.getUniformLocation(prog, "yieldBand"), P.YIELD_BAND);
+            gl.uniform1f(gl.getUniformLocation(prog, "waterTau"), P.WATER_TAU);
+            gl.uniform1f(gl.getUniformLocation(prog, "surfTension"), P.SURF);
+
+            gl.uniform1f(gl.getUniformLocation(prog, "waxAdvect"), P.WAX_ADVECT);
+            gl.uniform1f(gl.getUniformLocation(prog, "waxDiff"), P.WAX_DIFF);
+            gl.uniform1f(gl.getUniformLocation(prog, "waxSharp"), P.WAX_SHARP);
+            gl.uniform1f(gl.getUniformLocation(prog, "waxMobility"), P.WAX_MOBILITY);
+            gl.uniform1f(gl.getUniformLocation(prog, "heat"), P.HEAT);
+            gl.uniform1f(gl.getUniformLocation(prog, "cool"), P.COOL);
+            gl.uniform1f(gl.getUniformLocation(prog, "tempDiff"), P.DIFF);
+        }
+
+        function bindTex(prog, name, unit, tex) {
+            gl.activeTexture(gl.TEXTURE0 + unit);
+            gl.bindTexture(gl.TEXTURE_2D, tex);
+            gl.uniform1i(gl.getUniformLocation(prog, name), unit);
+        }
+
+        function step() {
+            gl.viewport(0, 0, W, H);
+
+            gl.enableVertexAttribArray(0);
+            gl.bindBuffer(gl.ARRAY_BUFFER, quadVBO);
+            gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
+
+            // 1. Update Scalars (Wax, Temp)
+            // Read: Scal[read], Vel[read] -> Write: Scal[write]
+            gl.useProgram(programs.scal);
+            setUniforms(programs.scal);
+            bindTex(programs.scal, "uScal", 0, textures.scal[idxRead]);
+            bindTex(programs.scal, "uVel", 1, textures.vel[idxRead]);
+            gl.bindFramebuffer(gl.FRAMEBUFFER, fbos.scal[idxWrite]);
+            gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+
+            // 2. LBM Collision & Stream
+            gl.useProgram(programs.lbm);
+            setUniforms(programs.lbm);
+            bindTex(programs.lbm, "uF0", 0, textures.f0[idxRead]);
+            bindTex(programs.lbm, "uF1", 1, textures.f1[idxRead]);
+            bindTex(programs.lbm, "uF2", 2, textures.f2[idxRead]);
+            bindTex(programs.lbm, "uScal", 3, textures.scal[idxWrite]); // Use updated scalars
+            bindTex(programs.lbm, "uVel", 4, textures.vel[idxRead]);    // Use old velocity (shear)
+            gl.bindFramebuffer(gl.FRAMEBUFFER, fbos.lbm[idxWrite]);
+            gl.drawBuffers([gl.COLOR_ATTACHMENT0, gl.COLOR_ATTACHMENT1, gl.COLOR_ATTACHMENT2]); // Ensure MRT
+            gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+
+            // 3. Compute Velocity & Shear
+            // Read: F[write], Vel[read] (for neighbor shear calc) -> Write: Vel[write]
+            gl.useProgram(programs.vel);
+            setUniforms(programs.vel);
+            bindTex(programs.vel, "uF0", 0, textures.f0[idxWrite]);
+            bindTex(programs.vel, "uF1", 1, textures.f1[idxWrite]);
+            bindTex(programs.vel, "uF2", 2, textures.f2[idxWrite]);
+            // Note: We need sampler for Vel READ (for shear)
+            bindTex(programs.vel, "uVel", 3, textures.vel[idxRead]);
+            gl.bindFramebuffer(gl.FRAMEBUFFER, fbos.vel[idxWrite]);
+            gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+
+            // Swap indices
+            let tmp = idxRead; idxRead = idxWrite; idxWrite = tmp;
+        }
+
+        function render() {
+            gl.viewport(0, 0, canvas.width, canvas.height);
+            gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+            gl.useProgram(programs.render);
+            bindTex(programs.render, "uScal", 0, textures.scal[idxRead]);
+            bindTex(programs.render, "uVel", 1, textures.vel[idxRead]);
+
+            gl.enableVertexAttribArray(0);
+            gl.bindBuffer(gl.ARRAY_BUFFER, quadVBO);
+            gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
+            gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+        }
+
+        // Stats (optional, CPU readback is slow, do sparingly)
+        function updateStats() {
+            // Read 4 bytes per pixel? No, RGBA32F is float.
+            // gl.readPixels reads into Float32Array if texture is float.
+            /*
+            gl.bindFramebuffer(gl.FRAMEBUFFER, fbos.scal[idxRead]);
+            gl.readPixels(0, 0, W, H, gl.RGBA, gl.FLOAT, fbos.readBuf);
+            let waxM = 0, maxT = 0;
+            for(let i=0; i<W*H; i++){
+                let w = fbos.readBuf[i*4];
+                let t = fbos.readBuf[i*4+1];
+                waxM += w;
+                if(w > 0.3 && t > maxT) maxT = t;
+            }
+            document.getElementById('stats').innerText = `GPU | ${W}x${H} | Tick:${frame}`;
+            */
+            document.getElementById('stats').innerText = `GPU | ${W}x${H} | Tick:${frame}`;
+        }
+
+        function loop() {
+            if (!paused) {
+                for (let i = 0; i < ff; i++) {
+                    step();
+                    frame++;
+                }
+            }
+            render();
+            if (frame % 30 === 0) updateStats();
+            requestAnimationFrame(loop);
+        }
+
+        function resize() {
+            canvas.width = innerWidth;
+            canvas.height = innerHeight;
+            readP();
+            initState();
+        }
+
+        window.onload = () => {
+            initGL();
+            resize();
+            loop();
+        };
+
+        document.getElementById('ff').onclick = () => { ff = ff === 1 ? 5 : ff === 5 ? 20 : 1; document.getElementById('ff').textContent = ff + 'x'; };
+        document.getElementById('pp').onclick = () => { paused = !paused; document.getElementById('pp').textContent = paused ? '>' : '||'; };
+        document.getElementById('rr').onclick = () => { frame = 0; initState(); };
+        document.getElementById('params').addEventListener('change', () => { readP(); });
+        addEventListener('resize', resize);
+
+    </script>
+</body>
+
+</html>

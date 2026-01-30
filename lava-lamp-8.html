@@ -1,0 +1,471 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Lava Lamp v8 - Rule-Based with Cohesion</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        html, body { width: 100%; height: 100%; overflow: hidden; background: #0a0a12; }
+        #canvas { display: block; image-rendering: pixelated; image-rendering: crisp-edges; }
+        #ui {
+            position: absolute; top: 10px; left: 10px;
+            color: #fff; font-family: monospace; font-size: 12px;
+            background: rgba(0,0,0,0.85); padding: 12px; border-radius: 4px; z-index: 100;
+        }
+        #controls { position: absolute; top: 10px; right: 10px; z-index: 100; }
+        #controls button {
+            padding: 10px 20px; margin: 2px; background: #222; color: #fff;
+            border: 1px solid #555; cursor: pointer; font-family: monospace; font-size: 14px;
+        }
+        #controls button:hover { background: #444; }
+        #controls button.active { background: #a00; }
+    </style>
+</head>
+<body>
+    <canvas id="canvas"></canvas>
+    <div id="ui">
+        <div style="font-size:14px;margin-bottom:8px;">Lava Lamp v8</div>
+        <div id="fps">FPS: 0</div>
+        <div id="ticks">Ticks: 0</div>
+        <div id="temp-stats">Temp: --</div>
+        <div id="swap-stats">Moves: 0</div>
+        <div style="margin-top:10px;border-top:1px solid #444;padding-top:8px;">
+            <div style="margin-bottom:4px;color:#888;">Heat params:</div>
+            <label>Input: <input type="number" id="p-input" step="0.01" style="width:60px"></label><br>
+            <label>Diffuse: <input type="number" id="p-diffuse" step="0.01" style="width:60px"></label><br>
+            <label>Loss: <input type="number" id="p-loss" step="0.0001" style="width:60px"></label><br>
+            <label>Cool: <input type="number" id="p-cool" step="0.01" style="width:60px"></label><br>
+            <div style="margin:8px 0 4px;color:#888;">Move params:</div>
+            <label>Rise T: <input type="number" id="p-rise" step="0.05" style="width:60px"></label><br>
+            <label>Fall T: <input type="number" id="p-fall" step="0.05" style="width:60px"></label><br>
+            <label>Move %: <input type="number" id="p-prob" step="0.05" style="width:60px"></label><br>
+            <button id="apply-btn" style="margin-top:8px;padding:4px 12px;">Apply & Reset</button>
+        </div>
+    </div>
+    <div id="controls">
+        <button id="ff-btn">1x</button>
+        <button id="pause-btn">| |</button>
+        <button id="heater-btn">Heater ON</button>
+        <button id="reset-btn">Reset</button>
+    </div>
+
+<script>
+// ============================================================
+// LAVA LAMP v8 - Simple rule-based approach with cohesion
+// ============================================================
+// Key insight: Abandon energy minimization. Use direct rules:
+// 1. Hot wax wants to rise, cold wax wants to fall
+// 2. Wax can only move if it stays connected (cohesion check)
+// 3. This prevents fragmentation while allowing blob movement
+// ============================================================
+
+const CONFIG = {
+    CELL_SIZE: 3,
+
+    // Heat parameters
+    HEAT_INPUT: 0.2,        // Heat added per tick in heater zone
+    HEAT_DIFFUSION: 0.5,    // How fast heat spreads within wax (much faster!)
+    HEAT_LOSS: 0.0002,      // Ambient heat loss (very small)
+    COOL_RATE: 0.03,        // Heat removed in cooler zone
+
+    // Movement parameters
+    RISE_THRESHOLD: 0.5,    // Temperature above which wax wants to rise
+    FALL_THRESHOLD: 0.3,    // Temperature below which wax wants to fall
+    MOVE_PROBABILITY: 0.3,  // Probability of attempting move each tick (adds viscosity)
+
+    // Geometry
+    HEATER_WIDTH_FRAC: 0.33,  // Center third
+    COOLER_HEIGHT: 5,
+    WAX_HEIGHT_FRAC: 0.08,
+    WAX_WIDTH_FRAC: 0.9,
+};
+
+let canvas, ctx, cols, rows;
+let grid;  // Single grid - we'll be careful about update order
+let frame = 0, paused = false, heaterOn = true;
+let fastForwardFactor = 1, fastForwardLevels = [1, 10, 100, 1000], fastForwardIndex = 0;
+let lastRenderTime = 0;
+let heaterLeft, heaterRight;
+let movesThisTick = 0, movesTotal = 0;
+
+// PRNG
+let rngState = 12345;
+function rand() {
+    rngState ^= rngState << 13;
+    rngState ^= rngState >>> 17;
+    rngState ^= rngState << 5;
+    return (rngState >>> 0) / 0x100000000;
+}
+
+function init() {
+    canvas = document.getElementById('canvas');
+    ctx = canvas.getContext('2d');
+    resize();
+    window.addEventListener('resize', resize);
+    setupControls();
+    resetSimulation();
+    requestAnimationFrame(gameLoop);
+}
+
+function resize() {
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+    const newCols = Math.floor(canvas.width / CONFIG.CELL_SIZE);
+    const newRows = Math.floor(canvas.height / CONFIG.CELL_SIZE);
+    if (newCols !== cols || newRows !== rows) {
+        cols = newCols;
+        rows = newRows;
+        const heaterWidth = Math.floor(cols * CONFIG.HEATER_WIDTH_FRAC);
+        heaterLeft = Math.floor((cols - heaterWidth) / 2);
+        heaterRight = heaterLeft + heaterWidth;
+        resetSimulation();
+    }
+}
+
+function resetSimulation() {
+    grid = new Array(cols * rows);
+    for (let i = 0; i < grid.length; i++) {
+        grid[i] = { phase: 0, temp: 0 };
+    }
+
+    // Create flat wax layer at bottom
+    const waxHeight = Math.floor(rows * CONFIG.WAX_HEIGHT_FRAC);
+    const waxWidth = Math.floor(cols * CONFIG.WAX_WIDTH_FRAC);
+    const waxLeft = Math.floor((cols - waxWidth) / 2);
+    const waxRight = waxLeft + waxWidth;
+    const waxTop = rows - waxHeight;
+
+    for (let y = waxTop; y < rows; y++) {
+        for (let x = waxLeft; x < waxRight; x++) {
+            grid[y * cols + x].phase = 1;
+        }
+    }
+
+    frame = 0;
+    movesTotal = 0;
+    rngState = Date.now() & 0xFFFFFFFF;
+}
+
+function populateInputs() {
+    document.getElementById('p-input').value = CONFIG.HEAT_INPUT;
+    document.getElementById('p-diffuse').value = CONFIG.HEAT_DIFFUSION;
+    document.getElementById('p-loss').value = CONFIG.HEAT_LOSS;
+    document.getElementById('p-cool').value = CONFIG.COOL_RATE;
+    document.getElementById('p-rise').value = CONFIG.RISE_THRESHOLD;
+    document.getElementById('p-fall').value = CONFIG.FALL_THRESHOLD;
+    document.getElementById('p-prob').value = CONFIG.MOVE_PROBABILITY;
+}
+
+function applyInputs() {
+    CONFIG.HEAT_INPUT = parseFloat(document.getElementById('p-input').value) || 0;
+    CONFIG.HEAT_DIFFUSION = parseFloat(document.getElementById('p-diffuse').value) || 0;
+    CONFIG.HEAT_LOSS = parseFloat(document.getElementById('p-loss').value) || 0;
+    CONFIG.COOL_RATE = parseFloat(document.getElementById('p-cool').value) || 0;
+    CONFIG.RISE_THRESHOLD = parseFloat(document.getElementById('p-rise').value) || 0;
+    CONFIG.FALL_THRESHOLD = parseFloat(document.getElementById('p-fall').value) || 0;
+    CONFIG.MOVE_PROBABILITY = parseFloat(document.getElementById('p-prob').value) || 0;
+    console.log('Applied:', JSON.stringify(CONFIG, null, 2));
+    resetSimulation();
+}
+
+function setupControls() {
+    populateInputs();
+
+    document.getElementById('ff-btn').onclick = () => {
+        fastForwardIndex = (fastForwardIndex + 1) % fastForwardLevels.length;
+        fastForwardFactor = fastForwardLevels[fastForwardIndex];
+        document.getElementById('ff-btn').textContent = fastForwardFactor + 'x';
+    };
+    document.getElementById('pause-btn').onclick = () => {
+        paused = !paused;
+        document.getElementById('pause-btn').textContent = paused ? '▶' : '| |';
+    };
+    document.getElementById('heater-btn').onclick = () => {
+        heaterOn = !heaterOn;
+        document.getElementById('heater-btn').textContent = heaterOn ? 'Heater ON' : 'Heater OFF';
+        document.getElementById('heater-btn').classList.toggle('active', !heaterOn);
+    };
+    document.getElementById('reset-btn').onclick = resetSimulation;
+    document.getElementById('apply-btn').onclick = applyInputs;
+
+    document.addEventListener('keydown', (e) => {
+        if (e.key === ' ') { paused = !paused; e.preventDefault(); }
+        if (e.key === 'r' || e.key === 'R') resetSimulation();
+        if (e.key === 'h' || e.key === 'H') {
+            heaterOn = !heaterOn;
+            document.getElementById('heater-btn').textContent = heaterOn ? 'Heater ON' : 'Heater OFF';
+            document.getElementById('heater-btn').classList.toggle('active', !heaterOn);
+        }
+    });
+}
+
+// ============================================================
+// SIMULATION
+// ============================================================
+
+function advanceTick() {
+    frame++;
+    movesThisTick = 0;
+
+    // Step 1: Apply heat sources
+    applyHeat();
+
+    // Step 2: Diffuse heat through wax
+    diffuseHeat();
+
+    // Step 3: Move wax (with cohesion check)
+    moveWax();
+
+    movesTotal += movesThisTick;
+
+    // Debug: log every 500 frames
+    if (frame % 500 === 0) {
+        let sum = 0, count = 0, max = 0;
+        for (let i = 0; i < grid.length; i++) {
+            if (grid[i].phase === 1) {
+                sum += grid[i].temp;
+                count++;
+                max = Math.max(max, grid[i].temp);
+            }
+        }
+        console.log(`F${frame}: avg=${(sum/count).toFixed(3)}, max=${max.toFixed(3)}, moves=${movesTotal}`);
+    }
+}
+
+function applyHeat() {
+    for (let y = 0; y < rows; y++) {
+        for (let x = 0; x < cols; x++) {
+            const idx = y * cols + x;
+            const cell = grid[idx];
+
+            // Only heat wax (not water)
+            if (cell.phase !== 1) continue;
+
+            // Heater: bottom row, center third
+            if (heaterOn && y === rows - 1 && x >= heaterLeft && x < heaterRight) {
+                cell.temp = Math.min(1, cell.temp + CONFIG.HEAT_INPUT);
+            }
+
+            // Cooler: top region
+            if (y < CONFIG.COOLER_HEIGHT) {
+                cell.temp = Math.max(0, cell.temp - CONFIG.COOL_RATE);
+            }
+
+            // Ambient heat loss everywhere
+            cell.temp = Math.max(0, cell.temp - CONFIG.HEAT_LOSS);
+        }
+    }
+}
+
+function diffuseHeat() {
+    // Create temp array for new temperatures
+    const newTemps = new Float32Array(cols * rows);
+
+    // Copy current temps
+    for (let i = 0; i < grid.length; i++) {
+        newTemps[i] = grid[i].temp;
+    }
+
+    for (let y = 0; y < rows; y++) {
+        for (let x = 0; x < cols; x++) {
+            const idx = y * cols + x;
+            const cell = grid[idx];
+
+            if (cell.phase !== 1) continue;
+
+            // Standard heat diffusion: Laplacian
+            const neighbors = [
+                [x, y - 1], [x, y + 1], [x - 1, y], [x + 1, y]
+            ];
+
+            let laplacian = 0;
+            let waxNeighborCount = 0;
+            for (const [nx, ny] of neighbors) {
+                if (nx >= 0 && nx < cols && ny >= 0 && ny < rows) {
+                    const nidx = ny * cols + nx;
+                    // Only diffuse between wax cells
+                    if (grid[nidx].phase === 1) {
+                        laplacian += grid[nidx].temp - cell.temp;
+                        waxNeighborCount++;
+                    }
+                    // Water neighbors: no heat transfer (wax is insulated from water)
+                }
+            }
+            // Scale diffusion by number of wax neighbors
+            if (waxNeighborCount === 0) continue;
+
+            newTemps[idx] = cell.temp + CONFIG.HEAT_DIFFUSION * laplacian;
+        }
+    }
+
+    // Apply new temperatures
+    for (let i = 0; i < grid.length; i++) {
+        if (grid[i].phase === 1) {
+            grid[i].temp = Math.max(0, Math.min(1, newTemps[i]));
+        }
+    }
+}
+
+function moveWax() {
+    // Process from top to bottom for rising, bottom to top for falling
+    // Use checkerboard to avoid conflicts
+
+    for (let parity = 0; parity < 2; parity++) {
+        // Rising pass (hot wax moves up) - process top to bottom
+        for (let y = 1; y < rows; y++) {
+            for (let x = 0; x < cols; x++) {
+                if ((x + y) % 2 !== parity) continue;
+                tryMove(x, y, 'up');
+            }
+        }
+
+        // Falling pass (cold wax moves down) - process bottom to top
+        for (let y = rows - 2; y >= 0; y--) {
+            for (let x = 0; x < cols; x++) {
+                if ((x + y) % 2 !== parity) continue;
+                tryMove(x, y, 'down');
+            }
+        }
+    }
+}
+
+function tryMove(x, y, direction) {
+    const idx = y * cols + x;
+    const cell = grid[idx];
+
+    // Must be wax
+    if (cell.phase !== 1) return;
+
+    // Check if this cell wants to move in this direction
+    if (direction === 'up' && cell.temp < CONFIG.RISE_THRESHOLD) return;
+    if (direction === 'down' && cell.temp > CONFIG.FALL_THRESHOLD) return;
+
+    // Viscosity: random chance to skip
+    if (rand() > CONFIG.MOVE_PROBABILITY) return;
+
+    // Target cell
+    const ty = direction === 'up' ? y - 1 : y + 1;
+    if (ty < 0 || ty >= rows) return;
+
+    const tidx = ty * cols + x;
+    const target = grid[tidx];
+
+    // Target must be water
+    if (target.phase !== 0) return;
+
+    // COHESION CHECK: Will the wax cell still have at least one wax neighbor after moving?
+    // Check neighbors at the TARGET position
+    const hasWaxNeighborAtTarget = countWaxNeighbors(x, ty, idx) >= 1;
+
+    // Also check: will moving break the blob? (leave isolated cells behind)
+    // The cell we're leaving behind should still be connected
+    const neighborsAtCurrent = countWaxNeighbors(x, y, -1);
+
+    // Only move if:
+    // 1. We'll have a neighbor at the new position, OR we're part of a larger mass that won't break
+    // 2. We're not the only connection between two parts of the blob
+
+    if (!hasWaxNeighborAtTarget && neighborsAtCurrent <= 1) {
+        // Would become isolated - don't move
+        return;
+    }
+
+    // Perform the swap
+    grid[idx].phase = 0;
+    grid[idx].temp = 0;
+    grid[tidx].phase = 1;
+    grid[tidx].temp = cell.temp;  // Heat moves with the wax
+
+    movesThisTick++;
+}
+
+function countWaxNeighbors(x, y, excludeIdx) {
+    let count = 0;
+    const neighbors = [
+        [x, y - 1], [x, y + 1], [x - 1, y], [x + 1, y]
+    ];
+
+    for (const [nx, ny] of neighbors) {
+        if (nx >= 0 && nx < cols && ny >= 0 && ny < rows) {
+            const nidx = ny * cols + nx;
+            if (nidx !== excludeIdx && grid[nidx].phase === 1) {
+                count++;
+            }
+        }
+    }
+    return count;
+}
+
+// ============================================================
+// RENDERING
+// ============================================================
+
+function render() {
+    ctx.fillStyle = '#0a0a12';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    const size = CONFIG.CELL_SIZE;
+
+    for (let y = 0; y < rows; y++) {
+        for (let x = 0; x < cols; x++) {
+            const cell = grid[y * cols + x];
+
+            if (cell.phase === 1) {
+                const T = cell.temp;
+                // Color: dark red (cold) to bright yellow (hot)
+                const r = Math.floor(120 + 135 * T);
+                const g = Math.floor(30 + 200 * T);
+                const b = Math.floor(20 + 40 * T);
+                ctx.fillStyle = `rgb(${r},${g},${b})`;
+                ctx.fillRect(x * size, y * size, size, size);
+            }
+        }
+    }
+
+    // Heater indicator (subtle line at bottom)
+    if (heaterOn) {
+        ctx.fillStyle = 'rgba(255, 100, 0, 0.8)';
+        ctx.fillRect(heaterLeft * size, (rows - 1) * size + size - 2,
+                     (heaterRight - heaterLeft) * size, 2);
+    }
+}
+
+function updateUI() {
+    let waxCount = 0, tempSum = 0, maxTemp = 0, minTemp = 1;
+    for (let i = 0; i < grid.length; i++) {
+        if (grid[i].phase === 1) {
+            waxCount++;
+            tempSum += grid[i].temp;
+            maxTemp = Math.max(maxTemp, grid[i].temp);
+            minTemp = Math.min(minTemp, grid[i].temp);
+        }
+    }
+
+    document.getElementById('ticks').textContent = `Ticks: ${frame}`;
+    document.getElementById('temp-stats').textContent = waxCount > 0
+        ? `Temp - Min: ${minTemp.toFixed(2)} Avg: ${(tempSum/waxCount).toFixed(2)} Max: ${maxTemp.toFixed(2)}`
+        : 'No wax';
+    document.getElementById('swap-stats').textContent = `Moves: ${movesThisTick}/tick | ${movesTotal} total`;
+}
+
+function gameLoop(timestamp) {
+    const dt = timestamp - lastRenderTime;
+    lastRenderTime = timestamp;
+    document.getElementById('fps').textContent = `FPS: ${dt > 0 ? Math.round(1000 / dt) : 0}`;
+
+    if (!paused) {
+        for (let i = 0; i < fastForwardFactor; i++) {
+            advanceTick();
+        }
+    }
+
+    render();
+    updateUI();
+    requestAnimationFrame(gameLoop);
+}
+
+window.addEventListener('DOMContentLoaded', init);
+</script>
+</body>
+</html>

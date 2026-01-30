@@ -1,0 +1,915 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Lava Lamp CA - Velocity Field v3 (Cohesion Forces)</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        html, body { height: 100%; overflow: hidden; background: #0a0a12; }
+        #canvas { display: block; image-rendering: pixelated; width: 100%; height: 100%; }
+        #ui { position: absolute; top: 10px; left: 10px; color: #fff; font: 10px monospace; background: rgba(0,0,0,0.85); padding: 8px; border-radius: 4px; max-height: 90vh; overflow-y: auto; min-width: 220px; }
+        #ui .param-row { display: flex; align-items: center; justify-content: space-between; margin: 3px 0; }
+        #ui label { display: inline-block; width: 100px; }
+        #ui input[type="number"] { width: 65px; background: #222; color: #fff; border: 1px solid #444; font-size: 10px; padding: 2px 4px; }
+        #ui .range-hint { color: #666; font-size: 8px; margin-left: 4px; }
+        #ui .section { color: #888; margin-top: 8px; border-top: 1px solid #333; padding-top: 4px; font-weight: bold; }
+        #controls { position: absolute; top: 10px; right: 10px; }
+        #controls button { padding: 6px 12px; margin: 2px; background: #222; color: #fff; border: 1px solid #555; cursor: pointer; font: 11px monospace; }
+        #stats { position: absolute; bottom: 10px; left: 10px; color: #fff; font: 11px monospace; background: rgba(0,0,0,0.8); padding: 8px; border-radius: 4px; }
+    </style>
+</head>
+<body>
+<canvas id="canvas"></canvas>
+<div id="ui">
+    <div><b>Lava Lamp Velfield v3</b></div>
+    <div style="color:#888;font-size:9px;margin-bottom:8px;">Cohesion-based surface tension<br>Discrete integer wax units</div>
+    <div id="params"></div>
+</div>
+<div id="controls">
+    <button id="toggleParams">Hide</button>
+    <button id="ff">1x</button>
+    <button id="pp">||</button>
+    <button id="heat">Heat ON</button>
+    <button id="reset">Reset</button>
+    <button id="toggleView">View: WAX</button>
+</div>
+<div id="stats">Initializing WebGPU...</div>
+
+<script type="module">
+// ============================================
+// LAVA LAMP VELFIELD v3 - Cohesion-Based Surface Tension
+// ============================================
+// Key design:
+// 1. Wax stored as discrete integer units (0-8) - NEVER destroyed
+// 2. Cohesion force computed from pairwise interactions (Akinci-style)
+// 3. Force creates velocity field that guides discrete cell swaps
+// 4. Small blobs cannot dissolve - only whole-unit swaps allowed
+//
+// The cohesion force naturally produces:
+// - Surface tension (surface particles pulled inward)
+// - Blob coalescence (nearby blobs attract)
+// - Resistance to fragmentation
+
+const PARAMS = {
+    // Cell size
+    cellSize: 4,
+
+    // Heat
+    heatRate: 0.08,
+    heatSpread: 0.1,
+    coolRate: 0.004,
+    radiantHeat: 0.002,
+    heatSourceWidth: 0.5,
+
+    // Cohesion (surface tension)
+    cohesionStrength: 0.3,
+    cohesionRadius: 4,
+
+    // Buoyancy
+    buoyancyScale: 0.08,      // Gentler - acceleration accumulates
+
+    // Acceleration (new!)
+    accDiffusion: 0.3,        // How much acc spreads to neighbors
+    accDecay: 0.95,           // Acceleration persistence
+
+    // Velocity
+    velocityDamping: 0.9,
+
+    // Movement
+    velocityThreshold: 0.05,
+    moveChanceScale: 1.0,
+
+    // Brownian motion
+    brownianStrength: 0.01,
+
+    // Setup
+    initialWaxHeight: 0.15,
+};
+
+const PARAM_CONFIG = {
+    cellSize:         { section: 'Grid',      min: 2, max: 10, step: 1, round: true },
+    heatRate:         { section: 'Heat',      min: 0.01, max: 0.2, step: 0.01 },
+    heatSpread:       { min: 0.01, max: 0.3, step: 0.01 },
+    coolRate:         { min: 0.001, max: 0.02, step: 0.001 },
+    radiantHeat:      { min: 0, max: 0.01, step: 0.001 },
+    heatSourceWidth:  { min: 0.2, max: 1.0, step: 0.1 },
+    cohesionStrength: { section: 'Cohesion',  min: 0, max: 1.0, step: 0.05 },
+    cohesionRadius:   { min: 2, max: 8, step: 1, round: true },
+    buoyancyScale:    { section: 'Buoyancy',  min: 0.01, max: 0.5, step: 0.01 },
+    accDiffusion:     { section: 'Acceleration', min: 0, max: 0.8, step: 0.05 },
+    accDecay:         { min: 0.8, max: 0.99, step: 0.01 },
+    velocityDamping:  { section: 'Velocity',  min: 0.7, max: 0.99, step: 0.01 },
+    velocityThreshold:{ section: 'Movement',  min: 0.01, max: 0.3, step: 0.01 },
+    moveChanceScale:  { min: 0.1, max: 3.0, step: 0.1 },
+    brownianStrength: { min: 0, max: 0.1, step: 0.01 },
+    initialWaxHeight: { section: 'Setup',     min: 0.05, max: 0.3, step: 0.01 },
+};
+
+// ============================================
+// WGSL SHADERS
+// ============================================
+const SHADER_CODE = `
+struct Params {
+    width: u32,
+    height: u32,
+    frame: u32,
+    heatOn: u32,
+
+    heatRate: f32,
+    heatSpread: f32,
+    coolRate: f32,
+    radiantHeat: f32,
+    heatSourceWidth: f32,
+
+    cohesionStrength: f32,
+    cohesionRadius: f32,
+
+    buoyancyScale: f32,
+    accDiffusion: f32,
+    accDecay: f32,
+    velocityDamping: f32,
+    velocityThreshold: f32,
+    moveChanceScale: f32,
+    brownianStrength: f32,
+
+    seed: f32,
+    showVelocity: u32,
+}
+
+struct Cell {
+    units: u32,      // Discrete wax units (0-8)
+    temp: f32,       // Temperature (0-1)
+    velX: f32,       // Velocity X
+    velY: f32,       // Velocity Y
+    accX: f32,       // Acceleration X (force accumulator)
+    accY: f32,       // Acceleration Y (force accumulator)
+}
+
+@group(0) @binding(0) var<uniform> params: Params;
+@group(0) @binding(1) var<storage, read_write> cellsIn: array<Cell>;
+@group(0) @binding(2) var<storage, read_write> cellsOut: array<Cell>;
+@group(0) @binding(3) var<uniform> movePass: vec4u;
+
+// Pseudo-random
+fn rand(seed: f32, idx: u32) -> f32 {
+    return fract(sin(seed + f32(idx) * 0.1234) * 43758.5453);
+}
+
+// Get capacity based on temperature
+// Lower thresholds to make buoyancy kick in sooner
+fn getCapacity(t: f32) -> u32 {
+    if (t >= 0.5) { return 6u; }  // Hot - rises
+    if (t >= 0.25) { return 7u; } // Neutral
+    return 8u;                     // Cold - sinks
+}
+
+// Safe index
+fn idx(x: i32, y: i32) -> u32 {
+    let w = i32(params.width);
+    let h = i32(params.height);
+    return u32(clamp(y, 0, h-1) * w + clamp(x, 0, w-1));
+}
+
+// Akinci-style cohesion kernel (simplified)
+// Returns attractive force magnitude based on distance
+fn cohesionKernel(r: f32, h: f32) -> f32 {
+    if (r >= h || r < 0.1) { return 0.0; }
+
+    // Simplified spline that's attractive at medium range
+    // Peak attraction around r = h/2
+    let q = r / h;
+
+    // Cubic spline variant: strong at edges, weaker in middle
+    // This pulls surface particles inward
+    if (q > 0.5) {
+        let t = 1.0 - q;
+        return t * t * q;  // Peaks around q=0.67
+    } else {
+        return q * q * (1.0 - q);  // Weaker at very close range
+    }
+}
+
+// ==========================================================
+// SHADER 1: TEMPERATURE UPDATE
+// ==========================================================
+@compute @workgroup_size(16, 16)
+fn updateTemp(@builtin(global_invocation_id) gid: vec3u) {
+    let x = i32(gid.x);
+    let y = i32(gid.y);
+    let w = i32(params.width);
+    let h = i32(params.height);
+    if (x >= w || y >= h) { return; }
+
+    let i = idx(x, y);
+    var cell = cellsIn[i];
+    cellsOut[i] = cell;
+
+    // No wax = no temperature
+    if (cell.units == 0u) {
+        cellsOut[i].temp = 0.0;
+        return;
+    }
+
+    var t = cell.temp;
+
+    // Heat source at bottom (larger zone)
+    if (params.heatOn == 1u && y >= h - 8) {
+        let centerDist = abs(f32(x) / f32(w) - 0.5);
+        if (centerDist < params.heatSourceWidth * 0.5) {
+            let vertIntensity = f32(y - (h - 8)) / 8.0;  // Stronger at very bottom
+            let horizIntensity = 1.0 - centerDist / (params.heatSourceWidth * 0.5);
+            t += params.heatRate * vertIntensity * horizIntensity;
+        }
+    }
+
+    // Cool zone at top
+    if (y <= 4) {
+        t -= params.coolRate * 2.0;
+    }
+
+    // Radiant heat gradient (bottom warm, top cool)
+    let relY = f32(y) / f32(h);
+    t += (relY - 0.5) * 2.0 * params.radiantHeat;
+
+    // Heat spread to neighbors
+    var tempSum = t;
+    var count = 1.0;
+    for (var dy = -1; dy <= 1; dy++) {
+        for (var dx = -1; dx <= 1; dx++) {
+            if (dx == 0 && dy == 0) { continue; }
+            let ni = idx(x + dx, y + dy);
+            if (cellsIn[ni].units > 0u) {
+                tempSum += cellsIn[ni].temp;
+                count += 1.0;
+            }
+        }
+    }
+    t += (tempSum / count - t) * params.heatSpread;
+
+    cellsOut[i].temp = clamp(t, 0.0, 1.0);
+}
+
+// ==========================================================
+// SHADER 2: FORCES → ACCELERATION → VELOCITY
+// ==========================================================
+// Physics: Forces add to acceleration, acceleration transfers to velocity,
+// acceleration diffuses to neighbors (so blobs move together)
+@compute @workgroup_size(16, 16)
+fn updateForces(@builtin(global_invocation_id) gid: vec3u) {
+    let x = i32(gid.x);
+    let y = i32(gid.y);
+    let w = i32(params.width);
+    let h = i32(params.height);
+    if (x >= w || y >= h) { return; }
+
+    let i = idx(x, y);
+    let cell = cellsOut[i];  // Read from temp-updated buffer
+
+    // Empty cells: zero everything
+    if (cell.units == 0u) {
+        cellsOut[i].velX = 0.0;
+        cellsOut[i].velY = 0.0;
+        cellsOut[i].accX = 0.0;
+        cellsOut[i].accY = 0.0;
+        return;
+    }
+
+    // Start with previous acceleration (read from input buffer for consistency)
+    var ax = cellsIn[i].accX;
+    var ay = cellsIn[i].accY;
+
+    // === DIFFUSE ACCELERATION FROM NEIGHBORS ===
+    // This spreads the "desire to move" through connected wax
+    var neighborAccX = 0.0;
+    var neighborAccY = 0.0;
+    var neighborCount = 0.0;
+
+    for (var dy = -1; dy <= 1; dy++) {
+        for (var dx = -1; dx <= 1; dx++) {
+            if (dx == 0 && dy == 0) { continue; }
+
+            let nx = x + dx;
+            let ny = y + dy;
+            if (nx < 0 || nx >= w || ny < 0 || ny >= h) { continue; }
+
+            let ni = idx(nx, ny);
+            if (cellsIn[ni].units > 0u) {
+                neighborAccX += cellsIn[ni].accX;
+                neighborAccY += cellsIn[ni].accY;
+                neighborCount += 1.0;
+            }
+        }
+    }
+
+    // Blend own acceleration with neighbor average
+    if (neighborCount > 0.0) {
+        let avgAccX = neighborAccX / neighborCount;
+        let avgAccY = neighborAccY / neighborCount;
+        ax = mix(ax, avgAccX, params.accDiffusion);
+        ay = mix(ay, avgAccY, params.accDiffusion);
+    }
+
+    // === COHESION FORCE → ACCELERATION ===
+    let radius = i32(params.cohesionRadius);
+    var forceX = 0.0;
+    var forceY = 0.0;
+
+    for (var dy = -radius; dy <= radius; dy++) {
+        for (var dx = -radius; dx <= radius; dx++) {
+            if (dx == 0 && dy == 0) { continue; }
+
+            let nx = x + dx;
+            let ny = y + dy;
+            if (nx < 0 || nx >= w || ny < 0 || ny >= h) { continue; }
+
+            let ni = idx(nx, ny);
+            let neighbor = cellsOut[ni];
+
+            if (neighbor.units == 0u) { continue; }
+
+            let dist = sqrt(f32(dx*dx + dy*dy));
+            let cohesion = cohesionKernel(dist, f32(radius));
+            let dirX = f32(dx) / dist;
+            let dirY = f32(dy) / dist;
+            let mass = f32(neighbor.units) / 8.0;
+
+            forceX += dirX * cohesion * mass;
+            forceY += dirY * cohesion * mass;
+        }
+    }
+
+    // Add cohesion force to acceleration
+    ax += forceX * params.cohesionStrength;
+    ay += forceY * params.cohesionStrength;
+
+    // === BUOYANCY → ACCELERATION ===
+    let capacity = getCapacity(cell.temp);
+    let buoyancy = f32(cell.units) * f32(7i - i32(capacity)) * params.buoyancyScale;
+    ay -= buoyancy;  // Negative = upward
+
+    // === BROWNIAN (small random force) ===
+    let r1 = rand(params.seed, u32(i));
+    let r2 = rand(params.seed + 1.0, u32(i));
+    ax += (r1 - 0.5) * params.brownianStrength;
+    ay += (r2 - 0.5) * params.brownianStrength;
+
+    // === ACCELERATION DECAY ===
+    ax *= params.accDecay;
+    ay *= params.accDecay;
+
+    // === VELOCITY UPDATE: vel += acc ===
+    var vx = cell.velX + ax;
+    var vy = cell.velY + ay;
+
+    // === VELOCITY DAMPING ===
+    vx *= params.velocityDamping;
+    vy *= params.velocityDamping;
+
+    // Store results
+    cellsOut[i].accX = ax;
+    cellsOut[i].accY = ay;
+    cellsOut[i].velX = vx;
+    cellsOut[i].velY = vy;
+}
+
+// ==========================================================
+// SHADER 3: MOVEMENT (Discrete Cell Swaps)
+// ==========================================================
+@compute @workgroup_size(16, 16)
+fn updateMovement(@builtin(global_invocation_id) gid: vec3u) {
+    let x = i32(gid.x);
+    let y = i32(gid.y);
+    let w = i32(params.width);
+    let h = i32(params.height);
+    if (x >= w || y >= h) { return; }
+
+    // Determine swap partner based on pass type (checkerboard)
+    var tx = x;
+    var ty = y;
+    let passIdx = movePass.x;
+
+    // 4 passes: vertical even/odd, horizontal even/odd
+    if (passIdx == 0u) { if ((y % 2) == 0 && y < h-1) { ty = y + 1; } }
+    else if (passIdx == 1u) { if ((y % 2) == 1 && y < h-1) { ty = y + 1; } }
+    else if (passIdx == 2u) { if ((x % 2) == 0 && x < w-1) { tx = x + 1; } }
+    else if (passIdx == 3u) { if ((x % 2) == 1 && x < w-1) { tx = x + 1; } }
+
+    // Not a swap initiator this pass
+    if (tx == x && ty == y) { return; }
+
+    let i1 = idx(x, y);
+    let i2 = idx(tx, ty);
+
+    var c1 = cellsOut[i1];
+    var c2 = cellsOut[i2];
+
+    // Compute desire to swap based on velocity projection
+    let dx = f32(tx - x);
+    let dy = f32(ty - y);
+
+    var desire = 0.0;
+
+    // c1 wants to move toward c2?
+    if (c1.units > 0u) {
+        let proj = c1.velX * dx + c1.velY * dy;
+        if (proj > params.velocityThreshold) {
+            desire += proj;
+        }
+    }
+
+    // c2 wants to move toward c1? (opposite direction)
+    if (c2.units > 0u) {
+        let proj = c2.velX * (-dx) + c2.velY * (-dy);
+        if (proj > params.velocityThreshold) {
+            desire += proj;
+        }
+    }
+
+    // Probabilistic swap
+    if (desire > 0.0) {
+        let chance = min(1.0, desire * params.moveChanceScale);
+        let r = rand(params.seed + f32(passIdx) * 100.0, u32(i1));
+
+        if (r < chance) {
+            // SWAP - this preserves mass perfectly
+            let tempUnits = c1.units;
+            let tempTemp = c1.temp;
+            let tempVx = c1.velX;
+            let tempVy = c1.velY;
+            let tempAx = c1.accX;
+            let tempAy = c1.accY;
+
+            c1.units = c2.units;
+            c1.temp = c2.temp;
+            c1.velX = c2.velX * 0.95;
+            c1.velY = c2.velY * 0.95;
+            c1.accX = c2.accX * 0.95;
+            c1.accY = c2.accY * 0.95;
+
+            c2.units = tempUnits;
+            c2.temp = tempTemp;
+            c2.velX = tempVx * 0.95;
+            c2.velY = tempVy * 0.95;
+            c2.accX = tempAx * 0.95;
+            c2.accY = tempAy * 0.95;
+
+            cellsOut[i1] = c1;
+            cellsOut[i2] = c2;
+        }
+    }
+}
+
+// ==========================================================
+// RENDER
+// ==========================================================
+struct VertexOutput {
+    @builtin(position) pos: vec4f,
+    @location(0) uv: vec2f,
+}
+
+@vertex
+fn vs_main(@builtin(vertex_index) vi: u32) -> VertexOutput {
+    var positions = array<vec2f, 6>(
+        vec2f(-1.0, -1.0), vec2f(1.0, -1.0), vec2f(-1.0, 1.0),
+        vec2f(-1.0, 1.0), vec2f(1.0, -1.0), vec2f(1.0, 1.0)
+    );
+    var out: VertexOutput;
+    out.pos = vec4f(positions[vi], 0.0, 1.0);
+    out.uv = positions[vi] * 0.5 + 0.5;
+    out.uv.y = 1.0 - out.uv.y;
+    return out;
+}
+
+@fragment
+fn fs_main(@location(0) uv: vec2f) -> @location(0) vec4f {
+    let w = i32(params.width);
+    let h = i32(params.height);
+    let x = i32(uv.x * f32(w));
+    let y = i32(uv.y * f32(h));
+    let i = idx(x, y);
+    let cell = cellsOut[i];
+
+    // Velocity visualization mode
+    if (params.showVelocity == 1u) {
+        let speed = sqrt(cell.velX * cell.velX + cell.velY * cell.velY);
+        // Color: red = right, green = down, blue = speed
+        let r = clamp(cell.velX * 5.0 + 0.5, 0.0, 1.0);
+        let g = clamp(cell.velY * 5.0 + 0.5, 0.0, 1.0);
+        let b = clamp(speed * 3.0, 0.0, 1.0);
+        if (cell.units > 0u) {
+            return vec4f(r, g, b * 0.5 + 0.5, 1.0);
+        } else {
+            return vec4f(r * 0.3, g * 0.3, b * 0.3, 1.0);
+        }
+    }
+
+    // Normal wax view
+    if (cell.units == 0u) {
+        return vec4f(0.04, 0.04, 0.07, 1.0);
+    }
+
+    let t = cell.temp;
+    var col: vec3f;
+
+    // Temperature-based coloring
+    if (t < 0.33) {
+        let f = t / 0.33;
+        col = vec3f(0.24 + 0.35*f, 0.08 + 0.15*f, 0.47 - 0.15*f);
+    } else if (t < 0.66) {
+        let f = (t - 0.33) / 0.33;
+        col = vec3f(0.59 + 0.31*f, 0.23 + 0.32*f, 0.32 - 0.24*f);
+    } else {
+        let f = (t - 0.66) / 0.34;
+        col = vec3f(0.9 + 0.1*f, 0.55 + 0.4*f, 0.08 + 0.2*f);
+    }
+
+    // Brightness based on unit count
+    let brightness = 0.6 + 0.4 * f32(cell.units) / 8.0;
+    return vec4f(col * brightness, 1.0);
+}
+`;
+
+// ============================================
+// MAIN APPLICATION
+// ============================================
+let device, context;
+let pipelineTemp, pipelineForces, pipelineMove, pipelineRender;
+let bindGroupLayout, bindGroupA, bindGroupB;
+let paramsBuffer, movePassBuffer;
+let cellsBufferA, cellsBufferB;
+
+let W, H;
+let frame = 0, heatOn = 1, paused = false, ff = 1, showVelocity = 0;
+let initialTotalUnits = 0;
+
+async function init() {
+    if (!navigator.gpu) {
+        document.getElementById('stats').textContent = "WebGPU not supported";
+        return;
+    }
+
+    const adapter = await navigator.gpu.requestAdapter();
+    device = await adapter.requestDevice();
+
+    const canvas = document.getElementById('canvas');
+    context = canvas.getContext('webgpu');
+    context.configure({
+        device,
+        format: navigator.gpu.getPreferredCanvasFormat(),
+        alphaMode: 'premultiplied',
+    });
+
+    resize();
+    window.addEventListener('resize', resize);
+    setupUI();
+    loop();
+}
+
+function resize() {
+    const canvas = document.getElementById('canvas');
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+
+    W = Math.floor(canvas.width / PARAMS.cellSize);
+    H = Math.floor(canvas.height / PARAMS.cellSize);
+
+    initSimulation();
+}
+
+function initSimulation() {
+    frame = 0;
+
+    const size = W * H;
+    const cellStride = 24; // 6 fields × 4 bytes: units(u32), temp(f32), velX(f32), velY(f32), accX(f32), accY(f32)
+    const bufferSize = size * cellStride;
+
+    // Initialize wax at bottom
+    const initData = new ArrayBuffer(bufferSize);
+    const view = new DataView(initData);
+    const waxTop = H - Math.floor(H * PARAMS.initialWaxHeight);
+
+    initialTotalUnits = 0;
+
+    for (let y = 0; y < H; y++) {
+        for (let x = 0; x < W; x++) {
+            const i = y * W + x;
+            const offset = i * cellStride;
+
+            let units = 0;
+            let temp = 0;
+
+            if (y >= waxTop) {
+                // Add some surface noise
+                const noise = Math.sin(x * 0.2) * 2 + Math.random() * 2;
+                if (y >= waxTop + noise) {
+                    units = 8;
+                    temp = 0.15 + Math.random() * 0.05;
+                    initialTotalUnits += units;
+                }
+            }
+
+            view.setUint32(offset, units, true);
+            view.setFloat32(offset + 4, temp, true);
+            view.setFloat32(offset + 8, 0, true);   // velX
+            view.setFloat32(offset + 12, 0, true);  // velY
+            view.setFloat32(offset + 16, 0, true);  // accX
+            view.setFloat32(offset + 20, 0, true);  // accY
+        }
+    }
+
+    // Create buffers
+    cellsBufferA = device.createBuffer({
+        size: bufferSize,
+        usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST | GPUBufferUsage.COPY_SRC,
+        mappedAtCreation: true,
+    });
+    new Uint8Array(cellsBufferA.getMappedRange()).set(new Uint8Array(initData));
+    cellsBufferA.unmap();
+
+    cellsBufferB = device.createBuffer({
+        size: bufferSize,
+        usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST | GPUBufferUsage.COPY_SRC,
+    });
+
+    // Copy A to B
+    const encoder = device.createCommandEncoder();
+    encoder.copyBufferToBuffer(cellsBufferA, 0, cellsBufferB, 0, bufferSize);
+    device.queue.submit([encoder.finish()]);
+
+    paramsBuffer = device.createBuffer({
+        size: 128,
+        usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+    });
+
+    // Pre-populate all 4 pass values at different offsets (256-byte aligned for dynamic offset)
+    movePassBuffer = device.createBuffer({
+        size: 1024,  // 4 passes * 256 bytes each
+        usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+    });
+    {
+        const moveData = new ArrayBuffer(1024);
+        const moveView = new DataView(moveData);
+        for (let i = 0; i < 4; i++) {
+            moveView.setUint32(i * 256, i, true);  // passIdx at offset i*256
+        }
+        device.queue.writeBuffer(movePassBuffer, 0, moveData);
+    }
+
+    // Bind group layout
+    bindGroupLayout = device.createBindGroupLayout({
+        entries: [
+            { binding: 0, visibility: GPUShaderStage.COMPUTE | GPUShaderStage.FRAGMENT, buffer: { type: 'uniform' } },
+            { binding: 1, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'storage' } },
+            { binding: 2, visibility: GPUShaderStage.COMPUTE | GPUShaderStage.FRAGMENT, buffer: { type: 'storage' } },
+            { binding: 3, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'uniform', hasDynamicOffset: true, minBindingSize: 16 } },
+        ],
+    });
+
+    // Create pipelines
+    const module = device.createShaderModule({ code: SHADER_CODE });
+    const pipelineLayout = device.createPipelineLayout({ bindGroupLayouts: [bindGroupLayout] });
+
+    pipelineTemp = device.createComputePipeline({
+        layout: pipelineLayout,
+        compute: { module, entryPoint: 'updateTemp' },
+    });
+
+    pipelineForces = device.createComputePipeline({
+        layout: pipelineLayout,
+        compute: { module, entryPoint: 'updateForces' },
+    });
+
+    pipelineMove = device.createComputePipeline({
+        layout: pipelineLayout,
+        compute: { module, entryPoint: 'updateMovement' },
+    });
+
+    pipelineRender = device.createRenderPipeline({
+        layout: pipelineLayout,
+        vertex: { module, entryPoint: 'vs_main' },
+        fragment: {
+            module,
+            entryPoint: 'fs_main',
+            targets: [{ format: navigator.gpu.getPreferredCanvasFormat() }],
+        },
+        primitive: { topology: 'triangle-list' },
+    });
+
+    // Bind groups (double-buffered)
+    bindGroupA = device.createBindGroup({
+        layout: bindGroupLayout,
+        entries: [
+            { binding: 0, resource: { buffer: paramsBuffer } },
+            { binding: 1, resource: { buffer: cellsBufferA } },
+            { binding: 2, resource: { buffer: cellsBufferB } },
+            { binding: 3, resource: { buffer: movePassBuffer, offset: 0, size: 16 } },
+        ],
+    });
+
+    bindGroupB = device.createBindGroup({
+        layout: bindGroupLayout,
+        entries: [
+            { binding: 0, resource: { buffer: paramsBuffer } },
+            { binding: 1, resource: { buffer: cellsBufferB } },
+            { binding: 2, resource: { buffer: cellsBufferA } },
+            { binding: 3, resource: { buffer: movePassBuffer, offset: 0, size: 16 } },
+        ],
+    });
+}
+
+function updateParams() {
+    const data = new ArrayBuffer(128);
+    const v = new DataView(data);
+
+    v.setUint32(0, W, true);
+    v.setUint32(4, H, true);
+    v.setUint32(8, frame, true);
+    v.setUint32(12, heatOn, true);
+
+    v.setFloat32(16, PARAMS.heatRate, true);
+    v.setFloat32(20, PARAMS.heatSpread, true);
+    v.setFloat32(24, PARAMS.coolRate, true);
+    v.setFloat32(28, PARAMS.radiantHeat, true);
+    v.setFloat32(32, PARAMS.heatSourceWidth, true);
+
+    v.setFloat32(36, PARAMS.cohesionStrength, true);
+    v.setFloat32(40, PARAMS.cohesionRadius, true);
+
+    v.setFloat32(44, PARAMS.buoyancyScale, true);
+    v.setFloat32(48, PARAMS.accDiffusion, true);
+    v.setFloat32(52, PARAMS.accDecay, true);
+    v.setFloat32(56, PARAMS.velocityDamping, true);
+    v.setFloat32(60, PARAMS.velocityThreshold, true);
+    v.setFloat32(64, PARAMS.moveChanceScale, true);
+    v.setFloat32(68, PARAMS.brownianStrength, true);
+
+    v.setFloat32(72, Math.random() * 10000, true);  // seed
+    v.setUint32(76, showVelocity, true);
+
+    device.queue.writeBuffer(paramsBuffer, 0, data);
+}
+
+function tick(encoder) {
+    frame++;
+    updateParams();
+
+    const workgroupsX = Math.ceil(W / 16);
+    const workgroupsY = Math.ceil(H / 16);
+
+    // Use alternating buffers
+    const bindGroup = (frame % 2 === 0) ? bindGroupA : bindGroupB;
+
+    // Phase 1: Temperature update
+    {
+        const pass = encoder.beginComputePass();
+        pass.setPipeline(pipelineTemp);
+        pass.setBindGroup(0, bindGroup, [0]);
+        pass.dispatchWorkgroups(workgroupsX, workgroupsY);
+        pass.end();
+    }
+
+    // Phase 2: Forces → Velocity
+    {
+        const pass = encoder.beginComputePass();
+        pass.setPipeline(pipelineForces);
+        pass.setBindGroup(0, bindGroup, [0]);
+        pass.dispatchWorkgroups(workgroupsX, workgroupsY);
+        pass.end();
+    }
+
+    // Phase 3: Movement (4 passes for checkerboard)
+    for (let p = 0; p < 4; p++) {
+        const pass = encoder.beginComputePass();
+        pass.setPipeline(pipelineMove);
+        // Use dynamic offset to select the prepopulated pass index at p*256
+        pass.setBindGroup(0, bindGroup, [p * 256]);
+        pass.dispatchWorkgroups(workgroupsX, workgroupsY);
+        pass.end();
+    }
+}
+
+function loop() {
+    if (!device) return;
+
+    const encoder = device.createCommandEncoder();
+
+    if (!paused) {
+        for (let i = 0; i < ff; i++) {
+            tick(encoder);
+        }
+    }
+
+    // Render
+    const textureView = context.getCurrentTexture().createView();
+    const renderPass = encoder.beginRenderPass({
+        colorAttachments: [{
+            view: textureView,
+            clearValue: { r: 0, g: 0, b: 0, a: 1 },
+            loadOp: 'clear',
+            storeOp: 'store',
+        }],
+    });
+
+    renderPass.setPipeline(pipelineRender);
+    const renderBindGroup = (frame % 2 === 0) ? bindGroupA : bindGroupB;
+    renderPass.setBindGroup(0, renderBindGroup, [0]);
+    renderPass.draw(6);
+    renderPass.end();
+
+    device.queue.submit([encoder.finish()]);
+
+    document.getElementById('stats').innerHTML =
+        `Tick: ${frame} | Grid: ${W}x${H} | ${showVelocity ? 'VEL' : 'WAX'}`;
+
+    requestAnimationFrame(loop);
+}
+
+// ============================================
+// UI
+// ============================================
+function setupUI() {
+    const container = document.getElementById('params');
+    container.innerHTML = '';
+
+    for (const key in PARAM_CONFIG) {
+        const config = PARAM_CONFIG[key];
+
+        if (config.section) {
+            const section = document.createElement('div');
+            section.className = 'section';
+            section.textContent = config.section;
+            container.appendChild(section);
+        }
+
+        const row = document.createElement('div');
+        row.className = 'param-row';
+
+        const label = document.createElement('label');
+        label.textContent = key;
+
+        const input = document.createElement('input');
+        input.type = 'number';
+        input.step = config.step;
+        input.value = PARAMS[key];
+
+        const hint = document.createElement('span');
+        hint.className = 'range-hint';
+        hint.textContent = `(${config.min}-${config.max})`;
+
+        input.onchange = () => {
+            let val = parseFloat(input.value);
+            if (config.round) val = Math.round(val);
+            PARAMS[key] = val;
+            if (key === 'cellSize' || key === 'initialWaxHeight') {
+                resize();
+            }
+        };
+
+        row.appendChild(label);
+        row.appendChild(input);
+        row.appendChild(hint);
+        container.appendChild(row);
+    }
+}
+
+// Controls
+document.getElementById('toggleParams').onclick = () => {
+    const p = document.getElementById('params');
+    const btn = document.getElementById('toggleParams');
+    p.style.display = p.style.display === 'none' ? '' : 'none';
+    btn.textContent = p.style.display === 'none' ? 'Show' : 'Hide';
+};
+
+document.getElementById('ff').onclick = (e) => {
+    ff = ff === 1 ? 10 : ff === 10 ? 100 : 1;
+    e.target.textContent = ff + 'x';
+};
+
+document.getElementById('pp').onclick = (e) => {
+    paused = !paused;
+    e.target.textContent = paused ? '▶' : '||';
+};
+
+document.getElementById('heat').onclick = (e) => {
+    heatOn = 1 - heatOn;
+    e.target.textContent = heatOn ? 'Heat ON' : 'Heat OFF';
+};
+
+document.getElementById('reset').onclick = () => resize();
+
+document.getElementById('toggleView').onclick = (e) => {
+    showVelocity = 1 - showVelocity;
+    e.target.textContent = showVelocity ? 'View: VEL' : 'View: WAX';
+};
+
+window.addEventListener('keydown', (e) => {
+    if (e.code === 'Space') { paused = !paused; e.preventDefault(); }
+    if (e.code === 'KeyR') resize();
+    if (e.code === 'KeyV') { showVelocity = 1 - showVelocity; }
+});
+
+init();
+</script>
+</body>
+</html>

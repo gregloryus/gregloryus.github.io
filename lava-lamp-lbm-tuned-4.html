@@ -1,0 +1,431 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Lava Lamp LBM - Two Component</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        html,
+        body {
+            height: 100%;
+            overflow: hidden;
+            background: #0a0a12;
+        }
+
+        #canvas {
+            display: block;
+            image-rendering: pixelated;
+        }
+
+        #ui {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            color: #fff;
+            font: 11px monospace;
+            background: rgba(0, 0, 0, 0.8);
+            padding: 8px;
+            border-radius: 4px;
+            max-width: 300px;
+        }
+
+        #controls {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+        }
+
+        #controls button {
+            padding: 8px 14px;
+            margin: 2px;
+            background: #222;
+            color: #fff;
+            border: 1px solid #555;
+            cursor: pointer;
+            font: 12px monospace;
+        }
+    </style>
+</head>
+
+<body>
+    <canvas id="canvas"></canvas>
+    <div id="ui">
+        <div>Lava Lamp LBM v2</div>
+        <div>Two-Component (Stable)</div>
+        <div id="stats"></div>
+    </div>
+    <div id="controls">
+        <button id="ff">1x</button>
+        <button id="pp">||</button>
+        <button id="rr">Reset</button>
+    </div>
+    <script>
+        // Lattice Boltzmann Method - Two-Component Shan-Chen
+        // Tracks Wax (A) and Water (B) separately to guarantee mass conservation.
+
+        const CELL = 4;
+
+        // D2Q9 lattice
+        const cx = [0, 1, 0, -1, 0, 1, -1, -1, 1];
+        const cy = [0, 0, -1, 0, 1, -1, -1, 1, 1];
+        const w = [4 / 9, 1 / 9, 1 / 9, 1 / 9, 1 / 9, 1 / 36, 1 / 36, 1 / 36, 1 / 36];
+        const opposite = [0, 3, 4, 1, 2, 7, 8, 5, 6];
+
+        // --- PHYSICS PARAMETERS ---
+
+        // Viscosity (Tau)
+        const TAU_WAX = 1.0;    // Lower viscosity to let sharpening work
+        const TAU_WATER = 1.0;  
+
+        // Surface Tension (Repulsion)
+        const G_COUPLE = 0.35;  
+
+        // Densities (Simulated Mass)
+        const RHO_WAX_INIT = 1.0;
+        const RHO_WATER_INIT = 1.0;
+
+        // Gravity & Buoyancy
+        const GRAVITY = 0.001;        
+        const BUOYANCY_STRENGTH = 0.005; 
+        
+        // Thermal Parameters
+        const HEAT_RATE = 0.015;       
+        const COOL_RATE = 0.003;      
+        const NEUTRAL_TEMP = 0.45;
+
+        // Thermal Parameters
+        const HEAT_RATE = 0.015;
+        const COOL_RATE = 0.003;
+        const NEUTRAL_TEMP = 0.45;
+
+        // Heat Conduction
+        const DIFFUSION_WAX = 0.1;
+        const DIFFUSION_WATER = 0.1;
+        const DIFFUSION_INTERFACE = 0.0001;
+
+        // Setup
+        const WAX_AMOUNT = 0.15;
+
+        // Globals
+        let W, H;
+        let fA, fB, fATemp, fBTemp;
+        let rhoA, rhoB;
+        let temp;
+        let frame = 0, paused = false, ff = 1;
+
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+
+        function resize() {
+            canvas.width = innerWidth;
+            canvas.height = innerHeight;
+            W = Math.floor(canvas.width / CELL);
+            H = Math.floor(canvas.height / CELL);
+            reset();
+        }
+
+        function reset() {
+            const size = W * H;
+            fA = new Float32Array(size * 9);
+            fB = new Float32Array(size * 9);
+            fATemp = new Float32Array(size * 9);
+            fBTemp = new Float32Array(size * 9);
+
+            rhoA = new Float32Array(size);
+            rhoB = new Float32Array(size);
+            temp = new Float32Array(size);
+
+            const waxTop = H - Math.floor(H * WAX_AMOUNT);
+
+            for (let y = 0; y < H; y++) {
+                for (let x = 0; x < W; x++) {
+                    const i = y * W + x;
+
+                    // Smooth initialization to prevent shockwaves
+                    const transitionWidth = 4;
+                    const sigmoid = 1 / (1 + Math.exp((waxTop - y) / transitionWidth));
+
+                    // Add noise only deep in the wax
+                    const noise = (y > waxTop + 5) ? (Math.random() - 0.5) * 0.1 : 0;
+
+                    const rA = (RHO_WAX_INIT + noise) * sigmoid;
+                    const rB = RHO_WATER_INIT * (1 - sigmoid) + 0.05 * sigmoid;
+
+                    temp[i] = 0.2;
+                    rhoA[i] = rA;
+                    rhoB[i] = rB;
+
+                    initEquilibrium(i, rA, rB);
+                }
+            }
+            frame = 0;
+        }
+
+        function initEquilibrium(i, rA, rB) {
+            for (let k = 0; k < 9; k++) {
+                fA[i * 9 + k] = w[k] * rA;
+                fB[i * 9 + k] = w[k] * rB;
+            }
+        }
+
+        function tick() {
+            frame++;
+            const size = W * H;
+
+            // 1. Calculate Densities
+            for (let i = 0; i < size; i++) {
+                let sA = 0, sB = 0;
+                for (let k = 0; k < 9; k++) {
+                    sA += fA[i * 9 + k];
+                    sB += fB[i * 9 + k];
+                }
+                rhoA[i] = sA;
+                rhoB[i] = sB;
+            }
+
+            // 2. Compute Forces & Collide
+            for (let y = 0; y < H; y++) {
+                for (let x = 0; x < W; x++) {
+                    const i = y * W + x;
+
+                    // Compute Interaction (Repulsion)
+                    let interactX = 0, interactY = 0;
+
+                    for (let k = 1; k < 9; k++) {
+                        let nx = x + cx[k];
+                        let ny = y + cy[k];
+                        nx = (nx + W) % W;
+                        if (ny < 0) ny = 0;
+                        if (ny >= H) ny = H - 1;
+                        const ni = ny * W + nx;
+
+                        // Force on A is pushed by B neighbors
+                        interactX += w[k] * rhoB[ni] * cx[k];
+                        interactY += w[k] * rhoB[ni] * cy[k];
+                    }
+
+                    // External Forces
+                    const t = temp[i];
+                    const rA = rhoA[i];
+                    let extFy = 0;
+                    if (rA > 0.01) {
+                        extFy += GRAVITY * rA;
+                        extFy -= BUOYANCY_STRENGTH * rA * (t - NEUTRAL_TEMP);
+                    }
+
+                    // Shan-Chen Repulsion
+                    // G_COUPLE is small to prevent instability
+                    const F_SC_x = -G_COUPLE * rA * interactX;
+                    const F_SC_y = -G_COUPLE * rA * interactY;
+
+                    // Total Force on A
+                    const FAx = F_SC_x;
+                    const FAy = F_SC_y + extFy;
+
+                    // --- COLLISION ---
+                    const rB = rhoB[i];
+                    if (rA + rB < 1e-6) continue;
+
+                    // 1. Calculate Momentum
+                    let uAx = 0, uAy = 0, uBx = 0, uBy = 0;
+                    for (let k = 0; k < 9; k++) {
+                        uAx += fA[i * 9 + k] * cx[k];
+                        uAy += fA[i * 9 + k] * cy[k];
+                        uBx += fB[i * 9 + k] * cx[k];
+                        uBy += fB[i * 9 + k] * cy[k];
+                    }
+
+                    // 2. Barycentric Velocity
+                    const totalRho = rA + rB;
+                    // Force contribution to velocity: (F_A + F_B) / 2
+                    // Force on B from interaction is -F_SC
+                    // Assuming F_total acts on the mixture:
+                    const F_total_x = 0; // Interactions cancel out in momentum sum
+                    const F_total_y = extFy; // Only external force remains
+
+                    let ux = (uAx + uBx + F_total_x * 0.5) / totalRho;
+                    let uy = (uAy + uBy + F_total_y * 0.5) / totalRho;
+
+                    // Clamp for safety
+                    const MAX_V = 0.15;
+                    ux = Math.max(-MAX_V, Math.min(MAX_V, ux));
+                    uy = Math.max(-MAX_V, Math.min(MAX_V, uy));
+
+                    // 3. Relax Distributions
+
+                    // Wax (A) Equilibrium
+                    // Velocity shift method: u_eq = u + tau * F / rho
+                    const shiftAx = (rA > 1e-4) ? (TAU_WAX * FAx / rA) : 0;
+                    const shiftAy = (rA > 1e-4) ? (TAU_WAX * FAy / rA) : 0;
+                    const uAx_eq = ux + shiftAx;
+                    const uAy_eq = uy + shiftAy;
+                    const usqA = uAx_eq * uAx_eq + uAy_eq * uAy_eq;
+
+                    // Water (B) Equilibrium
+                    // F_B = -F_SC
+                    const shiftBx = (rB > 1e-4) ? (TAU_WATER * (-F_SC_x) / rB) : 0;
+                    const shiftBy = (rB > 1e-4) ? (TAU_WATER * (-F_SC_y) / rB) : 0;
+                    const uBx_eq = ux + shiftBx;
+                    const uBy_eq = uy + shiftBy;
+                    const usqB = uBx_eq * uBx_eq + uBy_eq * uBy_eq;
+
+                    for (let k = 0; k < 9; k++) {
+                        const cuA = cx[k] * uAx_eq + cy[k] * uAy_eq;
+                        const feqA = w[k] * rA * (1 + 3 * cuA + 4.5 * cuA * cuA - 1.5 * usqA);
+                        fATemp[i * 9 + k] = fA[i * 9 + k] - (fA[i * 9 + k] - feqA) / TAU_WAX;
+
+                        const cuB = cx[k] * uBx_eq + cy[k] * uBy_eq;
+                        const feqB = w[k] * rB * (1 + 3 * cuB + 4.5 * cuB * cuB - 1.5 * usqB);
+                        fBTemp[i * 9 + k] = fB[i * 9 + k] - (fB[i * 9 + k] - feqB) / TAU_WATER;
+                    }
+                }
+            }
+
+            // 3. Streaming
+            for (let i = 0; i < size * 9; i++) { fA[i] = 0; fB[i] = 0; }
+
+            for (let y = 0; y < H; y++) {
+                for (let x = 0; x < W; x++) {
+                    const i = y * W + x;
+                    for (let k = 0; k < 9; k++) {
+                        let nx = x + cx[k];
+                        let ny = y + cy[k];
+                        nx = (nx + W) % W;
+
+                        if (ny < 0 || ny >= H) {
+                            fA[i * 9 + opposite[k]] += fATemp[i * 9 + k];
+                            fB[i * 9 + opposite[k]] += fBTemp[i * 9 + k];
+                        } else {
+                            const ni = ny * W + nx;
+                            fA[ni * 9 + k] += fATemp[i * 9 + k];
+                            fB[ni * 9 + k] += fBTemp[i * 9 + k];
+                        }
+                    }
+                }
+            }
+
+            // 4. Thermodynamics
+            const newTemp = new Float32Array(size);
+            for (let y = 0; y < H; y++) {
+                for (let x = 0; x < W; x++) {
+                    const i = y * W + x;
+                    let t = temp[i];
+                    const rA = rhoA[i];
+                    const isWax = rA > 0.5;
+
+                    // Diffusion
+                    let sum = 0, count = 0;
+                    for (const [dx, dy] of [[-1, 0], [1, 0], [0, -1], [0, 1]]) {
+                        const nx = (x + dx + W) % W;
+                        const ny = y + dy;
+                        if (ny >= 0 && ny < H) {
+                            const ni = ny * W + nx;
+                            const neighborWax = rhoA[ni] > 0.5;
+                            let rate = DIFFUSION_INTERFACE;
+                            if (isWax && neighborWax) rate = DIFFUSION_WAX;
+                            if (!isWax && !neighborWax) rate = DIFFUSION_WATER;
+                            sum += temp[ni] * rate;
+                            count += rate;
+                        }
+                    }
+                    if (count > 0) t += (sum / count - t);
+
+                    // Heat Sources
+                    const bottomZone = H * 0.90;
+                    const radiantZone = H * 0.70;
+                    if (isWax) {
+                        if (y > bottomZone) {
+                            const intensity = (y - bottomZone) / (H - bottomZone);
+                            const dx = (x - W / 2) / (W / 6.0);
+                            t += HEAT_RATE * Math.exp(-dx * dx) * intensity;
+                        } else if (y > radiantZone) {
+                            const intensity = (y - radiantZone) / (H - radiantZone);
+                            const centerDist = Math.abs(x - W / 2) / (W / 2);
+                            t += HEAT_RATE * 0.3 * intensity * (1 - centerDist);
+                        }
+                    }
+
+                    // Cooling
+                    const topZone = H * 0.25;
+                    if (y < topZone) {
+                        t -= COOL_RATE * ((topZone - y) / topZone);
+                    }
+                    newTemp[i] = Math.max(0, Math.min(1, t));
+                }
+            }
+            temp = newTemp;
+        }
+
+        function render() {
+            const imageData = ctx.createImageData(W, H);
+            const data = imageData.data;
+
+            for (let i = 0; i < W * H; i++) {
+                const rA = rhoA[i];
+                const t = temp[i];
+                const pi = i * 4;
+
+                if (rA > 0.5) {
+                    let heat = Math.min(1, Math.max(0, (t - 0.2) / 0.8));
+                    data[pi] = 100 + 155 * heat;
+                    data[pi + 1] = 20 + 180 * heat;
+                    data[pi + 2] = 50 + 50 * heat;
+                    data[pi + 3] = 255;
+                } else if (rA > 0.1) {
+                    // Show "mixed" regions so we can diagnose disappearing wax
+                    // If wax is spreading out (density < 0.5), we need to see it
+                    data[pi] = 100;
+                    data[pi + 1] = 0;
+                    data[pi + 2] = 100;
+                    data[pi + 3] = rA * 255; // Fade based on density
+                } else {
+                    data[pi] = 10;
+                    data[pi + 1] = 10;
+                    data[pi + 2] = 20 + t * 40;
+                    data[pi + 3] = 255;
+                }
+            }
+
+            const tempCanvas = document.createElement('canvas');
+            tempCanvas.width = W;
+            tempCanvas.height = H;
+            tempCanvas.getContext('2d').putImageData(imageData, 0, 0);
+
+            ctx.save();
+            ctx.scale(CELL, CELL);
+            ctx.imageSmoothingEnabled = false;
+            ctx.drawImage(tempCanvas, 0, 0);
+            ctx.restore();
+
+            ctx.fillStyle = 'rgba(255, 100, 0, 0.3)';
+            ctx.fillRect(W / 2 * CELL - 50, H * CELL - 5, 100, 5);
+        }
+
+        function loop() {
+            if (!paused) {
+                for (let i = 0; i < ff; i++) tick();
+            }
+            render();
+            const mass = rhoA.reduce((a, b) => a + b, 0);
+            document.getElementById('stats').innerHTML = `Mass A: ${mass.toFixed(0)}`;
+            requestAnimationFrame(loop);
+        }
+
+        document.getElementById('ff').onclick = () => { ff = ff === 1 ? 10 : ff === 10 ? 100 : 1; document.getElementById('ff').innerText = ff + 'x'; };
+        document.getElementById('pp').onclick = () => { paused = !paused; document.getElementById('pp').innerText = paused ? '▶' : '||'; };
+        document.getElementById('rr').onclick = reset;
+        window.onresize = resize;
+
+        resize();
+        loop();
+    </script>
+</body>
+
+</html>

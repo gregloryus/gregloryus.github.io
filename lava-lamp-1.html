@@ -1,0 +1,518 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Lava Lamp - Kawasaki Dynamics</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        html, body {
+            width: 100%; height: 100%;
+            overflow: hidden;
+            background: #1a1a2e;
+        }
+        #canvas {
+            display: block;
+            image-rendering: pixelated;
+            image-rendering: crisp-edges;
+        }
+        #ui {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            color: #fff;
+            font-family: monospace;
+            font-size: 12px;
+            background: rgba(0,0,0,0.7);
+            padding: 10px;
+            border-radius: 4px;
+            z-index: 100;
+        }
+        #ui div { margin: 2px 0; }
+        #controls {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            z-index: 100;
+        }
+        #controls button {
+            padding: 8px 16px;
+            margin: 2px;
+            background: #333;
+            color: #fff;
+            border: 1px solid #666;
+            cursor: pointer;
+            font-family: monospace;
+        }
+        #controls button:hover { background: #555; }
+        #controls button.active { background: #0066aa; border-color: #0088dd; }
+    </style>
+</head>
+<body>
+    <canvas id="canvas"></canvas>
+    <div id="ui">
+        <div id="fps">FPS: 0</div>
+        <div id="ticks">Ticks: 0</div>
+        <div id="stats">Wax: 0 | Avg T: 0</div>
+        <div id="params"></div>
+        <div style="margin-top:8px;font-size:10px;color:#888;">
+            [Space] Pause | [R] Reset | [T] Toggle temp view<br>
+            [1-4] Adjust params | Click FF button to change speed
+        </div>
+    </div>
+    <div id="controls">
+        <button id="ff-btn">1x</button>
+        <button id="pause-btn">Pause</button>
+        <button id="reset-btn">Reset</button>
+    </div>
+
+<script>
+// ============================================================
+// LAVA LAMP SIMULATION - Kawasaki Dynamics with Temperature-Dependent Surface Tension
+// ============================================================
+
+const CONFIG = {
+    // Grid
+    CELL_SIZE: 3,
+
+    // Thermal dynamics
+    K_DIFFUSION: 0.008,      // Very slow heat spread
+    T_BOTTOM: 1.0,           // Heater temperature
+    T_TOP: 0.0,              // Cooler temperature
+    HEATER_HEIGHT: 8,        // Pixels of heater zone
+    COOLER_HEIGHT: 8,        // Pixels of cooler zone
+
+    // Forces
+    G_GRAVITY: 0.05,         // Baseline downward pull
+    B_BUOYANCY: 0.08,        // Upward push when hot
+
+    // Surface tension (temperature-dependent)
+    J_COLD: 2.0,             // Surface tension when cold (rigid)
+    J_HOT: 0.15,             // Surface tension when hot (fluid)
+
+    // Initial wax blob
+    WAX_INIT_RADIUS: 0.15,   // Fraction of grid height
+    WAX_INIT_Y: 0.85,        // Vertical position (0=top, 1=bottom)
+
+    // Visuals
+    SHOW_TEMP: false,        // Show temperature overlay
+};
+
+// State
+let canvas, ctx;
+let cols, rows;
+let gridA, gridB;  // Ping-pong buffers
+let currentGrid, nextGrid;
+let frame = 0;
+let paused = false;
+let fastForwardFactor = 1;
+let fastForwardLevels = [1, 10, 50, 200, 1000];
+let fastForwardIndex = 0;
+let lastTime = 0;
+let showTemp = CONFIG.SHOW_TEMP;
+
+// PRNG (xorshift)
+let rngState = 12345;
+function rand() {
+    rngState ^= rngState << 13;
+    rngState ^= rngState >>> 17;
+    rngState ^= rngState << 5;
+    return (rngState >>> 0) / 0x100000000;
+}
+function randInt(n) { return (rand() * n) | 0; }
+
+// ============================================================
+// INITIALIZATION
+// ============================================================
+
+function init() {
+    canvas = document.getElementById('canvas');
+    ctx = canvas.getContext('2d');
+
+    resize();
+    window.addEventListener('resize', resize);
+
+    setupControls();
+    resetSimulation();
+
+    requestAnimationFrame(gameLoop);
+}
+
+function resize() {
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+
+    const newCols = Math.floor(canvas.width / CONFIG.CELL_SIZE);
+    const newRows = Math.floor(canvas.height / CONFIG.CELL_SIZE);
+
+    if (newCols !== cols || newRows !== rows) {
+        cols = newCols;
+        rows = newRows;
+        resetSimulation();
+    }
+}
+
+function resetSimulation() {
+    // Initialize grids: each cell = { phase: 0|1, temp: float 0-1 }
+    gridA = new Array(cols * rows);
+    gridB = new Array(cols * rows);
+
+    for (let i = 0; i < cols * rows; i++) {
+        gridA[i] = { phase: 0, temp: 0.3 };  // Start cool
+        gridB[i] = { phase: 0, temp: 0.3 };
+    }
+
+    // Create initial wax blob at bottom
+    const centerX = Math.floor(cols / 2);
+    const centerY = Math.floor(rows * CONFIG.WAX_INIT_Y);
+    const radius = Math.floor(rows * CONFIG.WAX_INIT_RADIUS);
+
+    for (let y = 0; y < rows; y++) {
+        for (let x = 0; x < cols; x++) {
+            const dx = x - centerX;
+            const dy = y - centerY;
+            const dist = Math.sqrt(dx * dx + dy * dy);
+
+            // Slightly irregular blob shape
+            const wobble = 1 + 0.15 * Math.sin(Math.atan2(dy, dx) * 5);
+
+            if (dist < radius * wobble) {
+                gridA[y * cols + x].phase = 1;
+                gridB[y * cols + x].phase = 1;
+            }
+        }
+    }
+
+    currentGrid = gridA;
+    nextGrid = gridB;
+    frame = 0;
+    rngState = Date.now() & 0xFFFFFFFF;
+}
+
+function setupControls() {
+    const ffBtn = document.getElementById('ff-btn');
+    const pauseBtn = document.getElementById('pause-btn');
+    const resetBtn = document.getElementById('reset-btn');
+
+    ffBtn.onclick = () => {
+        fastForwardIndex = (fastForwardIndex + 1) % fastForwardLevels.length;
+        fastForwardFactor = fastForwardLevels[fastForwardIndex];
+        ffBtn.textContent = fastForwardFactor + 'x';
+        if (fastForwardFactor > 1) paused = false;
+    };
+
+    pauseBtn.onclick = () => {
+        paused = !paused;
+        pauseBtn.textContent = paused ? 'Play' : 'Pause';
+        pauseBtn.classList.toggle('active', paused);
+    };
+
+    resetBtn.onclick = resetSimulation;
+
+    document.addEventListener('keydown', (e) => {
+        if (e.key === ' ' || e.code === 'Space') {
+            paused = !paused;
+            pauseBtn.textContent = paused ? 'Play' : 'Pause';
+            pauseBtn.classList.toggle('active', paused);
+            e.preventDefault();
+        }
+        if (e.key === 'r' || e.key === 'R') resetSimulation();
+        if (e.key === 't' || e.key === 'T') showTemp = !showTemp;
+
+        // Parameter adjustments
+        if (e.key === '1') { CONFIG.K_DIFFUSION = Math.min(0.1, CONFIG.K_DIFFUSION * 1.5); }
+        if (e.key === '!') { CONFIG.K_DIFFUSION = Math.max(0.001, CONFIG.K_DIFFUSION / 1.5); }
+        if (e.key === '2') { CONFIG.J_COLD = Math.min(5, CONFIG.J_COLD * 1.2); }
+        if (e.key === '@') { CONFIG.J_COLD = Math.max(0.5, CONFIG.J_COLD / 1.2); }
+        if (e.key === '3') { CONFIG.J_HOT = Math.min(1, CONFIG.J_HOT * 1.2); }
+        if (e.key === '#') { CONFIG.J_HOT = Math.max(0.01, CONFIG.J_HOT / 1.2); }
+        if (e.key === '4') { CONFIG.B_BUOYANCY = Math.min(0.2, CONFIG.B_BUOYANCY * 1.2); }
+        if (e.key === '$') { CONFIG.B_BUOYANCY = Math.max(0.02, CONFIG.B_BUOYANCY / 1.2); }
+    });
+}
+
+// ============================================================
+// SIMULATION CORE
+// ============================================================
+
+function advanceTick() {
+    frame++;
+
+    // Copy current state to next buffer
+    for (let i = 0; i < cols * rows; i++) {
+        nextGrid[i].phase = currentGrid[i].phase;
+        nextGrid[i].temp = currentGrid[i].temp;
+    }
+
+    // Pass 1: Thermal diffusion
+    thermalDiffusion();
+
+    // Pass 2: Checkerboard swaps (even cells)
+    checkerboardSwap(0);
+
+    // Pass 3: Checkerboard swaps (odd cells)
+    checkerboardSwap(1);
+
+    // Swap buffers
+    const tmp = currentGrid;
+    currentGrid = nextGrid;
+    nextGrid = tmp;
+}
+
+function thermalDiffusion() {
+    const k = CONFIG.K_DIFFUSION;
+
+    for (let y = 0; y < rows; y++) {
+        for (let x = 0; x < cols; x++) {
+            const idx = y * cols + x;
+
+            // Boundary conditions
+            if (y >= rows - CONFIG.HEATER_HEIGHT) {
+                // Bottom heater
+                nextGrid[idx].temp = CONFIG.T_BOTTOM;
+                continue;
+            }
+            if (y < CONFIG.COOLER_HEIGHT) {
+                // Top cooler
+                nextGrid[idx].temp = CONFIG.T_TOP;
+                continue;
+            }
+
+            // Get neighbor temperatures (wrap horizontally, clamp vertically)
+            const left = x > 0 ? currentGrid[idx - 1].temp : currentGrid[idx].temp;
+            const right = x < cols - 1 ? currentGrid[idx + 1].temp : currentGrid[idx].temp;
+            const up = y > 0 ? currentGrid[idx - cols].temp : currentGrid[idx].temp;
+            const down = y < rows - 1 ? currentGrid[idx + cols].temp : currentGrid[idx].temp;
+
+            const laplacian = (left + right + up + down) - 4 * currentGrid[idx].temp;
+            nextGrid[idx].temp = currentGrid[idx].temp + k * laplacian;
+
+            // Clamp
+            nextGrid[idx].temp = Math.max(0, Math.min(1, nextGrid[idx].temp));
+        }
+    }
+}
+
+function checkerboardSwap(parity) {
+    // Process cells where (x + y) % 2 === parity
+    for (let y = 1; y < rows - 1; y++) {
+        for (let x = 0; x < cols; x++) {
+            if ((x + y) % 2 !== parity) continue;
+
+            const idx = y * cols + x;
+            const cell = nextGrid[idx];
+
+            // Pick a random neighbor (0=up, 1=down, 2=left, 3=right)
+            const dir = randInt(4);
+            let nx = x, ny = y;
+
+            if (dir === 0) ny = y - 1;       // up
+            else if (dir === 1) ny = y + 1;  // down
+            else if (dir === 2) nx = (x - 1 + cols) % cols;  // left (wrap)
+            else nx = (x + 1) % cols;        // right (wrap)
+
+            // Bounds check (vertical)
+            if (ny < 0 || ny >= rows) continue;
+
+            const nidx = ny * cols + nx;
+            const neighbor = nextGrid[nidx];
+
+            // Only consider swaps between wax and water
+            if (cell.phase === neighbor.phase) continue;
+
+            // Calculate energy change for swap
+            const dE = calculateEnergyChange(x, y, nx, ny, cell, neighbor);
+
+            // Deterministic: swap only if energy decreases
+            if (dE < 0) {
+                // Swap phases
+                const tempPhase = cell.phase;
+                nextGrid[idx].phase = neighbor.phase;
+                nextGrid[nidx].phase = tempPhase;
+
+                // Temperature stays with position (not with the material)
+                // This is a simplification - in reality heat would partially move
+            }
+        }
+    }
+}
+
+function calculateEnergyChange(x1, y1, x2, y2, cell1, cell2) {
+    // cell1 is at (x1, y1), cell2 is at (x2, y2)
+    // We're considering swapping their phases
+
+    const waxCell = cell1.phase === 1 ? cell1 : cell2;
+    const waxY = cell1.phase === 1 ? y1 : y2;
+    const waterY = cell1.phase === 1 ? y2 : y1;
+
+    // Temperature of the wax (use position where wax currently is)
+    const T = waxCell.temp;
+
+    // 1. Gravity/Buoyancy term
+    // If wax moves from waxY to waterY:
+    const dy = waterY - waxY;  // positive = wax moving down, negative = wax moving up
+
+    // Effective gravity: positive pulls down, becomes negative (lift) when hot
+    const effectiveGravity = CONFIG.G_GRAVITY - CONFIG.B_BUOYANCY * T;
+
+    // Energy change from gravity/buoyancy
+    // Moving down (dy > 0) with positive gravity = energy decreases (good)
+    // Moving up (dy < 0) with negative gravity (hot) = energy decreases (good)
+    const dE_gravity = effectiveGravity * dy;
+
+    // 2. Surface tension term (temperature-dependent)
+    // J(T) = J_COLD * (1 - T) + J_HOT * T
+    const J = CONFIG.J_COLD * (1 - T) + CONFIG.J_HOT * T;
+
+    // Count unlike neighbors before and after swap
+    const currentUnlike = countUnlikeNeighbors(x1, y1, cell1.phase) +
+                          countUnlikeNeighbors(x2, y2, cell2.phase);
+
+    // After swap, phases are exchanged
+    const futureUnlike = countUnlikeNeighbors(x1, y1, cell2.phase) +
+                         countUnlikeNeighbors(x2, y2, cell1.phase);
+
+    const dE_surface = J * (futureUnlike - currentUnlike);
+
+    return dE_gravity + dE_surface;
+}
+
+function countUnlikeNeighbors(x, y, phase) {
+    let count = 0;
+
+    // Check 4 neighbors (von Neumann)
+    const neighbors = [
+        [x, y - 1],              // up
+        [x, y + 1],              // down
+        [(x - 1 + cols) % cols, y],  // left (wrap)
+        [(x + 1) % cols, y]      // right (wrap)
+    ];
+
+    for (const [nx, ny] of neighbors) {
+        if (ny < 0 || ny >= rows) {
+            // Out of bounds counts as water (phase 0)
+            if (phase === 1) count++;
+        } else {
+            const nidx = ny * cols + nx;
+            if (nextGrid[nidx].phase !== phase) count++;
+        }
+    }
+
+    return count;
+}
+
+// ============================================================
+// RENDERING
+// ============================================================
+
+function render() {
+    ctx.fillStyle = '#1a1a2e';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    const size = CONFIG.CELL_SIZE;
+
+    for (let y = 0; y < rows; y++) {
+        for (let x = 0; x < cols; x++) {
+            const idx = y * cols + x;
+            const cell = currentGrid[idx];
+
+            if (cell.phase === 1) {
+                // Wax: color by temperature
+                const T = cell.temp;
+
+                if (showTemp) {
+                    // Temperature visualization mode
+                    const r = Math.floor(255 * T);
+                    const g = Math.floor(50 * (1 - T));
+                    const b = Math.floor(100 * (1 - T));
+                    ctx.fillStyle = `rgb(${r},${g},${b})`;
+                } else {
+                    // Normal mode: warm = bright orange/yellow, cold = dark red
+                    const r = Math.floor(180 + 75 * T);
+                    const g = Math.floor(50 + 150 * T);
+                    const b = Math.floor(30 + 50 * T);
+                    ctx.fillStyle = `rgb(${r},${g},${b})`;
+                }
+
+                ctx.fillRect(x * size, y * size, size, size);
+            } else if (showTemp && cell.temp > 0.1) {
+                // Show water temperature too in temp mode
+                const T = cell.temp;
+                const r = Math.floor(40 * T);
+                const g = Math.floor(40 * T);
+                const b = Math.floor(80 + 80 * T);
+                ctx.fillStyle = `rgb(${r},${g},${b})`;
+                ctx.fillRect(x * size, y * size, size, size);
+            }
+        }
+    }
+
+    // Draw heater zone indicator
+    ctx.fillStyle = 'rgba(255, 100, 0, 0.3)';
+    ctx.fillRect(0, (rows - CONFIG.HEATER_HEIGHT) * size, cols * size, CONFIG.HEATER_HEIGHT * size);
+
+    // Draw cooler zone indicator
+    ctx.fillStyle = 'rgba(0, 100, 255, 0.2)';
+    ctx.fillRect(0, 0, cols * size, CONFIG.COOLER_HEIGHT * size);
+}
+
+function updateUI() {
+    // Calculate stats
+    let waxCount = 0;
+    let totalTemp = 0;
+    let waxTemp = 0;
+
+    for (let i = 0; i < cols * rows; i++) {
+        if (currentGrid[i].phase === 1) {
+            waxCount++;
+            waxTemp += currentGrid[i].temp;
+        }
+        totalTemp += currentGrid[i].temp;
+    }
+
+    const avgWaxTemp = waxCount > 0 ? (waxTemp / waxCount).toFixed(3) : 0;
+
+    document.getElementById('ticks').textContent = `Ticks: ${frame}`;
+    document.getElementById('stats').textContent = `Wax: ${waxCount} | Avg Wax T: ${avgWaxTemp}`;
+    document.getElementById('params').textContent =
+        `k=${CONFIG.K_DIFFUSION.toFixed(4)} J_cold=${CONFIG.J_COLD.toFixed(2)} J_hot=${CONFIG.J_HOT.toFixed(2)} buoy=${CONFIG.B_BUOYANCY.toFixed(3)}`;
+}
+
+// ============================================================
+// GAME LOOP
+// ============================================================
+
+function gameLoop(timestamp) {
+    // FPS calculation
+    const dt = timestamp - lastTime;
+    lastTime = timestamp;
+    const fps = dt > 0 ? Math.round(1000 / dt) : 0;
+    document.getElementById('fps').textContent = `FPS: ${fps}`;
+
+    if (!paused) {
+        // Run simulation ticks
+        const ticksThisFrame = fastForwardFactor;
+        for (let i = 0; i < ticksThisFrame; i++) {
+            advanceTick();
+        }
+    }
+
+    // Always render (even when paused)
+    render();
+
+    // Update UI less frequently
+    if (frame % 10 === 0 || paused) {
+        updateUI();
+    }
+
+    requestAnimationFrame(gameLoop);
+}
+
+// ============================================================
+// START
+// ============================================================
+
+window.addEventListener('DOMContentLoaded', init);
+</script>
+</body>
+</html>

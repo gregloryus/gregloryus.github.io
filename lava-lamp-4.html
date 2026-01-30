@@ -1,0 +1,560 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Lava Lamp v4</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        html, body {
+            width: 100%; height: 100%;
+            overflow: hidden;
+            background: #0a0a12;
+        }
+        #canvas {
+            display: block;
+            image-rendering: pixelated;
+            image-rendering: crisp-edges;
+        }
+        #ui {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            color: #fff;
+            font-family: monospace;
+            font-size: 12px;
+            background: rgba(0,0,0,0.85);
+            padding: 12px;
+            border-radius: 4px;
+            z-index: 100;
+            max-width: 340px;
+        }
+        #ui div { margin: 3px 0; }
+        .param-row {
+            display: flex;
+            justify-content: space-between;
+            padding: 2px 0;
+            border-bottom: 1px solid #333;
+        }
+        .param-name { color: #8af; }
+        .param-value { color: #fa0; }
+        #controls {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            z-index: 100;
+        }
+        #controls button {
+            padding: 10px 20px;
+            margin: 2px;
+            background: #222;
+            color: #fff;
+            border: 1px solid #555;
+            cursor: pointer;
+            font-family: monospace;
+            font-size: 14px;
+        }
+        #controls button:hover { background: #444; }
+        #controls button.active { background: #005588; border-color: #00aaff; }
+        #debug {
+            position: absolute;
+            bottom: 10px;
+            left: 10px;
+            color: #0f0;
+            font-family: monospace;
+            font-size: 11px;
+            background: rgba(0,0,0,0.9);
+            padding: 10px;
+            border-radius: 4px;
+            z-index: 100;
+            max-width: 400px;
+        }
+    </style>
+</head>
+<body>
+    <canvas id="canvas"></canvas>
+
+    <div id="ui">
+        <div style="font-size:14px;color:#fff;margin-bottom:8px;">Lava Lamp v4 (Debug)</div>
+        <div id="fps">FPS: 0</div>
+        <div id="ticks">Ticks: 0</div>
+        <div id="stats">Wax: 0</div>
+        <div id="temp-stats">Temp: 0</div>
+        <div id="swap-stats">Swaps: 0</div>
+        <div style="margin-top:10px;border-top:1px solid #444;padding-top:8px;">
+            <div class="param-row"><span class="param-name">[1/!] k_diff</span><span class="param-value" id="p-kdiff">0</span></div>
+            <div class="param-row"><span class="param-name">[2/@] J_cold</span><span class="param-value" id="p-jcold">0</span></div>
+            <div class="param-row"><span class="param-name">[3/#] J_hot</span><span class="param-value" id="p-jhot">0</span></div>
+            <div class="param-row"><span class="param-name">[4/$] buoyancy</span><span class="param-value" id="p-buoy">0</span></div>
+            <div class="param-row"><span class="param-name">[5/%] gravity</span><span class="param-value" id="p-grav">0</span></div>
+        </div>
+    </div>
+
+    <div id="controls">
+        <button id="ff-btn">1x</button>
+        <button id="pause-btn">| |</button>
+        <button id="reset-btn">Reset</button>
+    </div>
+
+    <div id="debug">
+        <div>Debug info will appear here</div>
+    </div>
+
+<script>
+// ============================================================
+// LAVA LAMP v4 - Debug version with stronger forces
+// ============================================================
+
+const CONFIG = {
+    CELL_SIZE: 3,
+
+    // Thermal
+    K_DIFFUSION: 0.02,      // Faster diffusion for testing
+    T_AMBIENT: 0.05,
+    T_HEATER: 1.0,
+    T_COOLER: 0.0,
+
+    HEATER_HEIGHT: 5,
+    HEATER_WIDTH_FRAC: 0.4,
+    COOLER_HEIGHT: 8,
+
+    // Forces - MUCH STRONGER now
+    G_GRAVITY: 0.5,         // 10x stronger
+    B_BUOYANCY: 0.8,        // 10x stronger, exceeds gravity when hot
+
+    // Surface tension
+    J_COLD: 1.5,            // Reduced from 2.5
+    J_HOT: 0.1,             // Low when hot
+
+    // Initial wax
+    WAX_HEIGHT_FRAC: 0.10,
+    WAX_WIDTH_FRAC: 0.6,
+
+    SHOW_TEMP: false,
+};
+
+let canvas, ctx;
+let cols, rows;
+let gridA, gridB;
+let currentGrid, nextGrid;
+let frame = 0;
+let paused = false;
+let fastForwardFactor = 1;
+let fastForwardLevels = [1, 10, 100, 1000];
+let fastForwardIndex = 0;
+let lastRenderTime = 0;
+let showTemp = false;
+let heaterLeft, heaterRight;
+
+// Debug counters
+let swapsThisTick = 0;
+let swapsTotal = 0;
+let attemptsThisTick = 0;
+let debugInfo = "";
+
+// PRNG
+let rngState = 12345;
+function rand() {
+    rngState ^= rngState << 13;
+    rngState ^= rngState >>> 17;
+    rngState ^= rngState << 5;
+    return (rngState >>> 0) / 0x100000000;
+}
+function randInt(n) { return (rand() * n) | 0; }
+
+function init() {
+    canvas = document.getElementById('canvas');
+    ctx = canvas.getContext('2d');
+    resize();
+    window.addEventListener('resize', resize);
+    setupControls();
+    resetSimulation();
+    requestAnimationFrame(gameLoop);
+}
+
+function resize() {
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+    const newCols = Math.floor(canvas.width / CONFIG.CELL_SIZE);
+    const newRows = Math.floor(canvas.height / CONFIG.CELL_SIZE);
+    if (newCols !== cols || newRows !== rows) {
+        cols = newCols;
+        rows = newRows;
+        const heaterWidth = Math.floor(cols * CONFIG.HEATER_WIDTH_FRAC);
+        heaterLeft = Math.floor((cols - heaterWidth) / 2);
+        heaterRight = heaterLeft + heaterWidth;
+        resetSimulation();
+    }
+}
+
+function resetSimulation() {
+    const size = cols * rows;
+    gridA = new Array(size);
+    gridB = new Array(size);
+
+    for (let i = 0; i < size; i++) {
+        gridA[i] = { phase: 0, temp: CONFIG.T_AMBIENT };
+        gridB[i] = { phase: 0, temp: CONFIG.T_AMBIENT };
+    }
+
+    // Flat wax pancake at bottom
+    const waxHeight = Math.floor(rows * CONFIG.WAX_HEIGHT_FRAC);
+    const waxWidth = Math.floor(cols * CONFIG.WAX_WIDTH_FRAC);
+    const waxLeft = Math.floor((cols - waxWidth) / 2);
+    const waxRight = waxLeft + waxWidth;
+    const waxTop = rows - waxHeight;
+
+    for (let y = waxTop; y < rows; y++) {
+        for (let x = waxLeft; x < waxRight; x++) {
+            // Simple flat blob with rounded edges
+            const edgeDistX = Math.min(x - waxLeft, waxRight - 1 - x);
+            const roundness = Math.max(0, 3 - edgeDistX);
+            if (y >= waxTop + roundness) {
+                const idx = y * cols + x;
+                gridA[idx].phase = 1;
+                gridB[idx].phase = 1;
+            }
+        }
+    }
+
+    currentGrid = gridA;
+    nextGrid = gridB;
+    frame = 0;
+    swapsTotal = 0;
+    rngState = Date.now() & 0xFFFFFFFF;
+}
+
+function setupControls() {
+    const ffBtn = document.getElementById('ff-btn');
+    const pauseBtn = document.getElementById('pause-btn');
+    const resetBtn = document.getElementById('reset-btn');
+
+    ffBtn.onclick = () => {
+        fastForwardIndex = (fastForwardIndex + 1) % fastForwardLevels.length;
+        fastForwardFactor = fastForwardLevels[fastForwardIndex];
+        ffBtn.textContent = fastForwardFactor + 'x';
+        if (fastForwardFactor > 1) paused = false;
+    };
+
+    pauseBtn.onclick = () => {
+        paused = !paused;
+        pauseBtn.textContent = paused ? '▶' : '| |';
+        pauseBtn.classList.toggle('active', paused);
+    };
+
+    resetBtn.onclick = resetSimulation;
+
+    document.addEventListener('keydown', (e) => {
+        if (e.key === ' ' || e.code === 'Space') {
+            paused = !paused;
+            pauseBtn.textContent = paused ? '▶' : '| |';
+            e.preventDefault();
+        }
+        if (e.key === 'r' || e.key === 'R') resetSimulation();
+        if (e.key === 't' || e.key === 'T') showTemp = !showTemp;
+
+        if (e.key === '1') CONFIG.K_DIFFUSION = Math.min(0.2, CONFIG.K_DIFFUSION * 1.5);
+        if (e.key === '!') CONFIG.K_DIFFUSION = Math.max(0.001, CONFIG.K_DIFFUSION / 1.5);
+        if (e.key === '2') CONFIG.J_COLD = Math.min(5, CONFIG.J_COLD * 1.2);
+        if (e.key === '@') CONFIG.J_COLD = Math.max(0.1, CONFIG.J_COLD / 1.2);
+        if (e.key === '3') CONFIG.J_HOT = Math.min(2, CONFIG.J_HOT * 1.3);
+        if (e.key === '#') CONFIG.J_HOT = Math.max(0.01, CONFIG.J_HOT / 1.3);
+        if (e.key === '4') CONFIG.B_BUOYANCY = Math.min(2, CONFIG.B_BUOYANCY * 1.2);
+        if (e.key === '$') CONFIG.B_BUOYANCY = Math.max(0.1, CONFIG.B_BUOYANCY / 1.2);
+        if (e.key === '5') CONFIG.G_GRAVITY = Math.min(2, CONFIG.G_GRAVITY * 1.2);
+        if (e.key === '%') CONFIG.G_GRAVITY = Math.max(0.05, CONFIG.G_GRAVITY / 1.2);
+    });
+}
+
+// ============================================================
+// SIMULATION
+// ============================================================
+
+function advanceTick() {
+    frame++;
+    swapsThisTick = 0;
+    attemptsThisTick = 0;
+
+    // Copy state
+    for (let i = 0; i < cols * rows; i++) {
+        nextGrid[i].phase = currentGrid[i].phase;
+        nextGrid[i].temp = currentGrid[i].temp;
+    }
+
+    thermalDiffusion();
+    checkerboardSwap(0);
+    checkerboardSwap(1);
+
+    swapsTotal += swapsThisTick;
+
+    // Swap buffers
+    const tmp = currentGrid;
+    currentGrid = nextGrid;
+    nextGrid = tmp;
+}
+
+function thermalDiffusion() {
+    const k = CONFIG.K_DIFFUSION;
+
+    for (let y = 0; y < rows; y++) {
+        for (let x = 0; x < cols; x++) {
+            const idx = y * cols + x;
+
+            // Heater zone
+            if (y >= rows - CONFIG.HEATER_HEIGHT && x >= heaterLeft && x < heaterRight) {
+                nextGrid[idx].temp = CONFIG.T_HEATER;
+                continue;
+            }
+
+            // Cooler zone
+            if (y < CONFIG.COOLER_HEIGHT) {
+                nextGrid[idx].temp = CONFIG.T_COOLER;
+                continue;
+            }
+
+            // NO side cooling - removed as requested
+
+            // Diffusion (5-point stencil)
+            const curr = currentGrid[idx].temp;
+            const left = x > 0 ? currentGrid[idx - 1].temp : curr;
+            const right = x < cols - 1 ? currentGrid[idx + 1].temp : curr;
+            const up = y > 0 ? currentGrid[idx - cols].temp : curr;
+            const down = y < rows - 1 ? currentGrid[idx + cols].temp : curr;
+
+            const laplacian = (left + right + up + down) - 4 * curr;
+            nextGrid[idx].temp = Math.max(0, Math.min(1, curr + k * laplacian));
+        }
+    }
+}
+
+function checkerboardSwap(parity) {
+    for (let y = 1; y < rows - 1; y++) {
+        for (let x = 1; x < cols - 1; x++) {
+            if ((x + y) % 2 !== parity) continue;
+
+            const idx = y * cols + x;
+            const myPhase = currentGrid[idx].phase;
+
+            // Pick random neighbor
+            const dir = randInt(4);
+            let nx = x, ny = y;
+            if (dir === 0) ny = y - 1;      // up
+            else if (dir === 1) ny = y + 1; // down
+            else if (dir === 2) nx = x - 1; // left
+            else nx = x + 1;                // right
+
+            const nidx = ny * cols + nx;
+            const neighborPhase = currentGrid[nidx].phase;
+
+            // Only swap wax <-> water
+            if (myPhase === neighborPhase) continue;
+
+            attemptsThisTick++;
+
+            const result = calculateEnergyChange(x, y, nx, ny, idx, nidx, myPhase, neighborPhase);
+
+            if (result.dE < 0) {
+                nextGrid[idx].phase = neighborPhase;
+                nextGrid[nidx].phase = myPhase;
+                swapsThisTick++;
+
+                // Debug: log first few swaps
+                if (swapsTotal + swapsThisTick <= 5) {
+                    console.log(`Swap #${swapsTotal + swapsThisTick}: dE=${result.dE.toFixed(4)} (grav=${result.dE_grav.toFixed(4)}, surf=${result.dE_surf.toFixed(4)}) T=${result.T.toFixed(3)}`);
+                }
+            }
+        }
+    }
+}
+
+function calculateEnergyChange(x1, y1, x2, y2, idx1, idx2, phase1, phase2) {
+    // Which is wax?
+    const waxIdx = phase1 === 1 ? idx1 : idx2;
+    const waxY = phase1 === 1 ? y1 : y2;
+    const waterY = phase1 === 1 ? y2 : y1;
+    const waxX = phase1 === 1 ? x1 : x2;
+    const waterX = phase1 === 1 ? x2 : x1;
+
+    const T = currentGrid[waxIdx].temp;
+
+    // GRAVITY/BUOYANCY
+    // g_eff = G - B*T
+    // When T=1 and B > G: g_eff < 0 (buoyancy wins, wax wants to rise)
+    // dE = g_eff * (waxY - waterY)
+    // If wax rises (waxY > waterY), and g_eff < 0: dE < 0 (favorable)
+    const g_eff = CONFIG.G_GRAVITY - CONFIG.B_BUOYANCY * T;
+    const dE_gravity = g_eff * (waxY - waterY);
+
+    // SURFACE TENSION
+    const J = CONFIG.J_COLD * (1 - T) + CONFIG.J_HOT * T;
+
+    // Count interface changes
+    const unlike1_before = countUnlikeExcluding(x1, y1, phase1, x2, y2);
+    const unlike2_before = countUnlikeExcluding(x2, y2, phase2, x1, y1);
+    const unlike1_after = countUnlikeExcluding(x1, y1, phase2, x2, y2);
+    const unlike2_after = countUnlikeExcluding(x2, y2, phase1, x1, y1);
+
+    const dE_surface = J * ((unlike1_after + unlike2_after) - (unlike1_before + unlike2_before));
+
+    const dE = dE_gravity + dE_surface;
+
+    return { dE, dE_grav: dE_gravity, dE_surf: dE_surface, T, J, g_eff };
+}
+
+function countUnlikeExcluding(x, y, phase, exX, exY) {
+    let count = 0;
+
+    // Up
+    if (y > 0) {
+        if (!(x === exX && y - 1 === exY)) {
+            if (currentGrid[(y - 1) * cols + x].phase !== phase) count++;
+        }
+    } else {
+        if (phase === 1) count++; // boundary = water
+    }
+
+    // Down
+    if (y < rows - 1) {
+        if (!(x === exX && y + 1 === exY)) {
+            if (currentGrid[(y + 1) * cols + x].phase !== phase) count++;
+        }
+    } else {
+        if (phase === 1) count++;
+    }
+
+    // Left
+    if (x > 0) {
+        if (!(x - 1 === exX && y === exY)) {
+            if (currentGrid[y * cols + (x - 1)].phase !== phase) count++;
+        }
+    } else {
+        if (phase === 1) count++;
+    }
+
+    // Right
+    if (x < cols - 1) {
+        if (!(x + 1 === exX && y === exY)) {
+            if (currentGrid[y * cols + (x + 1)].phase !== phase) count++;
+        }
+    } else {
+        if (phase === 1) count++;
+    }
+
+    return count;
+}
+
+// ============================================================
+// RENDERING
+// ============================================================
+
+function render() {
+    ctx.fillStyle = '#0a0a12';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    const size = CONFIG.CELL_SIZE;
+
+    for (let y = 0; y < rows; y++) {
+        for (let x = 0; x < cols; x++) {
+            const idx = y * cols + x;
+            const cell = currentGrid[idx];
+
+            if (cell.phase === 1) {
+                const T = cell.temp;
+                if (showTemp) {
+                    const r = Math.floor(50 + 205 * T);
+                    const b = Math.floor(200 * (1 - T));
+                    ctx.fillStyle = `rgb(${r},30,${b})`;
+                } else {
+                    const r = Math.floor(100 + 155 * T);
+                    const g = Math.floor(20 + 180 * T);
+                    const b = Math.floor(30 + 40 * T);
+                    ctx.fillStyle = `rgb(${r},${g},${b})`;
+                }
+                ctx.fillRect(x * size, y * size, size, size);
+            } else if (showTemp && cell.temp > 0.03) {
+                ctx.fillStyle = `rgba(80, 40, 120, ${cell.temp * 0.7})`;
+                ctx.fillRect(x * size, y * size, size, size);
+            }
+        }
+    }
+
+    // Heater
+    ctx.fillStyle = 'rgba(255, 80, 0, 0.5)';
+    ctx.fillRect(heaterLeft * size, (rows - CONFIG.HEATER_HEIGHT) * size,
+                 (heaterRight - heaterLeft) * size, CONFIG.HEATER_HEIGHT * size);
+
+    // Cooler
+    ctx.fillStyle = 'rgba(0, 100, 255, 0.2)';
+    ctx.fillRect(0, 0, cols * size, CONFIG.COOLER_HEIGHT * size);
+}
+
+function updateUI() {
+    let waxCount = 0, waxTempSum = 0, maxWaxTemp = 0;
+    for (let i = 0; i < cols * rows; i++) {
+        if (currentGrid[i].phase === 1) {
+            waxCount++;
+            waxTempSum += currentGrid[i].temp;
+            maxWaxTemp = Math.max(maxWaxTemp, currentGrid[i].temp);
+        }
+    }
+
+    document.getElementById('ticks').textContent = `Ticks: ${frame}`;
+    document.getElementById('stats').textContent = `Wax cells: ${waxCount}`;
+    document.getElementById('temp-stats').textContent =
+        `Avg T: ${waxCount > 0 ? (waxTempSum/waxCount).toFixed(3) : 0} | Max T: ${maxWaxTemp.toFixed(3)}`;
+    document.getElementById('swap-stats').textContent =
+        `Swaps this tick: ${swapsThisTick} | Total: ${swapsTotal}`;
+
+    document.getElementById('p-kdiff').textContent = CONFIG.K_DIFFUSION.toFixed(4);
+    document.getElementById('p-jcold').textContent = CONFIG.J_COLD.toFixed(2);
+    document.getElementById('p-jhot').textContent = CONFIG.J_HOT.toFixed(2);
+    document.getElementById('p-buoy').textContent = CONFIG.B_BUOYANCY.toFixed(2);
+    document.getElementById('p-grav').textContent = CONFIG.G_GRAVITY.toFixed(2);
+
+    // Debug info
+    const g_eff_hot = CONFIG.G_GRAVITY - CONFIG.B_BUOYANCY * 1.0;
+    const g_eff_cold = CONFIG.G_GRAVITY - CONFIG.B_BUOYANCY * 0.0;
+    document.getElementById('debug').innerHTML = `
+        <b>Physics check:</b><br>
+        g_eff @ T=0 (cold): ${g_eff_cold.toFixed(3)} ${g_eff_cold > 0 ? '(sinks ✓)' : '(floats ✗)'}<br>
+        g_eff @ T=1 (hot): ${g_eff_hot.toFixed(3)} ${g_eff_hot < 0 ? '(rises ✓)' : '(sinks ✗)'}<br>
+        J @ T=0: ${CONFIG.J_COLD.toFixed(2)} | J @ T=1: ${CONFIG.J_HOT.toFixed(2)}<br>
+        <br>
+        For hot wax to rise, need: |g_eff| > ~2*J_hot<br>
+        Current: |${Math.abs(g_eff_hot).toFixed(3)}| vs ${(2*CONFIG.J_HOT).toFixed(3)}<br>
+        ${Math.abs(g_eff_hot) > 2*CONFIG.J_HOT ? '✓ Should move!' : '✗ Surface tension too strong'}
+    `;
+}
+
+// ============================================================
+// GAME LOOP - Fixed for fast-forward
+// ============================================================
+
+function gameLoop(timestamp) {
+    const dt = timestamp - lastRenderTime;
+    lastRenderTime = timestamp;
+    document.getElementById('fps').textContent = `FPS: ${dt > 0 ? Math.round(1000 / dt) : 0}`;
+
+    if (!paused) {
+        // Limit ticks per frame to prevent freezing
+        const maxTicksPerFrame = Math.min(fastForwardFactor, 100);
+        const tickBatches = Math.ceil(fastForwardFactor / maxTicksPerFrame);
+
+        for (let batch = 0; batch < tickBatches; batch++) {
+            const ticksThisBatch = Math.min(maxTicksPerFrame, fastForwardFactor - batch * maxTicksPerFrame);
+            for (let i = 0; i < ticksThisBatch; i++) {
+                advanceTick();
+            }
+        }
+    }
+
+    render();
+    updateUI();
+
+    requestAnimationFrame(gameLoop);
+}
+
+window.addEventListener('DOMContentLoaded', init);
+</script>
+</body>
+</html>

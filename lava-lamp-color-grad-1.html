@@ -1,0 +1,747 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Lava Lamp - Color Gradient LBM v1 (fixed)</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        html, body { height: 100%; overflow: hidden; background: #0a0a12; }
+        #canvas { display: block; }
+        #ui { position: absolute; top: 4px; left: 6px; color: #fff; font: 10px monospace; background: rgba(0,0,0,0.8); padding: 4px 6px; border-radius: 3px; }
+        #controls { position: absolute; top: 4px; right: 6px; display: flex; gap: 2px; }
+        #controls button { padding: 3px 8px; background: #222; color: #fff; border: 1px solid #555; cursor: pointer; font: 9px monospace; }
+        #params { position: absolute; top: 28px; left: 0; right: 0; color: #ccc; font: 8px monospace; background: rgba(0,0,0,0.9); padding: 4px 8px; display: flex; flex-wrap: wrap; gap: 2px 10px; align-items: center; }
+        #params label { display: flex; align-items: center; gap: 3px; white-space: nowrap; }
+        #params input[type="number"] { width: 50px; background: #222; color: #fff; border: 1px solid #444; padding: 1px 2px; font: 8px monospace; }
+        #params .section { color: #888; font-weight: bold; margin-left: 8px; }
+        #params .section:first-child { margin-left: 0; }
+    </style>
+</head>
+<body>
+<canvas id="canvas"></canvas>
+<div id="ui">
+    <div>Color Gradient LBM v1 (Fixed - Mass Conserving)</div>
+    <div id="stats"></div>
+</div>
+<div id="controls">
+    <button id="ff">1x</button>
+    <button id="pp">||</button>
+    <button id="rr">Reset</button>
+    <button id="toggleParams">Params</button>
+</div>
+<div id="params">
+    <span class="section">Recoloring</span>
+    <label>β_cold<input type="number" id="p_betaCold" step="0.1" value="0.7" title="Recoloring strength when cold (max separation, blobs bounce)"></label>
+    <label>β_hot<input type="number" id="p_betaHot" step="0.1" value="0.1" title="Recoloring strength when hot (weak separation, blobs merge)"></label>
+    <span class="section">Density</span>
+    <label>ρ_wax<input type="number" id="p_rhoWax" step="0.05" value="1.0"></label>
+    <label>ρ_water<input type="number" id="p_rhoWater" step="0.05" value="1.0"></label>
+    <label>WaxH<input type="number" id="p_waxH" step="0.02" value="0.15"></label>
+    <span class="section">Viscosity</span>
+    <label>τ_cold<input type="number" id="p_tauCold" step="0.1" value="1.5" title="Relaxation time when cold (high viscosity)"></label>
+    <label>τ_hot<input type="number" id="p_tauHot" step="0.05" value="0.7" title="Relaxation time when hot (low viscosity)"></label>
+    <label>τ_water<input type="number" id="p_tauWater" step="0.05" value="0.8"></label>
+    <label>TransT<input type="number" id="p_transT" step="0.05" value="0.5"></label>
+    <span class="section">Forces</span>
+    <label>Buoy<input type="number" id="p_buoy" step="0.001" value="0.015"></label>
+    <label>Grav<input type="number" id="p_grav" step="0.0001" value="0.0003"></label>
+    <label>BuoyT<input type="number" id="p_buoyT" step="0.05" value="0.5"></label>
+    <label>BuoySharp<input type="number" id="p_buoySharp" step="1" value="15"></label>
+    <span class="section">Temp</span>
+    <label>Heat<input type="number" id="p_heatR" step="0.001" value="0.008"></label>
+    <label>Cool<input type="number" id="p_coolR" step="0.001" value="0.006"></label>
+    <label>Diff<input type="number" id="p_diffuse" step="0.01" value="0.03"></label>
+    <span class="section">Zones</span>
+    <label>HeatY<input type="number" id="p_heatZone" step="0.02" value="0.85"></label>
+    <label>CoolY<input type="number" id="p_coolZone" step="0.02" value="0.2"></label>
+    <span class="section">Grid</span>
+    <label>Cell<input type="number" id="p_cell" step="1" value="4"></label>
+</div>
+
+<script>
+// ============================================================
+// Color Gradient (Rothman-Keller) Lattice Boltzmann Method
+//
+// Key difference from Shan-Chen:
+// - Shan-Chen: thermodynamic attraction → small droplets dissolve
+// - Color Gradient: explicit recoloring step → blobs stay cohesive
+//
+// The recoloring step redistributes mass to maintain sharp interfaces
+// regardless of blob size. Temperature-dependent recoloring strength
+// controls merge/bounce behavior.
+// ============================================================
+
+const canvas = document.getElementById('canvas');
+const ctx = canvas.getContext('2d');
+
+// D2Q9 lattice constants
+const cx = [0, 1, 0, -1, 0, 1, -1, -1, 1];
+const cy = [0, 0, 1, 0, -1, 1, 1, -1, -1];  // y+ is UP (canvas convention: we'll flip for rendering)
+const w = [4/9, 1/9, 1/9, 1/9, 1/9, 1/36, 1/36, 1/36, 1/36];
+const opposite = [0, 3, 4, 1, 2, 7, 8, 5, 6];
+
+let P = {};  // Parameters
+let W, H;    // Grid dimensions
+let frame = 0, paused = false, ff = 1;
+
+// Distribution functions: fR (wax/red), fB (water/blue)
+let fR, fB;      // [W*H*9] - current distributions
+let fR_new, fB_new;  // [W*H*9] - post-streaming distributions
+let temp;        // [W*H] - temperature field
+
+// Macroscopic quantities (computed each step)
+let rhoR, rhoB;  // Densities
+let ux, uy;      // Velocity components
+let colorGradX, colorGradY;  // Color gradient for surface tension
+
+let initialMassR = 0, initialMassB = 0;
+
+function readParams() {
+    P = {
+        CELL: parseFloat(document.getElementById('p_cell').value),
+        BETA_COLD: parseFloat(document.getElementById('p_betaCold').value),
+        BETA_HOT: parseFloat(document.getElementById('p_betaHot').value),
+        RHO_WAX: parseFloat(document.getElementById('p_rhoWax').value),
+        RHO_WATER: parseFloat(document.getElementById('p_rhoWater').value),
+        WAX_HEIGHT_FRAC: parseFloat(document.getElementById('p_waxH').value),
+        TAU_COLD: parseFloat(document.getElementById('p_tauCold').value),
+        TAU_HOT: parseFloat(document.getElementById('p_tauHot').value),
+        TAU_WATER: parseFloat(document.getElementById('p_tauWater').value),
+        TRANSITION_TEMP: parseFloat(document.getElementById('p_transT').value),
+        BUOYANCY: parseFloat(document.getElementById('p_buoy').value),
+        GRAVITY: parseFloat(document.getElementById('p_grav').value),
+        BUOY_THRESHOLD: parseFloat(document.getElementById('p_buoyT').value),
+        BUOY_SHARPNESS: parseFloat(document.getElementById('p_buoySharp').value),
+        HEAT_RATE: parseFloat(document.getElementById('p_heatR').value),
+        COOL_RATE: parseFloat(document.getElementById('p_coolR').value),
+        TEMP_DIFFUSION: parseFloat(document.getElementById('p_diffuse').value),
+        HEAT_ZONE_START: parseFloat(document.getElementById('p_heatZone').value),
+        COOL_ZONE_END: parseFloat(document.getElementById('p_coolZone').value)
+    };
+}
+
+function idx(x, y) {
+    return y * W + x;
+}
+
+function idx9(x, y, k) {
+    return (y * W + x) * 9 + k;
+}
+
+function sigmoid(x) {
+    if (x > 15) return 1;
+    if (x < -15) return 0;
+    return 1 / (1 + Math.exp(-x));
+}
+
+function allocateArrays() {
+    const N = W * H;
+    const N9 = N * 9;
+
+    fR = new Float32Array(N9);
+    fB = new Float32Array(N9);
+    fR_new = new Float32Array(N9);
+    fB_new = new Float32Array(N9);
+    temp = new Float32Array(N);
+
+    rhoR = new Float32Array(N);
+    rhoB = new Float32Array(N);
+    ux = new Float32Array(N);
+    uy = new Float32Array(N);
+    colorGradX = new Float32Array(N);
+    colorGradY = new Float32Array(N);
+}
+
+function initialize() {
+    readParams();
+
+    const interfaceY = Math.floor(H * P.WAX_HEIGHT_FRAC);
+
+    for (let y = 0; y < H; y++) {
+        for (let x = 0; x < W; x++) {
+            const i = idx(x, y);
+
+            // Smooth interface
+            const distFromInterface = interfaceY - y;
+            const blend = 0.5 * (1 + Math.tanh(distFromInterface / 2));
+
+            // Add slight noise for symmetry breaking
+            const noise = (Math.random() - 0.5) * 0.02;
+
+            const localRhoR = blend * P.RHO_WAX * (1 + noise);
+            const localRhoB = (1 - blend) * P.RHO_WATER * (1 + noise);
+
+            // Initialize at equilibrium (zero velocity)
+            for (let k = 0; k < 9; k++) {
+                fR[idx9(x, y, k)] = w[k] * localRhoR;
+                fB[idx9(x, y, k)] = w[k] * localRhoB;
+            }
+
+            // Temperature: wax starts cool, water at ambient
+            temp[i] = blend * 0.2 + (1 - blend) * 0.35;
+        }
+    }
+
+    // Compute initial mass
+    computeMacro();
+    initialMassR = 0;
+    initialMassB = 0;
+    for (let i = 0; i < W * H; i++) {
+        initialMassR += rhoR[i];
+        initialMassB += rhoB[i];
+    }
+
+    frame = 0;
+}
+
+function computeMacro() {
+    // Compute density and velocity from distributions
+    for (let y = 0; y < H; y++) {
+        for (let x = 0; x < W; x++) {
+            const i = idx(x, y);
+
+            let sumR = 0, sumB = 0;
+            let momX = 0, momY = 0;
+
+            for (let k = 0; k < 9; k++) {
+                const fRk = fR[idx9(x, y, k)];
+                const fBk = fB[idx9(x, y, k)];
+                sumR += fRk;
+                sumB += fBk;
+                momX += (fRk + fBk) * cx[k];
+                momY += (fRk + fBk) * cy[k];
+            }
+
+            rhoR[i] = sumR;
+            rhoB[i] = sumB;
+
+            const rhoTotal = sumR + sumB;
+            if (rhoTotal > 0.001) {
+                ux[i] = momX / rhoTotal;
+                uy[i] = momY / rhoTotal;
+            } else {
+                ux[i] = 0;
+                uy[i] = 0;
+            }
+        }
+    }
+}
+
+function computeColorGradient() {
+    // Compute gradient of color field: phi = (rhoR - rhoB) / (rhoR + rhoB)
+    // Using isotropic stencil for better accuracy
+
+    for (let y = 0; y < H; y++) {
+        for (let x = 0; x < W; x++) {
+            const i = idx(x, y);
+
+            let gradX = 0, gradY = 0;
+
+            for (let k = 1; k < 9; k++) {  // Skip rest direction
+                let nx = x + cx[k];
+                let ny = y + cy[k];
+
+                // Periodic in x, bounce at y boundaries
+                nx = (nx + W) % W;
+                ny = Math.max(0, Math.min(H - 1, ny));
+
+                const ni = idx(nx, ny);
+                const nRhoR = rhoR[ni];
+                const nRhoB = rhoB[ni];
+                const nRhoTotal = nRhoR + nRhoB;
+
+                // Color field at neighbor
+                const phi = nRhoTotal > 0.01 ? (nRhoR - nRhoB) / nRhoTotal : 0;
+
+                gradX += w[k] * phi * cx[k];
+                gradY += w[k] * phi * cy[k];
+            }
+
+            // Scale by 3 for proper D2Q9 gradient (cs^2 = 1/3)
+            colorGradX[i] = gradX * 3;
+            colorGradY[i] = gradY * 3;
+        }
+    }
+}
+
+function collision() {
+    // BGK collision for two-component system
+    // Surface tension is handled by recoloring step, not perturbation
+    // This ensures strict mass conservation
+
+    for (let y = 0; y < H; y++) {
+        for (let x = 0; x < W; x++) {
+            const i = idx(x, y);
+            const i9 = i * 9;
+
+            const localRhoR = rhoR[i];
+            const localRhoB = rhoB[i];
+            const rhoTotal = localRhoR + localRhoB;
+
+            if (rhoTotal < 0.001) {
+                // Empty cell - copy distributions unchanged
+                for (let k = 0; k < 9; k++) {
+                    fR_new[i9 + k] = fR[i9 + k];
+                    fB_new[i9 + k] = fB[i9 + k];
+                }
+                continue;
+            }
+
+            const localUx = ux[i];
+            const localUy = uy[i];
+            const t = temp[i];
+
+            // Compute body forces (only on wax)
+            let Fx = 0, Fy = 0;
+
+            if (localRhoR > 0.05) {
+                // Gravity (down)
+                Fy -= P.GRAVITY * localRhoR;
+
+                // Thermal buoyancy (sigmoid-gated)
+                const buoyGate = sigmoid(P.BUOY_SHARPNESS * (t - P.BUOY_THRESHOLD));
+                const excessTemp = Math.max(0, t - P.BUOY_THRESHOLD);
+                Fy += P.BUOYANCY * localRhoR * buoyGate * (1 + excessTemp * 2);
+            }
+
+            // Temperature-dependent viscosity for wax
+            const softness = sigmoid(15 * (t - P.TRANSITION_TEMP));
+            const tauR = P.TAU_COLD * (1 - softness) + P.TAU_HOT * softness;
+            const tauB = P.TAU_WATER;
+
+            // Velocity with force correction (Guo forcing)
+            const vx = localUx + Fx / rhoTotal * 0.5;
+            const vy = localUy + Fy / rhoTotal * 0.5;
+            const usq = vx * vx + vy * vy;
+
+            // Clamp velocity for stability
+            const uMag = Math.sqrt(usq);
+            let vxc = vx, vyc = vy, usqc = usq;
+            if (uMag > 0.15) {
+                vxc = vx * 0.15 / uMag;
+                vyc = vy * 0.15 / uMag;
+                usqc = 0.0225;
+            }
+
+            // BGK collision for each component
+            const invTauR = 1 / tauR;
+            const invTauB = 1 / tauB;
+
+            for (let k = 0; k < 9; k++) {
+                const cu = cx[k] * vxc + cy[k] * vyc;
+
+                // Equilibrium distributions
+                const feqCommon = 1 + 3 * cu + 4.5 * cu * cu - 1.5 * usqc;
+                const feqR = w[k] * localRhoR * feqCommon;
+                const feqB = w[k] * localRhoB * feqCommon;
+
+                const fRk = fR[i9 + k];
+                const fBk = fB[i9 + k];
+
+                // Standard BGK collision
+                let newFR = fRk - (fRk - feqR) * invTauR;
+                let newFB = fBk - (fBk - feqB) * invTauB;
+
+                // Add Guo forcing for wax (body forces)
+                if (localRhoR > 0.01) {
+                    const forceFactorR = 1 - 0.5 * invTauR;
+                    const cvx = cx[k] - vxc;
+                    const cvy = cy[k] - vyc;
+                    const FiR = w[k] * forceFactorR * (
+                        (3 * cvx + 9 * cu * cx[k]) * Fx +
+                        (3 * cvy + 9 * cu * cy[k]) * Fy
+                    );
+                    newFR += FiR;
+                }
+
+                // Ensure non-negative
+                fR_new[i9 + k] = Math.max(0, newFR);
+                fB_new[i9 + k] = Math.max(0, newFB);
+            }
+        }
+    }
+}
+
+function streaming() {
+    // Stream distributions and apply recoloring
+
+    // Temporary arrays for post-stream distributions
+    const fR_streamed = new Float32Array(W * H * 9);
+    const fB_streamed = new Float32Array(W * H * 9);
+
+    // Streaming step
+    for (let y = 0; y < H; y++) {
+        for (let x = 0; x < W; x++) {
+            const i9 = idx(x, y) * 9;
+
+            for (let k = 0; k < 9; k++) {
+                // Source cell (where this distribution came from)
+                let sx = x - cx[k];
+                let sy = y - cy[k];
+
+                // Periodic in x
+                sx = (sx + W) % W;
+
+                // Bounce-back at y boundaries
+                if (sy < 0 || sy >= H) {
+                    // Bounce back: take from opposite direction at same cell
+                    fR_streamed[i9 + k] = fR_new[i9 + opposite[k]];
+                    fB_streamed[i9 + k] = fB_new[i9 + opposite[k]];
+                } else {
+                    const si9 = idx(sx, sy) * 9;
+                    fR_streamed[i9 + k] = fR_new[si9 + k];
+                    fB_streamed[i9 + k] = fB_new[si9 + k];
+                }
+            }
+        }
+    }
+
+    // ===== RECOLORING STEP =====
+    // This is the KEY difference from Shan-Chen!
+    // Explicitly redistributes mass to maintain sharp interface
+    // CRITICAL: Must conserve mass for each component separately
+
+    for (let y = 0; y < H; y++) {
+        for (let x = 0; x < W; x++) {
+            const i = idx(x, y);
+            const i9 = i * 9;
+
+            // Compute post-streaming densities
+            let sumR = 0, sumB = 0;
+            for (let k = 0; k < 9; k++) {
+                sumR += fR_streamed[i9 + k];
+                sumB += fB_streamed[i9 + k];
+            }
+
+            const rhoTotal = sumR + sumB;
+            if (rhoTotal < 0.001) {
+                // Empty cell
+                for (let k = 0; k < 9; k++) {
+                    fR[i9 + k] = fR_streamed[i9 + k];
+                    fB[i9 + k] = fB_streamed[i9 + k];
+                }
+                continue;
+            }
+
+            // Get color gradient (interface normal)
+            const gx = colorGradX[i];
+            const gy = colorGradY[i];
+            const gradMag = Math.sqrt(gx * gx + gy * gy);
+
+            // Temperature-dependent recoloring strength
+            // β_cold: strong separation (blobs bounce)
+            // β_hot: weak separation (blobs can merge)
+            const t = temp[i];
+            const hotness = sigmoid(15 * (t - P.TRANSITION_TEMP));
+            const beta = P.BETA_COLD * (1 - hotness) + P.BETA_HOT * hotness;
+
+            // Recoloring: redistribute mass to sharpen interface
+            // Uses Latva-Kokko formulation which preserves component masses
+            //
+            // fR[k] = (rhoR/rho) * f[k] + beta * (rhoR*rhoB/rho) * w[k] * cos(θ_k)
+            // fB[k] = (rhoB/rho) * f[k] - beta * (rhoR*rhoB/rho) * w[k] * cos(θ_k)
+            //
+            // The cos terms sum to zero by lattice symmetry, so masses are preserved.
+
+            const fracR = sumR / rhoTotal;
+            const fracB = sumB / rhoTotal;
+
+            // Only apply recoloring at interfaces
+            const atInterface = gradMag > 0.01 && sumR > 0.05 && sumB > 0.05;
+            const mixFactor = atInterface ? beta * (sumR * sumB / rhoTotal) : 0;
+
+            for (let k = 0; k < 9; k++) {
+                const fTotal = fR_streamed[i9 + k] + fB_streamed[i9 + k];
+
+                // Base: distribute total proportionally
+                let newFR = fracR * fTotal;
+                let newFB = fracB * fTotal;
+
+                // Recoloring (only for moving directions, not rest)
+                if (k > 0 && mixFactor > 0) {
+                    const ckMag = Math.sqrt(cx[k] * cx[k] + cy[k] * cy[k]);
+                    const cosTheta = (cx[k] * gx + cy[k] * gy) / (ckMag * gradMag);
+
+                    // Latva-Kokko recoloring term
+                    const recolor = mixFactor * w[k] * cosTheta;
+
+                    newFR += recolor;
+                    newFB -= recolor;
+                }
+
+                // Store (may be negative temporarily)
+                fR[i9 + k] = newFR;
+                fB[i9 + k] = newFB;
+            }
+
+            // Enforce mass conservation: scale to match original sumR and sumB
+            let actualSumR = 0, actualSumB = 0;
+            for (let k = 0; k < 9; k++) {
+                // Clamp negatives first
+                if (fR[i9 + k] < 0) fR[i9 + k] = 0;
+                if (fB[i9 + k] < 0) fB[i9 + k] = 0;
+                actualSumR += fR[i9 + k];
+                actualSumB += fB[i9 + k];
+            }
+
+            // Rescale to enforce exact mass conservation
+            if (actualSumR > 0.001 && sumR > 0.001) {
+                const scaleR = sumR / actualSumR;
+                for (let k = 0; k < 9; k++) {
+                    fR[i9 + k] *= scaleR;
+                }
+            }
+            if (actualSumB > 0.001 && sumB > 0.001) {
+                const scaleB = sumB / actualSumB;
+                for (let k = 0; k < 9; k++) {
+                    fB[i9 + k] *= scaleB;
+                }
+            }
+        }
+    }
+}
+
+function updateTemperature() {
+    const newTemp = new Float32Array(W * H);
+
+    for (let y = 0; y < H; y++) {
+        const yNorm = y / H;  // 0 at bottom, 1 at top
+
+        for (let x = 0; x < W; x++) {
+            const i = idx(x, y);
+            const localRhoR = rhoR[i];
+            let t = temp[i];
+
+            // Heat diffusion (weighted by wax density)
+            if (localRhoR > 0.05) {
+                let sum = t;
+                let count = 1;
+
+                const neighbors = [
+                    [x-1, y], [x+1, y], [x, y-1], [x, y+1]
+                ];
+
+                for (const [nx, ny] of neighbors) {
+                    if (ny >= 0 && ny < H) {
+                        const nxWrapped = (nx + W) % W;
+                        const ni = idx(nxWrapped, ny);
+                        const wt = Math.min(localRhoR, rhoR[ni]) / P.RHO_WAX;
+                        sum += temp[ni] * wt;
+                        count += wt;
+                    }
+                }
+
+                t += (sum / count - t) * P.TEMP_DIFFUSION;
+            }
+
+            // Bottom heating zone
+            const heatZoneTop = 1 - P.HEAT_ZONE_START;
+            if (yNorm < heatZoneTop && localRhoR > 0.05) {
+                const intensity = 1 - yNorm / heatZoneTop;
+                // Stronger heat in center
+                const xNorm = x / W;
+                const centerDist = Math.abs(xNorm - 0.5) * 2;
+                const horizIntensity = Math.pow(1 - centerDist, 2);
+                t += P.HEAT_RATE * intensity * horizIntensity;
+            }
+
+            // Top cooling zone
+            const coolZoneBottom = 1 - P.COOL_ZONE_END;
+            if (yNorm > coolZoneBottom && localRhoR > 0.05) {
+                const intensity = (yNorm - coolZoneBottom) / (1 - coolZoneBottom);
+                t -= P.COOL_RATE * intensity;
+            }
+
+            newTemp[i] = Math.max(0, Math.min(1, t));
+        }
+    }
+
+    temp.set(newTemp);
+}
+
+function tick() {
+    frame++;
+
+    // 1. Compute macroscopic quantities
+    computeMacro();
+
+    // 2. Compute color gradient (for recoloring direction)
+    computeColorGradient();
+
+    // 3. Collision (standard BGK, no perturbation)
+    collision();
+
+    // 4. Streaming with recoloring (this maintains sharp interface)
+    streaming();
+
+    // 5. Update temperature
+    updateTemperature();
+}
+
+function render() {
+    const imageData = ctx.createImageData(W, H);
+    const data = imageData.data;
+
+    for (let y = 0; y < H; y++) {
+        for (let x = 0; x < W; x++) {
+            const i = idx(x, y);
+            // Flip y for canvas (y=0 at top in canvas, but we use y=0 at bottom)
+            const canvasY = H - 1 - y;
+            const pi = (canvasY * W + x) * 4;
+
+            const localRhoR = rhoR[i];
+            const t = temp[i];
+
+            // Background (dark blue)
+            let r = 10, g = 10, b = 20;
+
+            // Wax color based on temperature
+            if (localRhoR > 0.01) {
+                let waxR, waxG, waxB;
+
+                if (t < 0.35) {
+                    // Cold: deep purple
+                    const f = t / 0.35;
+                    waxR = 60 + 90 * f;
+                    waxG = 20 + 30 * f;
+                    waxB = 120 - 40 * f;
+                } else if (t < 0.6) {
+                    // Warm: orange-red
+                    const f = (t - 0.35) / 0.25;
+                    waxR = 150 + 70 * f;
+                    waxG = 50 + 80 * f;
+                    waxB = 80 - 60 * f;
+                } else {
+                    // Hot: bright yellow-orange
+                    const f = (t - 0.6) / 0.4;
+                    waxR = 220 + 35 * f;
+                    waxG = 130 + 125 * f;
+                    waxB = 20 + 60 * f;
+                }
+
+                // Alpha based on density
+                const alpha = Math.min(1, localRhoR / P.RHO_WAX * 1.2);
+                r = r * (1 - alpha) + waxR * alpha;
+                g = g * (1 - alpha) + waxG * alpha;
+                b = b * (1 - alpha) + waxB * alpha;
+            }
+
+            // Heater glow at bottom
+            const yNorm = y / H;
+            if (yNorm < 0.03) {
+                const glowIntensity = 1 - yNorm / 0.03;
+                r = r * (1 - glowIntensity * 0.7) + 255 * glowIntensity * 0.7;
+                g = g * (1 - glowIntensity * 0.7) + 60 * glowIntensity * 0.7;
+                b = b * (1 - glowIntensity * 0.7) + 0 * glowIntensity * 0.7;
+            }
+
+            data[pi] = Math.floor(r);
+            data[pi + 1] = Math.floor(g);
+            data[pi + 2] = Math.floor(b);
+            data[pi + 3] = 255;
+        }
+    }
+
+    // Scale up to canvas size
+    const tempCanvas = document.createElement('canvas');
+    tempCanvas.width = W;
+    tempCanvas.height = H;
+    tempCanvas.getContext('2d').putImageData(imageData, 0, 0);
+
+    ctx.imageSmoothingEnabled = false;
+    ctx.drawImage(tempCanvas, 0, 0, canvas.width, canvas.height);
+}
+
+function getStats() {
+    let massR = 0, massB = 0, maxT = 0, maxWaxY = 0;
+
+    for (let y = 0; y < H; y++) {
+        for (let x = 0; x < W; x++) {
+            const i = idx(x, y);
+            massR += rhoR[i];
+            massB += rhoB[i];
+
+            if (rhoR[i] > 0.3) {
+                if (temp[i] > maxT) maxT = temp[i];
+                if (y > maxWaxY) maxWaxY = y;
+            }
+        }
+    }
+
+    return {
+        massRatioR: (massR / initialMassR * 100).toFixed(1),
+        massRatioB: (massB / initialMassB * 100).toFixed(1),
+        maxT: maxT.toFixed(2),
+        height: ((maxWaxY + 1) / H * 100).toFixed(0)
+    };
+}
+
+function loop() {
+    if (!paused) {
+        for (let i = 0; i < ff; i++) tick();
+    }
+    render();
+
+    if (frame % 10 === 0) {
+        const stats = getStats();
+        document.getElementById('stats').innerHTML =
+            `Tick: ${frame} | Wax: ${stats.massRatioR}% | MaxT: ${stats.maxT} | Height: ${stats.height}% | ${W}x${H}`;
+    }
+
+    requestAnimationFrame(loop);
+}
+
+function resize() {
+    readParams();
+    canvas.width = innerWidth;
+    canvas.height = innerHeight;
+    W = Math.floor(canvas.width / P.CELL);
+    H = Math.floor(canvas.height / P.CELL);
+
+    allocateArrays();
+    initialize();
+}
+
+// Event handlers
+document.getElementById('ff').onclick = () => {
+    ff = ff === 1 ? 10 : ff === 10 ? 100 : 1;
+    document.getElementById('ff').textContent = ff + 'x';
+};
+
+document.getElementById('pp').onclick = () => {
+    paused = !paused;
+    document.getElementById('pp').textContent = paused ? '>' : '||';
+};
+
+document.getElementById('rr').onclick = () => {
+    initialize();
+};
+
+let paramsVisible = true;
+document.getElementById('toggleParams').onclick = () => {
+    paramsVisible = !paramsVisible;
+    document.getElementById('params').style.display = paramsVisible ? 'flex' : 'none';
+};
+
+document.getElementById('params').addEventListener('change', (e) => {
+    readParams();
+    if (e.target.id === 'p_cell') {
+        resize();
+    } else {
+        initialize();
+    }
+});
+
+addEventListener('resize', resize);
+addEventListener('keydown', e => {
+    if (e.code === 'Space') { paused = !paused; e.preventDefault(); }
+    if (e.code === 'KeyR') initialize();
+});
+
+// Start
+resize();
+loop();
+</script>
+</body>
+</html>

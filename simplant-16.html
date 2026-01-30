@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Simplant v16 - Headless Evolution</title>
+  <style>
+    html, body {
+      height: 100%;
+      margin: 0;
+      padding: 0;
+      background-color: #111;
+      color: #fff;
+      font-family: 'Courier New', monospace;
+    }
+    #controls {
+      padding: 15px;
+      background: #222;
+      border-bottom: 1px solid #444;
+    }
+    #toggles button {
+      padding: 10px 15px;
+      margin: 5px;
+      border: none;
+      color: #fff;
+      cursor: pointer;
+      font-family: inherit;
+      font-size: 14px;
+    }
+    #toggles button:hover {
+      opacity: 0.8;
+    }
+    #toggles button:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+    #progress-container {
+      margin: 15px 0;
+      background: #333;
+      height: 30px;
+      border-radius: 4px;
+      overflow: hidden;
+    }
+    #progress-bar {
+      height: 100%;
+      background: linear-gradient(90deg, #4a4, #8f8);
+      width: 0%;
+      transition: width 0.1s;
+    }
+    #progress-text {
+      margin: 10px 0;
+      font-size: 14px;
+      color: #aaa;
+    }
+    #stats {
+      margin: 15px 0;
+      padding: 10px;
+      background: #1a1a2e;
+      border-radius: 4px;
+      font-size: 14px;
+      line-height: 1.6;
+    }
+    #canvas-div {
+      display: flex;
+      justify-content: center;
+      padding: 20px;
+    }
+    canvas {
+      border: 1px solid #444;
+    }
+    .hint {
+      font-size: 12px;
+      color: #666;
+      margin-top: 5px;
+    }
+  </style>
+  <script src="https://pixijs.download/v7.2.4/pixi.min.js"></script>
+</head>
+<body>
+  <div id="controls">
+    <h2 style="margin-top:0">Simplant v16: Headless to 1M Ticks</h2>
+    <div id="toggles"></div>
+    <p class="hint">Toggle experimental features, then press "Run 1M Ticks" or Enter</p>
+
+    <div id="progress-container">
+      <div id="progress-bar"></div>
+    </div>
+    <div id="progress-text">Ready to run...</div>
+
+    <div id="stats"></div>
+  </div>
+
+  <div id="canvas-div"></div>
+
+  <script src="simplant-16.js"></script>
+</body>
+</html>

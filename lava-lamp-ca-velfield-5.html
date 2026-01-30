@@ -1,0 +1,514 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Lava Lamp - Shan-Chen Hybrid v5</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        html, body { height: 100%; overflow: hidden; background: #0a0a12; }
+        #canvas { display: block; image-rendering: pixelated; }
+        #ui { position: absolute; top: 10px; left: 10px; color: #fff; font: 11px monospace; background: rgba(0,0,0,0.8); padding: 10px; border-radius: 4px; }
+        #ui div { margin: 4px 0; }
+        #ui label { display: inline-block; width: 140px; }
+        #ui input { width: 60px; background: #333; color: #fff; border: 1px solid #555; padding: 2px 4px; }
+        #controls { position: absolute; top: 10px; right: 10px; }
+        #controls button { padding: 8px 14px; margin: 2px; background: #222; color: #fff; border: 1px solid #555; cursor: pointer; font: 12px monospace; }
+        .section { color: #888; margin-top: 10px; border-top: 1px solid #444; padding-top: 6px; }
+    </style>
+</head>
+<body>
+<canvas id="canvas"></canvas>
+<div id="ui">
+    <div><b>Shan-Chen Hybrid v5</b></div>
+    <div style="color:#888;font-size:10px;">Elegant physics, discrete mass</div>
+    <div class="section">Grid</div>
+    <div><label>Cell size</label><input type="number" id="cellSize" value="4" step="1"></div>
+    <div class="section">Shan-Chen</div>
+    <div><label>G (interaction)</label><input type="number" id="G" value="-5.0" step="0.5"></div>
+    <div><label>ρ₀ (reference)</label><input type="number" id="rho0" value="1.0" step="0.1"></div>
+    <div class="section">Buoyancy</div>
+    <div><label>Thermal strength</label><input type="number" id="buoyancy" value="0.01" step="0.002"></div>
+    <div><label>Gravity</label><input type="number" id="gravity" value="0.001" step="0.0005"></div>
+    <div><label>Neutral temp</label><input type="number" id="neutralTemp" value="0.45" step="0.05"></div>
+    <div class="section">Heat</div>
+    <div><label>Heat rate</label><input type="number" id="heatRate" value="0.004" step="0.001"></div>
+    <div><label>Cool rate</label><input type="number" id="coolRate" value="0.002" step="0.001"></div>
+    <div><label>Diffusion</label><input type="number" id="tempDiffusion" value="0.05" step="0.01"></div>
+    <div class="section">Velocity</div>
+    <div><label>Decay (viscosity)</label><input type="number" id="velDecay" value="0.98" step="0.01"></div>
+    <div id="stats" style="margin-top:10px;color:#aaa;"></div>
+</div>
+<div id="controls">
+    <button id="ff">1x</button>
+    <button id="pp">||</button>
+    <button id="reset">Reset</button>
+    <button id="view">View: WAX</button>
+</div>
+
+<script>
+// ============================================
+// SHAN-CHEN HYBRID v5
+// ============================================
+// Simple elegant approach:
+// 1. Discrete wax units (0-8 per cell) - mass perfectly conserved
+// 2. Shan-Chen pseudopotential for forces - surface tension emerges naturally
+// 3. Thermal buoyancy - hot rises, cold sinks
+// 4. Movement via cell swaps guided by forces
+//
+// No bandaids. No explicit cohesion rules. Just physics.
+
+let CELL_SIZE = 4;
+const WAX_UNITS = 8;  // Max units per cell
+const INITIAL_WAX_HEIGHT = 0.15;
+
+// D2Q9 weights for Shan-Chen force calculation
+const w = [4/9, 1/9, 1/9, 1/9, 1/9, 1/36, 1/36, 1/36, 1/36];
+const cx = [0, 1, 0, -1, 0, 1, -1, -1, 1];
+const cy = [0, 0, -1, 0, 1, -1, -1, 1, 1];
+
+// Parameters (editable via UI)
+const P = {
+    cellSize: 4,          // Cell size in pixels
+    G: -5.0,              // Shan-Chen interaction (negative = attraction)
+    rho0: 1.0,            // Reference density for pseudopotential
+    buoyancy: 0.01,       // Thermal buoyancy strength (increased)
+    gravity: 0.001,       // Base gravity (cold wax sinks)
+    neutralTemp: 0.45,    // Temperature at which wax is neutrally buoyant
+    heatRate: 0.004,      // Bottom heating rate
+    coolRate: 0.002,      // Top cooling rate
+    tempDiffusion: 0.05,  // Heat diffusion rate
+    velDecay: 0.98,       // Velocity persistence
+};
+
+let W, H;
+let units, temp;        // Primary state: discrete wax units and temperature
+let density, psi;       // Derived: smoothed density and pseudopotential
+let forceX, forceY;     // Shan-Chen + buoyancy forces
+let velX, velY;         // Accumulated velocity (forces integrate into this)
+
+let frame = 0, paused = false, ff = 1;
+let initialMass = 0;
+let showVel = false;
+
+const canvas = document.getElementById('canvas');
+const ctx = canvas.getContext('2d');
+
+function resize() {
+    canvas.width = innerWidth;
+    canvas.height = innerHeight;
+    CELL_SIZE = P.cellSize;
+    W = Math.floor(canvas.width / CELL_SIZE);
+    H = Math.floor(canvas.height / CELL_SIZE);
+    reset();
+}
+
+function reset() {
+    const size = W * H;
+
+    units = new Uint8Array(size);      // 0-8 wax units per cell
+    temp = new Float32Array(size);     // Temperature 0-1
+    density = new Float32Array(size);  // Smoothed density for Shan-Chen
+    psi = new Float32Array(size);      // Pseudopotential
+    forceX = new Float32Array(size);
+    forceY = new Float32Array(size);
+    velX = new Float32Array(size);     // Accumulated velocity X
+    velY = new Float32Array(size);     // Accumulated velocity Y
+
+    // Initialize: wax at bottom
+    const waxTop = H - Math.floor(H * INITIAL_WAX_HEIGHT);
+    initialMass = 0;
+
+    for (let y = 0; y < H; y++) {
+        for (let x = 0; x < W; x++) {
+            const i = y * W + x;
+
+            if (y >= waxTop) {
+                // Add surface noise
+                const noise = Math.sin(x * 0.2) * 2 + Math.random() * 2;
+                if (y >= waxTop + noise) {
+                    units[i] = WAX_UNITS;
+                    temp[i] = 0.25 + Math.random() * 0.05;  // Start cool
+                    initialMass += WAX_UNITS;
+                }
+            }
+        }
+    }
+
+    frame = 0;
+}
+
+function idx(x, y) {
+    // Clamp to boundaries
+    x = Math.max(0, Math.min(W - 1, x));
+    y = Math.max(0, Math.min(H - 1, y));
+    return y * W + x;
+}
+
+// Shan-Chen pseudopotential: ψ(ρ) = ρ₀ * (1 - e^(-ρ/ρ₀))
+function computePsi(rho) {
+    return P.rho0 * (1 - Math.exp(-rho / P.rho0));
+}
+
+function tick() {
+    frame++;
+    const size = W * H;
+
+    // === STEP 1: Compute smoothed density from discrete wax ===
+    // This gives us gradients for Shan-Chen to work with
+    for (let y = 0; y < H; y++) {
+        for (let x = 0; x < W; x++) {
+            const i = y * W + x;
+
+            // Average density in 3x3 neighborhood
+            let sum = 0, count = 0;
+            for (let dy = -1; dy <= 1; dy++) {
+                for (let dx = -1; dx <= 1; dx++) {
+                    const ni = idx(x + dx, y + dy);
+                    sum += units[ni] / WAX_UNITS;  // Normalize to 0-1
+                    count++;
+                }
+            }
+            density[i] = sum / count;
+            psi[i] = computePsi(density[i]);
+        }
+    }
+
+    // === STEP 2: Compute Shan-Chen interaction force ===
+    // F = -G * ψ * Σ(w_k * ψ_neighbor * e_k)
+    // This ONE formula creates surface tension, cohesion, everything
+    for (let y = 0; y < H; y++) {
+        for (let x = 0; x < W; x++) {
+            const i = y * W + x;
+            const psi_i = psi[i];
+
+            let fx = 0, fy = 0;
+
+            // Sum over D2Q9 directions (skip k=0, the rest direction)
+            for (let k = 1; k < 9; k++) {
+                const nx = x + cx[k];
+                const ny = y + cy[k];
+
+                // Boundary handling
+                if (nx < 0 || nx >= W || ny < 0 || ny >= H) continue;
+
+                const ni = ny * W + nx;
+                const psi_n = psi[ni];
+
+                fx += w[k] * psi_n * cx[k];
+                fy += w[k] * psi_n * cy[k];
+            }
+
+            forceX[i] = -P.G * psi_i * fx;
+            forceY[i] = -P.G * psi_i * fy;
+
+            // === STEP 3: Add thermal buoyancy + gravity ===
+            // Only for cells with wax
+            if (units[i] > 0) {
+                const t = temp[i];
+                const mass = units[i] / WAX_UNITS;
+
+                // Hot rises (negative fy), cold sinks (positive fy)
+                const thermalForce = -P.buoyancy * mass * (t - P.neutralTemp);
+
+                // Base gravity always pulls down
+                const gravityForce = P.gravity * mass;
+
+                forceY[i] += thermalForce + gravityForce;
+            }
+        }
+    }
+
+    // === STEP 3.5: Accumulate velocity from forces ===
+    // This is key - forces integrate over time, building up velocity
+    for (let i = 0; i < size; i++) {
+        if (units[i] > 0) {
+            // Add force to velocity
+            velX[i] += forceX[i];
+            velY[i] += forceY[i];
+
+            // Decay velocity (viscosity)
+            velX[i] *= P.velDecay;
+            velY[i] *= P.velDecay;
+        } else {
+            velX[i] = 0;
+            velY[i] = 0;
+        }
+    }
+
+    // === STEP 4: Update temperature ===
+    const newTemp = new Float32Array(size);
+
+    for (let y = 0; y < H; y++) {
+        for (let x = 0; x < W; x++) {
+            const i = y * W + x;
+
+            if (units[i] === 0) {
+                newTemp[i] = 0;
+                continue;
+            }
+
+            let t = temp[i];
+
+            // Heat diffusion with wax neighbors
+            let sum = t, count = 1;
+            for (let dy = -1; dy <= 1; dy++) {
+                for (let dx = -1; dx <= 1; dx++) {
+                    if (dx === 0 && dy === 0) continue;
+                    const ni = idx(x + dx, y + dy);
+                    if (units[ni] > 0) {
+                        sum += temp[ni];
+                        count++;
+                    }
+                }
+            }
+            t += (sum / count - t) * P.tempDiffusion;
+
+            // Bottom heating (center-focused)
+            if (y > H * 0.85) {
+                const intensity = (y - H * 0.85) / (H * 0.15);
+                const centerDist = Math.abs(x / W - 0.5) * 2;
+                const horizFalloff = Math.pow(1 - centerDist, 2);
+                t += P.heatRate * intensity * horizFalloff;
+            }
+
+            // Top cooling
+            if (y < H * 0.15) {
+                const intensity = 1 - y / (H * 0.15);
+                t -= P.coolRate * intensity;
+            }
+
+            newTemp[i] = Math.max(0, Math.min(1, t));
+        }
+    }
+    temp = newTemp;
+
+    // === STEP 5: Movement via discrete swaps ===
+    // Checkerboard pattern: 4 passes for conflict-free parallel swaps
+    // Use accumulated VELOCITY (not instantaneous force) for movement decisions
+    const passes = [
+        {dx: 0, dy: 1, offsetX: 0, offsetY: 0},  // Vertical, even rows
+        {dx: 0, dy: 1, offsetX: 0, offsetY: 1},  // Vertical, odd rows
+        {dx: 1, dy: 0, offsetX: 0, offsetY: 0},  // Horizontal, even cols
+        {dx: 1, dy: 0, offsetX: 1, offsetY: 0},  // Horizontal, odd cols
+    ];
+
+    for (const pass of passes) {
+        for (let y = pass.offsetY; y < H - 1; y += 2) {
+            for (let x = pass.offsetX; x < W - 1; x += 2) {
+                const x2 = x + pass.dx;
+                const y2 = y + pass.dy;
+
+                if (x2 >= W || y2 >= H) continue;
+
+                const i1 = y * W + x;
+                const i2 = y2 * W + x2;
+
+                // Compute desire to swap based on VELOCITY (accumulated force)
+                const dx = pass.dx;
+                const dy = pass.dy;
+
+                let desire = 0;
+
+                // Cell 1 wants to move toward cell 2?
+                if (units[i1] > 0) {
+                    const proj = velX[i1] * dx + velY[i1] * dy;
+                    if (proj > 0) {
+                        desire += proj;
+                    }
+                }
+
+                // Cell 2 wants to move toward cell 1?
+                if (units[i2] > 0) {
+                    const proj = velX[i2] * (-dx) + velY[i2] * (-dy);
+                    if (proj > 0) {
+                        desire += proj;
+                    }
+                }
+
+                // Probabilistic swap based on desire
+                if (desire > 0.001) {  // Very low threshold since velocity accumulates
+                    const chance = Math.min(1, desire * 5);
+                    if (Math.random() < chance) {
+                        // Swap units, temperature, AND velocity
+                        const tmpUnits = units[i1];
+                        const tmpTemp = temp[i1];
+                        const tmpVx = velX[i1];
+                        const tmpVy = velY[i1];
+
+                        units[i1] = units[i2];
+                        temp[i1] = temp[i2];
+                        velX[i1] = velX[i2] * 0.9;  // Slight damping on swap
+                        velY[i1] = velY[i2] * 0.9;
+
+                        units[i2] = tmpUnits;
+                        temp[i2] = tmpTemp;
+                        velX[i2] = tmpVx * 0.9;
+                        velY[i2] = tmpVy * 0.9;
+                    }
+                }
+            }
+        }
+    }
+}
+
+function render() {
+    ctx.fillStyle = '#0a0a12';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    const imageData = ctx.createImageData(W, H);
+    const data = imageData.data;
+
+    for (let y = 0; y < H; y++) {
+        for (let x = 0; x < W; x++) {
+            const i = y * W + x;
+            const pi = i * 4;
+
+            if (showVel) {
+                // Velocity visualization
+                const vx = velX[i];
+                const vy = velY[i];
+                const speed = Math.sqrt(vx * vx + vy * vy);
+
+                // Red = rightward, green = downward, blue = speed
+                const r = Math.min(255, 128 + vx * 5000);
+                const g = Math.min(255, 128 + vy * 5000);
+                const b = Math.min(255, speed * 10000);
+
+                if (units[i] > 0) {
+                    data[pi] = r;
+                    data[pi + 1] = g;
+                    data[pi + 2] = b;
+                } else {
+                    data[pi] = r * 0.3;
+                    data[pi + 1] = g * 0.3;
+                    data[pi + 2] = b * 0.3;
+                }
+                data[pi + 3] = 255;
+            } else if (units[i] > 0) {
+                const t = temp[i];
+                const brightness = 0.5 + 0.5 * units[i] / WAX_UNITS;
+
+                let r, g, b;
+                if (t < 0.33) {
+                    const f = t / 0.33;
+                    r = (60 + 100 * f) * brightness;
+                    g = (20 + 40 * f) * brightness;
+                    b = (120 - 40 * f) * brightness;
+                } else if (t < 0.66) {
+                    const f = (t - 0.33) / 0.33;
+                    r = (160 + 70 * f) * brightness;
+                    g = (60 + 80 * f) * brightness;
+                    b = (80 - 60 * f) * brightness;
+                } else {
+                    const f = (t - 0.66) / 0.34;
+                    r = (230 + 25 * f) * brightness;
+                    g = (140 + 110 * f) * brightness;
+                    b = (20 + 80 * f) * brightness;
+                }
+
+                data[pi] = r;
+                data[pi + 1] = g;
+                data[pi + 2] = b;
+                data[pi + 3] = 255;
+            } else {
+                data[pi] = 10;
+                data[pi + 1] = 10;
+                data[pi + 2] = 18;
+                data[pi + 3] = 255;
+            }
+        }
+    }
+
+    // Scale up
+    const tmpCanvas = document.createElement('canvas');
+    tmpCanvas.width = W;
+    tmpCanvas.height = H;
+    tmpCanvas.getContext('2d').putImageData(imageData, 0, 0);
+
+    ctx.imageSmoothingEnabled = false;
+    ctx.drawImage(tmpCanvas, 0, 0, W * CELL_SIZE, H * CELL_SIZE);
+}
+
+function getTotalMass() {
+    let mass = 0;
+    for (let i = 0; i < W * H; i++) {
+        mass += units[i];
+    }
+    return mass;
+}
+
+function loop() {
+    if (!paused) {
+        for (let i = 0; i < ff; i++) tick();
+    }
+    render();
+
+    const mass = getTotalMass();
+
+    // Find max velocity for debug
+    let maxVel = 0;
+    for (let i = 0; i < W * H; i++) {
+        const v = Math.sqrt(velX[i] * velX[i] + velY[i] * velY[i]);
+        if (v > maxVel) maxVel = v;
+    }
+
+    document.getElementById('stats').innerHTML =
+        `Tick: ${frame}<br>Mass: ${mass}/${initialMass}<br>Grid: ${W}x${H}<br>MaxVel: ${maxVel.toFixed(5)}`;
+
+    requestAnimationFrame(loop);
+}
+
+// UI bindings
+function bindParam(id, key) {
+    const el = document.getElementById(id);
+    el.value = P[key];
+    el.onchange = () => { P[key] = parseFloat(el.value); };
+}
+
+bindParam('cellSize', 'cellSize');
+bindParam('G', 'G');
+bindParam('rho0', 'rho0');
+bindParam('buoyancy', 'buoyancy');
+bindParam('gravity', 'gravity');
+bindParam('neutralTemp', 'neutralTemp');
+bindParam('heatRate', 'heatRate');
+bindParam('coolRate', 'coolRate');
+bindParam('tempDiffusion', 'tempDiffusion');
+bindParam('velDecay', 'velDecay');
+
+// Cell size needs to trigger resize
+document.getElementById('cellSize').onchange = () => {
+    P.cellSize = parseInt(document.getElementById('cellSize').value);
+    resize();
+};
+
+document.getElementById('ff').onclick = () => {
+    ff = ff === 1 ? 5 : ff === 5 ? 20 : 1;
+    document.getElementById('ff').textContent = ff + 'x';
+};
+document.getElementById('pp').onclick = () => {
+    paused = !paused;
+    document.getElementById('pp').textContent = paused ? '▶' : '||';
+};
+document.getElementById('reset').onclick = reset;
+document.getElementById('view').onclick = () => {
+    showVel = !showVel;
+    document.getElementById('view').textContent = showVel ? 'View: VEL' : 'View: WAX';
+};
+
+addEventListener('resize', resize);
+addEventListener('keydown', e => {
+    if (e.code === 'Space') { paused = !paused; e.preventDefault(); }
+    if (e.code === 'KeyR') reset();
+    if (e.code === 'KeyV') {
+        showVel = !showVel;
+        document.getElementById('view').textContent = showVel ? 'View: VEL' : 'View: WAX';
+    }
+});
+
+resize();
+loop();
+</script>
+</body>
+</html>

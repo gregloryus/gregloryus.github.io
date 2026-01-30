@@ -1,0 +1,337 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Lava Lamp v12</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        html, body { height: 100%; overflow: hidden; background: #0a0a12; }
+        #canvas { display: block; image-rendering: pixelated; }
+        #ui { position: absolute; top: 10px; left: 10px; color: #fff; font: 11px monospace; background: rgba(0,0,0,0.8); padding: 8px; border-radius: 4px; }
+        #controls { position: absolute; top: 10px; right: 10px; }
+        #controls button { padding: 8px 14px; margin: 2px; background: #222; color: #fff; border: 1px solid #555; cursor: pointer; font: 12px monospace; }
+    </style>
+</head>
+<body>
+<canvas id="canvas"></canvas>
+<div id="ui">
+    <div>Lava Lamp v12</div>
+    <div id="stats"></div>
+</div>
+<div id="controls">
+    <button id="ff">1x</button>
+    <button id="pp">||</button>
+    <button id="rr">Reset</button>
+</div>
+<script>
+// v12: Mass conservation + real surface tension for circular blobs
+// Surface tension: perimeter cells pull inward, creating circles
+// Mass is strictly conserved - every transfer is symmetric
+
+const CELL = 3;
+const GRAVITY = 0.5
+const BUOYANCY = 0.8;
+const HEAT_IN = 0.1;
+const HEAT_DIFF = 0.1;
+const COOL = 0.1;
+const SURFACE_TENSION = 0.9 // Strong surface tension
+const FLOW_RATE = 0.7
+
+let W, H, grid, frame = 0, paused = false, ff = 1;
+let heaterL, heaterR, coolerH, initialMass;
+
+const canvas = document.getElementById('canvas');
+const ctx = canvas.getContext('2d');
+
+function resize() {
+    canvas.width = innerWidth;
+    canvas.height = innerHeight;
+    W = Math.floor(canvas.width / CELL);
+    H = Math.floor(canvas.height / CELL);
+    heaterL = Math.floor(W * 0.1);
+    heaterR = Math.floor(W * 0.9);
+    coolerH = Math.floor(H * 0.1);
+    reset();
+}
+
+function reset() {
+    grid = new Float32Array(W * H * 2);
+    const wH = Math.floor(H * 0.1);
+    const wW = Math.floor(W * 0.75);
+    const wL = Math.floor((W - wW) / 2);
+    for (let y = H - wH; y < H; y++) {
+        for (let x = wL; x < wL + wW; x++) {
+            grid[(y * W + x) * 2] = 1;
+            grid[(y * W + x) * 2 + 1] = 0.1;
+        }
+    }
+    initialMass = getMass();
+    frame = 0;
+}
+
+function getMass() {
+    let m = 0;
+    for (let i = 0; i < W * H; i++) m += grid[i * 2];
+    return m;
+}
+
+function D(x, y) { return (x >= 0 && x < W && y >= 0 && y < H) ? grid[(y * W + x) * 2] : 0; }
+function T(x, y) { return (x >= 0 && x < W && y >= 0 && y < H) ? grid[(y * W + x) * 2 + 1] : 0; }
+
+function tick() {
+    frame++;
+    const next = new Float32Array(W * H * 2);
+    for (let i = 0; i < next.length; i++) next[i] = grid[i];
+
+    // Heat sources
+    for (let y = 0; y < H; y++) {
+        for (let x = 0; x < W; x++) {
+            const i = (y * W + x) * 2;
+            if (next[i] < 0.01) continue;
+            if (y >= H - 3 && x >= heaterL && x < heaterR) {
+                next[i + 1] = Math.min(1, next[i + 1] + HEAT_IN);
+            }
+            if (y < coolerH) {
+                next[i + 1] = Math.max(0, next[i + 1] - COOL * (1 - y / coolerH));
+            }
+        }
+    }
+
+    // Heat diffusion
+    for (let y = 0; y < H; y++) {
+        for (let x = 0; x < W; x++) {
+            const i = (y * W + x) * 2;
+            const d = next[i];
+            if (d < 0.01) continue;
+            let sum = next[i + 1] * d, wt = d;
+            for (const [dx, dy] of [[-1,0],[1,0],[0,-1],[0,1]]) {
+                const nd = D(x+dx, y+dy);
+                if (nd > 0.01) { sum += T(x+dx, y+dy) * nd; wt += nd; }
+            }
+            next[i + 1] += ((sum / wt) - next[i + 1]) * HEAT_DIFF;
+        }
+    }
+
+    // Calculate all transfers (mass-conserving)
+    const transfers = []; // {fx, fy, tx, ty, amount, temp}
+
+    for (let y = 0; y < H; y++) {
+        for (let x = 0; x < W; x++) {
+            const d = next[(y * W + x) * 2];
+            if (d < 0.02) continue;
+            const t = next[(y * W + x) * 2 + 1];
+
+            // === GRAVITY + BUOYANCY ===
+            const netForce = t * BUOYANCY - GRAVITY;
+            const dy = netForce > 0 ? -1 : 1;
+            const ty = y + dy;
+
+            if (ty >= 0 && ty < H) {
+                const targetD = next[(ty * W + x) * 2];
+                const space = 1 - targetD;
+                if (space > 0.01) {
+                    const amount = Math.min(Math.abs(netForce) * FLOW_RATE, d * 0.4, space);
+                    if (amount > 0.005) {
+                        transfers.push({fx: x, fy: y, tx: x, ty: ty, amount, temp: t});
+                    }
+                }
+            }
+
+            // === SURFACE TENSION ===
+            // Count how "exposed" this cell is (fewer neighbors = more exposed)
+            // Exposed cells should move toward denser regions
+            let neighborD = 0;
+            let bestDir = null, bestScore = 0;
+
+            for (const [dx, ddy] of [[-1,0],[1,0],[0,-1],[0,1]]) {
+                const nx = x + dx, ny = y + ddy;
+                const nd = (nx >= 0 && nx < W && ny >= 0 && ny < H) ? next[(ny * W + nx) * 2] : 0;
+                neighborD += nd;
+
+                // For surface tension: look for direction with MORE neighbors
+                if (nd < d - 0.1) {
+                    // This direction has less density - count neighbors of THAT cell
+                    let score = 0;
+                    for (const [ddx, ddy2] of [[-1,0],[1,0],[0,-1],[0,1]]) {
+                        const nnx = nx + ddx, nny = ny + ddy2;
+                        if (nnx >= 0 && nnx < W && nny >= 0 && nny < H) {
+                            score += next[(nny * W + nnx) * 2];
+                        }
+                    }
+                    if (score > bestScore) {
+                        bestScore = score;
+                        bestDir = [dx, ddy];
+                    }
+                }
+            }
+
+            // If this cell is exposed (low neighborD) and there's a better direction
+            // Surface tension pulls it toward denser regions
+            if (neighborD < 3 && bestDir && d > 0.2) {
+                const [sdx, sdy] = bestDir;
+                const stx = x + sdx, sty = y + sdy;
+                if (stx >= 0 && stx < W && sty >= 0 && sty < H) {
+                    const targetD = next[(sty * W + stx) * 2];
+                    const space = 1 - targetD;
+                    // Stronger tension for more exposed cells
+                    const exposure = (4 - neighborD) / 4;
+                    const amount = Math.min(SURFACE_TENSION * exposure * d, space, d * 0.3);
+                    if (amount > 0.005) {
+                        transfers.push({fx: x, fy: y, tx: stx, ty: sty, amount, temp: t});
+                    }
+                }
+            }
+        }
+    }
+
+    // Apply all transfers (mass-conserving)
+    for (const tr of transfers) {
+        const fi = (tr.fy * W + tr.fx) * 2;
+        const ti = (tr.ty * W + tr.tx) * 2;
+
+        const fromD = next[fi];
+        const toD = next[ti];
+
+        // Only transfer if there's room and source has enough
+        const actualAmount = Math.min(tr.amount, fromD - 0.01, 1 - toD);
+        if (actualAmount < 0.005) continue;
+
+        // Transfer density
+        next[fi] -= actualAmount;
+        next[ti] += actualAmount;
+
+        // Transfer temperature (weighted)
+        const newToD = next[ti];
+        if (newToD > 0.01) {
+            const oldToD = toD;
+            const oldToT = next[ti + 1];
+            next[ti + 1] = (oldToT * oldToD + tr.temp * actualAmount) / newToD;
+        }
+    }
+
+    // === BLOB ROUNDING (additional surface tension pass) ===
+    // Cells that stick out (protrusions) get pulled back
+    for (let y = 1; y < H - 1; y++) {
+        for (let x = 1; x < W - 1; x++) {
+            const i = (y * W + x) * 2;
+            const d = next[i];
+            if (d < 0.3) continue;
+
+            // Count orthogonal neighbors
+            const up = next[((y-1) * W + x) * 2];
+            const dn = next[((y+1) * W + x) * 2];
+            const lt = next[(y * W + x - 1) * 2];
+            const rt = next[(y * W + x + 1) * 2];
+
+            // Horizontal protrusion: has up/down neighbors but not left/right
+            if (up > 0.5 && dn > 0.5 && lt < 0.2 && rt < 0.2) {
+                // Spread horizontally to round out
+                const spread = d * 0.05;
+                if (spread > 0.01) {
+                    next[i] -= spread * 2;
+                    next[(y * W + x - 1) * 2] += spread;
+                    next[(y * W + x + 1) * 2] += spread;
+                }
+            }
+
+            // Vertical protrusion: has left/right neighbors but not up/down
+            if (lt > 0.5 && rt > 0.5 && up < 0.2 && dn < 0.2) {
+                const spread = d * 0.05;
+                if (spread > 0.01) {
+                    next[i] -= spread * 2;
+                    next[((y-1) * W + x) * 2] += spread;
+                    next[((y+1) * W + x) * 2] += spread;
+                }
+            }
+
+            // Tip of protrusion: only one neighbor
+            const total = (up > 0.3 ? 1 : 0) + (dn > 0.3 ? 1 : 0) + (lt > 0.3 ? 1 : 0) + (rt > 0.3 ? 1 : 0);
+            if (total === 1 && d > 0.3) {
+                // Pull back toward the one neighbor
+                const pull = d * 0.15;
+                next[i] -= pull;
+                if (up > 0.3) next[((y-1) * W + x) * 2] += pull;
+                else if (dn > 0.3) next[((y+1) * W + x) * 2] += pull;
+                else if (lt > 0.3) next[(y * W + x - 1) * 2] += pull;
+                else if (rt > 0.3) next[(y * W + x + 1) * 2] += pull;
+            }
+        }
+    }
+
+    // Clamp values
+    for (let i = 0; i < W * H; i++) {
+        next[i * 2] = Math.max(0, Math.min(1, next[i * 2]));
+        next[i * 2 + 1] = Math.max(0, Math.min(1, next[i * 2 + 1]));
+    }
+
+    grid = next;
+}
+
+function render() {
+    ctx.fillStyle = '#0a0a12';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    for (let y = 0; y < H; y++) {
+        for (let x = 0; x < W; x++) {
+            const d = grid[(y * W + x) * 2];
+            if (d < 0.05) continue;
+            const t = grid[(y * W + x) * 2 + 1];
+
+            let r, g, b;
+            if (t < 0.35) {
+                r = 50 + 120 * (t / 0.35);
+                g = 20 + 40 * (t / 0.35);
+                b = 80 - 40 * (t / 0.35);
+            } else if (t < 0.65) {
+                const f = (t - 0.35) / 0.3;
+                r = 170 + 60 * f;
+                g = 60 + 80 * f;
+                b = 40 - 20 * f;
+            } else {
+                const f = (t - 0.65) / 0.35;
+                r = 230 + 25 * f;
+                g = 140 + 115 * f;
+                b = 20 + 100 * f;
+            }
+
+            ctx.fillStyle = `rgba(${r|0},${g|0},${b|0},${0.5 + d * 0.5})`;
+            ctx.fillRect(x * CELL, y * CELL, CELL, CELL);
+        }
+    }
+
+    ctx.fillStyle = 'rgba(255,80,0,0.6)';
+    ctx.fillRect(heaterL * CELL, (H-1) * CELL, (heaterR - heaterL) * CELL, 2);
+}
+
+function loop() {
+    if (!paused) for (let i = 0; i < ff; i++) tick();
+    render();
+
+    const mass = getMass();
+    document.getElementById('stats').innerHTML =
+        `Tick: ${frame} | Mass: ${mass.toFixed(0)}/${initialMass.toFixed(0)} | FPS: 60`;
+
+    requestAnimationFrame(loop);
+}
+
+document.getElementById('ff').onclick = () => {
+    ff = ff === 1 ? 5 : ff === 5 ? 25 : ff === 25 ? 100 : 1;
+    document.getElementById('ff').textContent = ff + 'x';
+};
+document.getElementById('pp').onclick = () => {
+    paused = !paused;
+    document.getElementById('pp').textContent = paused ? '▶' : '||';
+};
+document.getElementById('rr').onclick = reset;
+addEventListener('resize', resize);
+addEventListener('keydown', e => {
+    if (e.code === 'Space') { paused = !paused; e.preventDefault(); }
+    if (e.code === 'KeyR') reset();
+});
+
+resize();
+loop();
+</script>
+</body>
+</html>

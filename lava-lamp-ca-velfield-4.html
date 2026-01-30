@@ -1,0 +1,1386 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Lava Lamp CA - Velocity Field v4 (Stable Fluids + Cohesion)</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        html, body { height: 100%; overflow: hidden; background: #0a0a12; }
+        #canvas { display: block; image-rendering: pixelated; width: 100%; height: 100%; }
+        #ui { position: absolute; top: 10px; left: 10px; color: #fff; font: 10px monospace; background: rgba(0,0,0,0.85); padding: 8px; border-radius: 4px; max-height: 90vh; overflow-y: auto; min-width: 220px; }
+        #ui .param-row { display: flex; align-items: center; justify-content: space-between; margin: 3px 0; }
+        #ui label { display: inline-block; width: 100px; }
+        #ui input[type="number"] { width: 65px; background: #222; color: #fff; border: 1px solid #444; font-size: 10px; padding: 2px 4px; }
+        #ui .range-hint { color: #666; font-size: 8px; margin-left: 4px; }
+        #ui .section { color: #888; margin-top: 8px; border-top: 1px solid #333; padding-top: 4px; font-weight: bold; }
+        #controls { position: absolute; top: 10px; right: 10px; }
+        #controls button { padding: 6px 12px; margin: 2px; background: #222; color: #fff; border: 1px solid #555; cursor: pointer; font: 11px monospace; }
+        #stats { position: absolute; bottom: 10px; left: 10px; color: #fff; font: 11px monospace; background: rgba(0,0,0,0.8); padding: 8px; border-radius: 4px; }
+    </style>
+</head>
+<body>
+<canvas id="canvas"></canvas>
+<div id="ui">
+    <div><b>Lava Lamp Velfield v4</b></div>
+    <div style="color:#888;font-size:9px;margin-bottom:8px;">Stable Fluids + Cohesion<br>Discrete integer wax units</div>
+    <div id="params"></div>
+</div>
+<div id="controls">
+    <button id="toggleParams">Hide</button>
+    <button id="ff">1x</button>
+    <button id="pp">||</button>
+    <button id="heat">Heat ON</button>
+    <button id="reset">Reset</button>
+    <button id="toggleView">View: WAX</button>
+</div>
+<div id="stats">Initializing WebGPU...</div>
+
+<script type="module">
+// ============================================
+// LAVA LAMP VELFIELD v4
+// ============================================
+// Architecture:
+// 1. Stable Fluids runs at low resolution (VF_SCALE) for oil velocity field
+//    - Wax buoyancy feeds forces into fluid
+//    - Pressure projection creates displacement/circulation
+// 2. CA wax layer with discrete integer units (0-8)
+//    - Samples fluid velocity for movement guidance
+//    - Cohesion forces (SPH-style) keep blobs together
+//    - Acceleration diffusion so blobs move as units
+//    - Only whole-unit swaps - mass perfectly conserved
+
+const VF_SCALE = 8; // Fluid grid is 1/8th of CA grid
+
+const PARAMS = {
+    // Cell size
+    cellSize: 4,
+
+    // Heat
+    heatRate: 0.04,
+    heatSpread: 0.08,
+    coolRate: 0.002,
+    radiantHeat: 0.002,
+    heatSourceWidth: 0.6,
+
+    // Fluid field
+    fluidInfluence: 0.7,
+    fluidScale: 3.0,
+    fluidBuoyancy: 1.2,
+    fluidDecay: 0.99,
+
+    // Cohesion (surface tension)
+    cohesionStrength: 0.6,
+    cohesionRadius: 5,
+
+    // Buoyancy (direct on wax)
+    buoyancyScale: 0.05,
+
+    // Acceleration
+    accDiffusion: 0.4,
+    accDecay: 0.92,
+
+    // Velocity
+    velocityDamping: 0.92,
+
+    // Movement
+    velocityThreshold: 0.08,
+    moveChanceScale: 0.8,
+    surfaceEnergy: 3.0,       // Penalizes breaking blobs apart
+
+    // Brownian motion
+    brownianStrength: 0.02,
+
+    // Setup
+    initialWaxHeight: 0.15,
+};
+
+const PARAM_CONFIG = {
+    cellSize:         { section: 'Grid',      min: 2, max: 10, step: 1, round: true },
+    heatRate:         { section: 'Heat',      min: 0.01, max: 0.15, step: 0.01 },
+    heatSpread:       { min: 0.01, max: 0.2, step: 0.01 },
+    coolRate:         { min: 0.001, max: 0.01, step: 0.001 },
+    radiantHeat:      { min: 0, max: 0.01, step: 0.001 },
+    heatSourceWidth:  { min: 0.2, max: 1.0, step: 0.1 },
+    fluidInfluence:   { section: 'Fluid',     min: 0, max: 1.0, step: 0.05 },
+    fluidScale:       { min: 0.5, max: 5.0, step: 0.1 },
+    fluidBuoyancy:    { min: 0, max: 2.0, step: 0.1 },
+    fluidDecay:       { min: 0.95, max: 1.0, step: 0.005 },
+    cohesionStrength: { section: 'Cohesion',  min: 0, max: 1.5, step: 0.05 },
+    cohesionRadius:   { min: 2, max: 8, step: 1, round: true },
+    buoyancyScale:    { section: 'Buoyancy',  min: 0, max: 0.2, step: 0.01 },
+    accDiffusion:     { section: 'Acceleration', min: 0, max: 0.8, step: 0.05 },
+    accDecay:         { min: 0.8, max: 0.99, step: 0.01 },
+    velocityDamping:  { section: 'Velocity',  min: 0.7, max: 0.99, step: 0.01 },
+    velocityThreshold:{ section: 'Movement',  min: 0.01, max: 0.3, step: 0.01 },
+    moveChanceScale:  { min: 0.1, max: 2.0, step: 0.1 },
+    surfaceEnergy:    { min: 0, max: 8.0, step: 0.5 },
+    brownianStrength: { min: 0, max: 0.1, step: 0.01 },
+    initialWaxHeight: { section: 'Setup',     min: 0.05, max: 0.3, step: 0.01 },
+};
+
+// ============================================
+// WGSL SHADERS
+// ============================================
+const SHADER_CODE = `
+struct Params {
+    width: u32,
+    height: u32,
+    frame: u32,
+    heatOn: u32,
+
+    heatRate: f32,
+    heatSpread: f32,
+    coolRate: f32,
+    radiantHeat: f32,
+    heatSourceWidth: f32,
+
+    fluidInfluence: f32,
+    fluidScale: f32,
+    fluidBuoyancy: f32,
+    fluidDecay: f32,
+
+    cohesionStrength: f32,
+    cohesionRadius: f32,
+
+    buoyancyScale: f32,
+    accDiffusion: f32,
+    accDecay: f32,
+    velocityDamping: f32,
+    velocityThreshold: f32,
+    moveChanceScale: f32,
+    surfaceEnergy: f32,
+    brownianStrength: f32,
+
+    seed: f32,
+    showVelocity: u32,
+}
+
+struct Cell {
+    units: u32,      // Discrete wax units (0-8)
+    temp: f32,       // Temperature (0-1)
+    velX: f32,       // Velocity X
+    velY: f32,       // Velocity Y
+    accX: f32,       // Acceleration X
+    accY: f32,       // Acceleration Y
+}
+
+// Group 0: CA resources
+@group(0) @binding(0) var<uniform> params: Params;
+@group(0) @binding(1) var<storage, read_write> cellsIn: array<Cell>;
+@group(0) @binding(2) var<storage, read_write> cellsOut: array<Cell>;
+@group(0) @binding(3) var<uniform> movePass: vec4u;
+
+// Group 1: Fluid resources
+@group(1) @binding(0) var fluidTexRead: texture_2d<f32>;
+@group(1) @binding(1) var fluidTexWrite: texture_storage_2d<rgba16float, write>;
+@group(1) @binding(2) var fluidAuxRead: texture_2d<f32>;
+@group(1) @binding(3) var fluidAuxWrite: texture_storage_2d<rgba16float, write>;
+@group(1) @binding(4) var fluidSampler: sampler;
+
+// Constants
+const VF_SCALE: i32 = 8;
+
+// Pseudo-random
+fn rand(seed: f32, idx: u32) -> f32 {
+    return fract(sin(seed + f32(idx) * 0.1234) * 43758.5453);
+}
+
+// Get capacity based on temperature
+fn getCapacity(t: f32) -> u32 {
+    if (t >= 0.5) { return 6u; }
+    if (t >= 0.25) { return 7u; }
+    return 8u;
+}
+
+// Safe index for CA grid
+fn idx(x: i32, y: i32) -> u32 {
+    let w = i32(params.width);
+    let h = i32(params.height);
+    return u32(clamp(y, 0, h-1) * w + clamp(x, 0, w-1));
+}
+
+// Cohesion kernel (SPH-style)
+fn cohesionKernel(r: f32, h: f32) -> f32 {
+    if (r >= h || r < 0.1) { return 0.0; }
+    let q = r / h;
+    if (q > 0.5) {
+        let t = 1.0 - q;
+        return t * t * q;
+    } else {
+        return q * q * (1.0 - q);
+    }
+}
+
+// Surface energy helpers - penalizes breaking blobs apart
+fn isWax(units: u32) -> i32 {
+    return select(0, 1, units > 0u);
+}
+
+// Calculate wax state at position, considering a hypothetical swap
+fn waxAt(x: i32, y: i32, swapIdx1: u32, swapVal1: i32, swapIdx2: u32, swapVal2: i32) -> i32 {
+    let ii = idx(x, y);
+    if (ii == swapIdx1) { return swapVal1; }
+    if (ii == swapIdx2) { return swapVal2; }
+    return isWax(cellsOut[ii].units);
+}
+
+// Count interfaces (discontinuities) around a cell
+fn localEnergy(x: i32, y: i32, i1: u32, v1: i32, i2: u32, v2: i32) -> i32 {
+    var cV = v1;
+    if (idx(x, y) == i2) { cV = v2; }
+
+    return abs(cV - waxAt(x-1, y, i1, v1, i2, v2)) +
+           abs(cV - waxAt(x+1, y, i1, v1, i2, v2)) +
+           abs(cV - waxAt(x, y-1, i1, v1, i2, v2)) +
+           abs(cV - waxAt(x, y+1, i1, v1, i2, v2));
+}
+
+// ==========================================================
+// FLUID SHADERS (Stable Fluids at low resolution)
+// ==========================================================
+
+@compute @workgroup_size(16, 16)
+fn fluidAddForce(@builtin(global_invocation_id) id: vec3u) {
+    let x = i32(id.x);
+    let y = i32(id.y);
+    let fw = i32(params.width) / VF_SCALE;
+    let fh = i32(params.height) / VF_SCALE;
+    if (x >= fw || y >= fh) { return; }
+
+    var vel = textureLoad(fluidTexRead, vec2i(x, y), 0).xy;
+
+    // Accumulate wax forces in this fluid cell
+    var waxOcc = 0.0;
+    var waxTemp = 0.0;
+
+    let sx = x * VF_SCALE;
+    let sy = y * VF_SCALE;
+
+    for (var dy = 0; dy < VF_SCALE; dy++) {
+        for (var dx = 0; dx < VF_SCALE; dx++) {
+            let ii = idx(sx + dx, sy + dy);
+            if (cellsIn[ii].units > 0u) {
+                waxOcc += 1.0;
+                waxTemp += cellsIn[ii].temp;
+            }
+        }
+    }
+
+    if (waxOcc > 0.0) {
+        waxTemp /= waxOcc;
+        let density = waxOcc / f32(VF_SCALE * VF_SCALE);
+
+        // Hot wax rises (negative Y in screen coords)
+        let buoyForce = -params.fluidBuoyancy * density * (waxTemp - 0.3);
+        vel.y += buoyForce;
+
+        // Add horizontal perturbation based on position and frame
+        // This breaks symmetry and creates more dynamic flow
+        let noise = rand(params.seed, u32(y * fw + x));
+        let horzPush = (noise - 0.5) * 0.1 * density * abs(waxTemp - 0.5);
+        vel.x += horzPush;
+    }
+
+    textureStore(fluidTexWrite, vec2i(x, y), vec4f(vel, 0.0, 0.0));
+}
+
+@compute @workgroup_size(16, 16)
+fn fluidAdvect(@builtin(global_invocation_id) id: vec3u) {
+    let x = i32(id.x);
+    let y = i32(id.y);
+    let fw = i32(params.width) / VF_SCALE;
+    let fh = i32(params.height) / VF_SCALE;
+    if (x >= fw || y >= fh) { return; }
+
+    let uv = (vec2f(f32(x), f32(y)) + 0.5) / vec2f(f32(fw), f32(fh));
+    let vel = textureSampleLevel(fluidTexRead, fluidSampler, uv, 0.0).xy;
+
+    // Semi-Lagrangian backtrace
+    let backPos = uv - vel * vec2f(1.0 / f32(fw), 1.0 / f32(fh));
+    let newVel = textureSampleLevel(fluidTexRead, fluidSampler, backPos, 0.0).xy;
+
+    textureStore(fluidTexWrite, vec2i(x, y), vec4f(newVel * params.fluidDecay, 0.0, 0.0));
+}
+
+@compute @workgroup_size(16, 16)
+fn fluidDivergence(@builtin(global_invocation_id) id: vec3u) {
+    let x = i32(id.x);
+    let y = i32(id.y);
+    let fw = i32(params.width) / VF_SCALE;
+    let fh = i32(params.height) / VF_SCALE;
+    if (x >= fw || y >= fh) { return; }
+
+    let vL = textureLoad(fluidTexRead, vec2i(max(0, x-1), y), 0).xy;
+    let vR = textureLoad(fluidTexRead, vec2i(min(fw-1, x+1), y), 0).xy;
+    let vU = textureLoad(fluidTexRead, vec2i(x, max(0, y-1)), 0).xy;
+    let vD = textureLoad(fluidTexRead, vec2i(x, min(fh-1, y+1)), 0).xy;
+
+    let div = 0.5 * (vR.x - vL.x + vD.y - vU.y);
+    textureStore(fluidAuxWrite, vec2i(x, y), vec4f(div, 0.0, 0.0, 0.0));
+}
+
+@compute @workgroup_size(16, 16)
+fn fluidJacobi(@builtin(global_invocation_id) id: vec3u) {
+    let x = i32(id.x);
+    let y = i32(id.y);
+    let fw = i32(params.width) / VF_SCALE;
+    let fh = i32(params.height) / VF_SCALE;
+    if (x >= fw || y >= fh) { return; }
+
+    // Read pressure from neighbors
+    let pL = textureLoad(fluidTexRead, vec2i(max(0, x-1), y), 0).r;
+    let pR = textureLoad(fluidTexRead, vec2i(min(fw-1, x+1), y), 0).r;
+    let pU = textureLoad(fluidTexRead, vec2i(x, max(0, y-1)), 0).r;
+    let pD = textureLoad(fluidTexRead, vec2i(x, min(fh-1, y+1)), 0).r;
+
+    // Read divergence
+    let b = textureLoad(fluidAuxRead, vec2i(x, y), 0).r;
+
+    let pNew = (pL + pR + pU + pD - b) * 0.25;
+    textureStore(fluidAuxWrite, vec2i(x, y), vec4f(pNew, 0.0, 0.0, 0.0));
+}
+
+@compute @workgroup_size(16, 16)
+fn fluidSubtractGradient(@builtin(global_invocation_id) id: vec3u) {
+    let x = i32(id.x);
+    let y = i32(id.y);
+    let fw = i32(params.width) / VF_SCALE;
+    let fh = i32(params.height) / VF_SCALE;
+    if (x >= fw || y >= fh) { return; }
+
+    let vel = textureLoad(fluidTexRead, vec2i(x, y), 0).xy;
+
+    // Read pressure gradient
+    let pL = textureLoad(fluidAuxRead, vec2i(max(0, x-1), y), 0).r;
+    let pR = textureLoad(fluidAuxRead, vec2i(min(fw-1, x+1), y), 0).r;
+    let pU = textureLoad(fluidAuxRead, vec2i(x, max(0, y-1)), 0).r;
+    let pD = textureLoad(fluidAuxRead, vec2i(x, min(fh-1, y+1)), 0).r;
+
+    let gradP = 0.5 * vec2f(pR - pL, pD - pU);
+    let newVel = vel - gradP;
+
+    textureStore(fluidTexWrite, vec2i(x, y), vec4f(newVel, 0.0, 0.0));
+}
+
+// ==========================================================
+// CA SHADER 1: TEMPERATURE UPDATE
+// ==========================================================
+@compute @workgroup_size(16, 16)
+fn updateTemp(@builtin(global_invocation_id) gid: vec3u) {
+    let x = i32(gid.x);
+    let y = i32(gid.y);
+    let w = i32(params.width);
+    let h = i32(params.height);
+    if (x >= w || y >= h) { return; }
+
+    let i = idx(x, y);
+    var cell = cellsIn[i];
+    cellsOut[i] = cell;
+
+    if (cell.units == 0u) {
+        cellsOut[i].temp = 0.0;
+        return;
+    }
+
+    var t = cell.temp;
+
+    // Heat source at bottom
+    if (params.heatOn == 1u && y >= h - 8) {
+        let centerDist = abs(f32(x) / f32(w) - 0.5);
+        if (centerDist < params.heatSourceWidth * 0.5) {
+            let vertIntensity = f32(y - (h - 8)) / 8.0;
+            let horizIntensity = 1.0 - centerDist / (params.heatSourceWidth * 0.5);
+            t += params.heatRate * vertIntensity * horizIntensity;
+        }
+    }
+
+    // Cool zone at top
+    if (y <= 4) {
+        t -= params.coolRate * 2.0;
+    }
+
+    // Radiant heat gradient
+    let relY = f32(y) / f32(h);
+    t += (relY - 0.5) * 2.0 * params.radiantHeat;
+
+    // Heat spread to neighbors
+    var tempSum = t;
+    var count = 1.0;
+    for (var dy = -1; dy <= 1; dy++) {
+        for (var dx = -1; dx <= 1; dx++) {
+            if (dx == 0 && dy == 0) { continue; }
+            let ni = idx(x + dx, y + dy);
+            if (cellsIn[ni].units > 0u) {
+                tempSum += cellsIn[ni].temp;
+                count += 1.0;
+            }
+        }
+    }
+    t += (tempSum / count - t) * params.heatSpread;
+
+    cellsOut[i].temp = clamp(t, 0.0, 1.0);
+}
+
+// ==========================================================
+// CA SHADER 2: FORCES + FLUID COUPLING -> VELOCITY
+// ==========================================================
+@compute @workgroup_size(16, 16)
+fn updateForces(@builtin(global_invocation_id) gid: vec3u) {
+    let x = i32(gid.x);
+    let y = i32(gid.y);
+    let w = i32(params.width);
+    let h = i32(params.height);
+    if (x >= w || y >= h) { return; }
+
+    let i = idx(x, y);
+    let cell = cellsOut[i];
+
+    if (cell.units == 0u) {
+        cellsOut[i].velX = 0.0;
+        cellsOut[i].velY = 0.0;
+        cellsOut[i].accX = 0.0;
+        cellsOut[i].accY = 0.0;
+        return;
+    }
+
+    // Start with previous acceleration
+    var ax = cellsIn[i].accX;
+    var ay = cellsIn[i].accY;
+
+    // === DIFFUSE ACCELERATION FROM NEIGHBORS ===
+    var neighborAccX = 0.0;
+    var neighborAccY = 0.0;
+    var neighborCount = 0.0;
+
+    for (var dy = -1; dy <= 1; dy++) {
+        for (var dx = -1; dx <= 1; dx++) {
+            if (dx == 0 && dy == 0) { continue; }
+            let nx = x + dx;
+            let ny = y + dy;
+            if (nx < 0 || nx >= w || ny < 0 || ny >= h) { continue; }
+            let ni = idx(nx, ny);
+            if (cellsIn[ni].units > 0u) {
+                neighborAccX += cellsIn[ni].accX;
+                neighborAccY += cellsIn[ni].accY;
+                neighborCount += 1.0;
+            }
+        }
+    }
+
+    if (neighborCount > 0.0) {
+        let avgAccX = neighborAccX / neighborCount;
+        let avgAccY = neighborAccY / neighborCount;
+        ax = mix(ax, avgAccX, params.accDiffusion);
+        ay = mix(ay, avgAccY, params.accDiffusion);
+    }
+
+    // === SAMPLE FLUID VELOCITY FIELD ===
+    let uv = vec2f(f32(x) / f32(w), f32(y) / f32(h));
+    let fluidVel = textureSampleLevel(fluidTexRead, fluidSampler, uv, 0.0).xy;
+
+    // === COHESION FORCE ===
+    let radius = i32(params.cohesionRadius);
+    var forceX = 0.0;
+    var forceY = 0.0;
+    var immediateNeighbors = 0;
+
+    for (var dy = -radius; dy <= radius; dy++) {
+        for (var dx = -radius; dx <= radius; dx++) {
+            if (dx == 0 && dy == 0) { continue; }
+            let nx = x + dx;
+            let ny = y + dy;
+            if (nx < 0 || nx >= w || ny < 0 || ny >= h) { continue; }
+            let ni = idx(nx, ny);
+            let neighbor = cellsOut[ni];
+            if (neighbor.units == 0u) { continue; }
+
+            let dist = sqrt(f32(dx*dx + dy*dy));
+
+            // Count immediate neighbors (adjacent cells)
+            if (dist < 1.5) {
+                immediateNeighbors++;
+            }
+
+            if (dist > f32(radius)) { continue; }
+
+            let cohesion = cohesionKernel(dist, f32(radius));
+            let dirX = f32(dx) / dist;
+            let dirY = f32(dy) / dist;
+            let mass = f32(neighbor.units) / 8.0;
+
+            forceX += dirX * cohesion * mass;
+            forceY += dirY * cohesion * mass;
+        }
+    }
+
+    // Base cohesion
+    ax += forceX * params.cohesionStrength;
+    ay += forceY * params.cohesionStrength;
+
+    // === ISOLATION PENALTY ===
+    // If a cell has very few neighbors, massively amplify cohesion to pull it back
+    // This prevents isolated cells from drifting and forces them to rejoin blobs
+    var isolationDamping = 1.0;
+    if (immediateNeighbors < 3) {
+        let isolationFactor = f32(3 - immediateNeighbors) * 3.0;
+        ax += forceX * params.cohesionStrength * isolationFactor;
+        ay += forceY * params.cohesionStrength * isolationFactor;
+
+        // Isolated cells get heavy velocity damping
+        isolationDamping = 0.3 + f32(immediateNeighbors) * 0.2;
+    }
+
+    // === BUOYANCY (direct) ===
+    let capacity = getCapacity(cell.temp);
+    let buoyancy = f32(cell.units) * f32(7i - i32(capacity)) * params.buoyancyScale;
+    ay -= buoyancy;
+
+    // === NEUTRAL ZONE INSTABILITY ===
+    // Wax at mid-temperature tends to stagnate; add vertical push toward extremes
+    let midTemp = abs(cell.temp - 0.4);
+    if (midTemp < 0.15) {
+        // In neutral zone: add random vertical bias to break stagnation
+        let r3 = rand(params.seed + 2.0, u32(i));
+        let vertBias = select(-1.0, 1.0, r3 > 0.5);
+        ay += vertBias * (0.15 - midTemp) * params.buoyancyScale * 2.0;
+    }
+
+    // === BROWNIAN ===
+    let r1 = rand(params.seed, u32(i));
+    let r2 = rand(params.seed + 1.0, u32(i));
+    ax += (r1 - 0.5) * params.brownianStrength;
+    ay += (r2 - 0.5) * params.brownianStrength;
+
+    // === ACCELERATION DECAY ===
+    ax *= params.accDecay;
+    ay *= params.accDecay;
+
+    // === VELOCITY UPDATE ===
+    // Mix fluid influence with local acceleration
+    var vx = cell.velX + ax;
+    var vy = cell.velY + ay;
+
+    // Blend with fluid velocity
+    vx = mix(vx, fluidVel.x * params.fluidScale, params.fluidInfluence);
+    vy = mix(vy, fluidVel.y * params.fluidScale, params.fluidInfluence);
+
+    // === VELOCITY DAMPING ===
+    vx *= params.velocityDamping * isolationDamping;
+    vy *= params.velocityDamping * isolationDamping;
+
+    cellsOut[i].accX = ax;
+    cellsOut[i].accY = ay;
+    cellsOut[i].velX = vx;
+    cellsOut[i].velY = vy;
+}
+
+// ==========================================================
+// CA SHADER 3: MOVEMENT (Discrete Cell Swaps)
+// ==========================================================
+@compute @workgroup_size(16, 16)
+fn updateMovement(@builtin(global_invocation_id) gid: vec3u) {
+    let x = i32(gid.x);
+    let y = i32(gid.y);
+    let w = i32(params.width);
+    let h = i32(params.height);
+    if (x >= w || y >= h) { return; }
+
+    var tx = x;
+    var ty = y;
+    let passIdx = movePass.x;
+
+    // 4 passes: vertical even/odd, horizontal even/odd
+    if (passIdx == 0u) { if ((y % 2) == 0 && y < h-1) { ty = y + 1; } }
+    else if (passIdx == 1u) { if ((y % 2) == 1 && y < h-1) { ty = y + 1; } }
+    else if (passIdx == 2u) { if ((x % 2) == 0 && x < w-1) { tx = x + 1; } }
+    else if (passIdx == 3u) { if ((x % 2) == 1 && x < w-1) { tx = x + 1; } }
+
+    if (tx == x && ty == y) { return; }
+
+    let i1 = idx(x, y);
+    let i2 = idx(tx, ty);
+
+    var c1 = cellsOut[i1];
+    var c2 = cellsOut[i2];
+
+    let dx = f32(tx - x);
+    let dy = f32(ty - y);
+
+    var desire = 0.0;
+
+    if (c1.units > 0u) {
+        let proj = c1.velX * dx + c1.velY * dy;
+        if (proj > params.velocityThreshold) {
+            desire += proj;
+        }
+    }
+
+    if (c2.units > 0u) {
+        let proj = c2.velX * (-dx) + c2.velY * (-dy);
+        if (proj > params.velocityThreshold) {
+            desire += proj;
+        }
+    }
+
+    if (desire > 0.0) {
+        var chance = min(1.0, desire * params.moveChanceScale);
+
+        let w1 = isWax(c1.units);
+        let w2 = isWax(c2.units);
+
+        // === CRITICAL: Neighbor-based movement restriction ===
+        // Prevents single cells from breaking off blobs
+        if (w1 != w2) {
+            // Count wax neighbors for the cell that's trying to leave
+            let movingCell = select(vec2i(tx, ty), vec2i(x, y), w1 == 1);
+            let mx = movingCell.x;
+            let my = movingCell.y;
+
+            var waxNeighbors = 0;
+            var neighborsMovingSameWay = 0;
+
+            for (var ndy = -1; ndy <= 1; ndy++) {
+                for (var ndx = -1; ndx <= 1; ndx++) {
+                    if (ndx == 0 && ndy == 0) { continue; }
+                    let nx = mx + ndx;
+                    let ny = my + ndy;
+                    if (nx < 0 || nx >= w || ny < 0 || ny >= h) { continue; }
+
+                    let ni = idx(nx, ny);
+                    if (cellsOut[ni].units > 0u) {
+                        waxNeighbors++;
+
+                        // Check if neighbor is also trying to move in similar direction
+                        let nVelProj = cellsOut[ni].velX * dx + cellsOut[ni].velY * dy;
+                        if (nVelProj > params.velocityThreshold * 0.5) {
+                            neighborsMovingSameWay++;
+                        }
+                    }
+                }
+            }
+
+            // HARD RULE: Cannot break off if too isolated
+            // Need at least 2 neighbors, AND at least 1 moving with you
+            // OR need at least 4 neighbors (well-connected, can spare one)
+            if (waxNeighbors < 2) {
+                chance = 0.0;  // Absolutely cannot break off
+            } else if (waxNeighbors < 4 && neighborsMovingSameWay < 1) {
+                chance = 0.0;  // Not enough momentum to pinch off
+            }
+        }
+
+        // Surface energy penalty (additional soft penalty)
+        if (params.surfaceEnergy > 0.0 && w1 != w2 && chance > 0.0) {
+            let energyBefore = localEnergy(x, y, i1, w1, i2, w2) +
+                               localEnergy(tx, ty, i1, w1, i2, w2);
+            let energyAfter = localEnergy(x, y, i1, w2, i2, w1) +
+                              localEnergy(tx, ty, i1, w2, i2, w1);
+            let dE = f32(energyAfter - energyBefore);
+            chance *= exp(-params.surfaceEnergy * dE * 0.5);
+        }
+
+        let r = rand(params.seed + f32(passIdx) * 100.0, u32(i1));
+
+        if (r < chance) {
+            // SWAP - preserves mass perfectly
+            let tempUnits = c1.units;
+            let tempTemp = c1.temp;
+            let tempVx = c1.velX;
+            let tempVy = c1.velY;
+            let tempAx = c1.accX;
+            let tempAy = c1.accY;
+
+            c1.units = c2.units;
+            c1.temp = c2.temp;
+            c1.velX = c2.velX * 0.95;
+            c1.velY = c2.velY * 0.95;
+            c1.accX = c2.accX * 0.95;
+            c1.accY = c2.accY * 0.95;
+
+            c2.units = tempUnits;
+            c2.temp = tempTemp;
+            c2.velX = tempVx * 0.95;
+            c2.velY = tempVy * 0.95;
+            c2.accX = tempAx * 0.95;
+            c2.accY = tempAy * 0.95;
+
+            cellsOut[i1] = c1;
+            cellsOut[i2] = c2;
+        }
+    }
+}
+
+// ==========================================================
+// RENDER
+// ==========================================================
+struct VertexOutput {
+    @builtin(position) pos: vec4f,
+    @location(0) uv: vec2f,
+}
+
+@vertex
+fn vs_main(@builtin(vertex_index) vi: u32) -> VertexOutput {
+    var positions = array<vec2f, 6>(
+        vec2f(-1.0, -1.0), vec2f(1.0, -1.0), vec2f(-1.0, 1.0),
+        vec2f(-1.0, 1.0), vec2f(1.0, -1.0), vec2f(1.0, 1.0)
+    );
+    var out: VertexOutput;
+    out.pos = vec4f(positions[vi], 0.0, 1.0);
+    out.uv = positions[vi] * 0.5 + 0.5;
+    out.uv.y = 1.0 - out.uv.y;
+    return out;
+}
+
+@fragment
+fn fs_main(@location(0) uv: vec2f) -> @location(0) vec4f {
+    let w = i32(params.width);
+    let h = i32(params.height);
+    let x = i32(uv.x * f32(w));
+    let y = i32(uv.y * f32(h));
+    let i = idx(x, y);
+    let cell = cellsOut[i];
+
+    // Velocity visualization mode
+    if (params.showVelocity == 1u) {
+        let fluidVel = textureSampleLevel(fluidTexRead, fluidSampler, uv, 0.0).xy;
+        let speed = length(fluidVel);
+        let r = clamp(fluidVel.x * 5.0 + 0.5, 0.0, 1.0);
+        let g = clamp(fluidVel.y * 5.0 + 0.5, 0.0, 1.0);
+        let b = clamp(speed * 3.0, 0.0, 1.0);
+        if (cell.units > 0u) {
+            return vec4f(r, g * 0.5 + 0.5, b, 1.0);
+        } else {
+            return vec4f(r * 0.4, g * 0.4, b * 0.4, 1.0);
+        }
+    }
+
+    // Normal wax view
+    if (cell.units == 0u) {
+        return vec4f(0.04, 0.04, 0.07, 1.0);
+    }
+
+    let t = cell.temp;
+    var col: vec3f;
+
+    if (t < 0.33) {
+        let f = t / 0.33;
+        col = vec3f(0.24 + 0.35*f, 0.08 + 0.15*f, 0.47 - 0.15*f);
+    } else if (t < 0.66) {
+        let f = (t - 0.33) / 0.33;
+        col = vec3f(0.59 + 0.31*f, 0.23 + 0.32*f, 0.32 - 0.24*f);
+    } else {
+        let f = (t - 0.66) / 0.34;
+        col = vec3f(0.9 + 0.1*f, 0.55 + 0.4*f, 0.08 + 0.2*f);
+    }
+
+    let brightness = 0.6 + 0.4 * f32(cell.units) / 8.0;
+    return vec4f(col * brightness, 1.0);
+}
+`;
+
+// ============================================
+// MAIN APPLICATION
+// ============================================
+let device, context;
+
+// Pipelines
+let pipelineFluidForce, pipelineFluidAdvect, pipelineFluidDiv, pipelineFluidJacobi, pipelineFluidSubtract;
+let pipelineTemp, pipelineForces, pipelineMove, pipelineRender;
+
+// Bind group layouts
+let bgLayout0, bgLayout1;
+
+// Buffers
+let paramsBuffer, movePassBuffer;
+let cellsBufferA, cellsBufferB;
+
+// Fluid textures
+let texVelA, texVelB, texPressA, texPressB, texDiv;
+let fluidSampler;
+
+// Bind groups
+let bgCA_A, bgCA_B;
+let bgFluidForce, bgFluidAdvectAB, bgFluidAdvectBA;
+let bgFluidDivA, bgFluidDivB;
+let bgFluidJacobiA, bgFluidJacobiB;
+let bgFluidSubA, bgFluidSubB;
+let bgFluidRenderA, bgFluidRenderB;
+
+let W, H, FW, FH;
+let frame = 0, heatOn = 1, paused = false, ff = 1, showVelocity = 0;
+let initialTotalUnits = 0;
+
+async function init() {
+    if (!navigator.gpu) {
+        document.getElementById('stats').textContent = "WebGPU not supported";
+        return;
+    }
+
+    const adapter = await navigator.gpu.requestAdapter();
+    device = await adapter.requestDevice();
+
+    const canvas = document.getElementById('canvas');
+    context = canvas.getContext('webgpu');
+    context.configure({
+        device,
+        format: navigator.gpu.getPreferredCanvasFormat(),
+        alphaMode: 'premultiplied',
+    });
+
+    resize();
+    window.addEventListener('resize', resize);
+    setupUI();
+    loop();
+}
+
+function resize() {
+    const canvas = document.getElementById('canvas');
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+
+    W = Math.floor(canvas.width / PARAMS.cellSize);
+    H = Math.floor(canvas.height / PARAMS.cellSize);
+    FW = Math.ceil(W / VF_SCALE);
+    FH = Math.ceil(H / VF_SCALE);
+
+    initSimulation();
+}
+
+function createTexture(w, h, format) {
+    return device.createTexture({
+        size: [w, h],
+        format: format,
+        usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.STORAGE_BINDING | GPUTextureUsage.COPY_DST | GPUTextureUsage.COPY_SRC,
+    });
+}
+
+function initSimulation() {
+    frame = 0;
+
+    // === CA BUFFERS ===
+    const size = W * H;
+    const cellStride = 24; // 6 fields × 4 bytes
+    const bufferSize = size * cellStride;
+
+    const initData = new ArrayBuffer(bufferSize);
+    const view = new DataView(initData);
+    const waxTop = H - Math.floor(H * PARAMS.initialWaxHeight);
+
+    initialTotalUnits = 0;
+
+    for (let y = 0; y < H; y++) {
+        for (let x = 0; x < W; x++) {
+            const i = y * W + x;
+            const offset = i * cellStride;
+
+            let units = 0;
+            let temp = 0;
+
+            if (y >= waxTop) {
+                const noise = Math.sin(x * 0.2) * 2 + Math.random() * 2;
+                if (y >= waxTop + noise) {
+                    units = 8;
+                    temp = 0.15 + Math.random() * 0.05;
+                    initialTotalUnits += units;
+                }
+            }
+
+            view.setUint32(offset, units, true);
+            view.setFloat32(offset + 4, temp, true);
+            view.setFloat32(offset + 8, 0, true);   // velX
+            view.setFloat32(offset + 12, 0, true);  // velY
+            view.setFloat32(offset + 16, 0, true);  // accX
+            view.setFloat32(offset + 20, 0, true);  // accY
+        }
+    }
+
+    cellsBufferA = device.createBuffer({
+        size: bufferSize,
+        usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST | GPUBufferUsage.COPY_SRC,
+        mappedAtCreation: true,
+    });
+    new Uint8Array(cellsBufferA.getMappedRange()).set(new Uint8Array(initData));
+    cellsBufferA.unmap();
+
+    cellsBufferB = device.createBuffer({
+        size: bufferSize,
+        usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST | GPUBufferUsage.COPY_SRC,
+    });
+
+    // Copy A to B
+    {
+        const encoder = device.createCommandEncoder();
+        encoder.copyBufferToBuffer(cellsBufferA, 0, cellsBufferB, 0, bufferSize);
+        device.queue.submit([encoder.finish()]);
+    }
+
+    paramsBuffer = device.createBuffer({
+        size: 128,
+        usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+    });
+
+    movePassBuffer = device.createBuffer({
+        size: 1024,
+        usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+    });
+    {
+        const moveData = new ArrayBuffer(1024);
+        const moveView = new DataView(moveData);
+        for (let i = 0; i < 4; i++) {
+            moveView.setUint32(i * 256, i, true);
+        }
+        device.queue.writeBuffer(movePassBuffer, 0, moveData);
+    }
+
+    // === FLUID TEXTURES ===
+    texVelA = createTexture(FW, FH, 'rgba16float');
+    texVelB = createTexture(FW, FH, 'rgba16float');
+    texPressA = createTexture(FW, FH, 'rgba16float');
+    texPressB = createTexture(FW, FH, 'rgba16float');
+    texDiv = createTexture(FW, FH, 'rgba16float');
+
+    fluidSampler = device.createSampler({
+        magFilter: 'linear',
+        minFilter: 'linear',
+        addressModeU: 'clamp-to-edge',
+        addressModeV: 'clamp-to-edge',
+    });
+
+    // === BIND GROUP LAYOUTS ===
+    bgLayout0 = device.createBindGroupLayout({
+        entries: [
+            { binding: 0, visibility: GPUShaderStage.COMPUTE | GPUShaderStage.FRAGMENT, buffer: { type: 'uniform' } },
+            { binding: 1, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'storage' } },
+            { binding: 2, visibility: GPUShaderStage.COMPUTE | GPUShaderStage.FRAGMENT, buffer: { type: 'storage' } },
+            { binding: 3, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'uniform', hasDynamicOffset: true, minBindingSize: 16 } },
+        ],
+    });
+
+    bgLayout1 = device.createBindGroupLayout({
+        entries: [
+            { binding: 0, visibility: GPUShaderStage.COMPUTE | GPUShaderStage.FRAGMENT, texture: { sampleType: 'float' } },
+            { binding: 1, visibility: GPUShaderStage.COMPUTE, storageTexture: { access: 'write-only', format: 'rgba16float' } },
+            { binding: 2, visibility: GPUShaderStage.COMPUTE, texture: { sampleType: 'float' } },
+            { binding: 3, visibility: GPUShaderStage.COMPUTE, storageTexture: { access: 'write-only', format: 'rgba16float' } },
+            { binding: 4, visibility: GPUShaderStage.COMPUTE | GPUShaderStage.FRAGMENT, sampler: { type: 'filtering' } },
+        ],
+    });
+
+    // === PIPELINES ===
+    const module = device.createShaderModule({ code: SHADER_CODE });
+    const pipelineLayout = device.createPipelineLayout({ bindGroupLayouts: [bgLayout0, bgLayout1] });
+
+    const mkCompute = (entryPoint) => device.createComputePipeline({
+        layout: pipelineLayout,
+        compute: { module, entryPoint },
+    });
+
+    pipelineFluidForce = mkCompute('fluidAddForce');
+    pipelineFluidAdvect = mkCompute('fluidAdvect');
+    pipelineFluidDiv = mkCompute('fluidDivergence');
+    pipelineFluidJacobi = mkCompute('fluidJacobi');
+    pipelineFluidSubtract = mkCompute('fluidSubtractGradient');
+
+    pipelineTemp = mkCompute('updateTemp');
+    pipelineForces = mkCompute('updateForces');
+    pipelineMove = mkCompute('updateMovement');
+
+    pipelineRender = device.createRenderPipeline({
+        layout: pipelineLayout,
+        vertex: { module, entryPoint: 'vs_main' },
+        fragment: {
+            module,
+            entryPoint: 'fs_main',
+            targets: [{ format: navigator.gpu.getPreferredCanvasFormat() }],
+        },
+        primitive: { topology: 'triangle-list' },
+    });
+
+    // === BIND GROUPS ===
+    const v = (tex) => tex.createView();
+
+    // CA bind groups (double-buffered)
+    bgCA_A = device.createBindGroup({
+        layout: bgLayout0,
+        entries: [
+            { binding: 0, resource: { buffer: paramsBuffer } },
+            { binding: 1, resource: { buffer: cellsBufferA } },
+            { binding: 2, resource: { buffer: cellsBufferB } },
+            { binding: 3, resource: { buffer: movePassBuffer, offset: 0, size: 16 } },
+        ],
+    });
+
+    bgCA_B = device.createBindGroup({
+        layout: bgLayout0,
+        entries: [
+            { binding: 0, resource: { buffer: paramsBuffer } },
+            { binding: 1, resource: { buffer: cellsBufferB } },
+            { binding: 2, resource: { buffer: cellsBufferA } },
+            { binding: 3, resource: { buffer: movePassBuffer, offset: 0, size: 16 } },
+        ],
+    });
+
+    // Fluid bind groups for various passes
+    // Force: Read VelA, Write VelB
+    bgFluidForce = device.createBindGroup({
+        layout: bgLayout1,
+        entries: [
+            { binding: 0, resource: v(texVelA) },
+            { binding: 1, resource: v(texVelB) },
+            { binding: 2, resource: v(texVelA) },
+            { binding: 3, resource: v(texDiv) },
+            { binding: 4, resource: fluidSampler },
+        ],
+    });
+
+    // Advect: Read VelB, Write VelA
+    bgFluidAdvectAB = device.createBindGroup({
+        layout: bgLayout1,
+        entries: [
+            { binding: 0, resource: v(texVelB) },
+            { binding: 1, resource: v(texVelA) },
+            { binding: 2, resource: v(texVelB) },
+            { binding: 3, resource: v(texDiv) },
+            { binding: 4, resource: fluidSampler },
+        ],
+    });
+
+    // Divergence: Read VelA, Write Div
+    bgFluidDivA = device.createBindGroup({
+        layout: bgLayout1,
+        entries: [
+            { binding: 0, resource: v(texVelA) },
+            { binding: 1, resource: v(texVelB) },
+            { binding: 2, resource: v(texVelA) },
+            { binding: 3, resource: v(texDiv) },
+            { binding: 4, resource: fluidSampler },
+        ],
+    });
+
+    // Jacobi: Read PressA, Read Div, Write PressB
+    bgFluidJacobiA = device.createBindGroup({
+        layout: bgLayout1,
+        entries: [
+            { binding: 0, resource: v(texPressA) },
+            { binding: 1, resource: v(texVelA) },
+            { binding: 2, resource: v(texDiv) },
+            { binding: 3, resource: v(texPressB) },
+            { binding: 4, resource: fluidSampler },
+        ],
+    });
+
+    // Jacobi: Read PressB, Read Div, Write PressA
+    bgFluidJacobiB = device.createBindGroup({
+        layout: bgLayout1,
+        entries: [
+            { binding: 0, resource: v(texPressB) },
+            { binding: 1, resource: v(texVelA) },
+            { binding: 2, resource: v(texDiv) },
+            { binding: 3, resource: v(texPressA) },
+            { binding: 4, resource: fluidSampler },
+        ],
+    });
+
+    // Subtract: Read VelA, Read PressA, Write VelB
+    bgFluidSubA = device.createBindGroup({
+        layout: bgLayout1,
+        entries: [
+            { binding: 0, resource: v(texVelA) },
+            { binding: 1, resource: v(texVelB) },
+            { binding: 2, resource: v(texPressA) },
+            { binding: 3, resource: v(texDiv) },
+            { binding: 4, resource: fluidSampler },
+        ],
+    });
+
+    // For CA physics and rendering: Read VelA (final velocity)
+    bgFluidRenderA = device.createBindGroup({
+        layout: bgLayout1,
+        entries: [
+            { binding: 0, resource: v(texVelA) },
+            { binding: 1, resource: v(texVelB) },
+            { binding: 2, resource: v(texVelA) },
+            { binding: 3, resource: v(texDiv) },
+            { binding: 4, resource: fluidSampler },
+        ],
+    });
+
+    bgFluidRenderB = device.createBindGroup({
+        layout: bgLayout1,
+        entries: [
+            { binding: 0, resource: v(texVelB) },
+            { binding: 1, resource: v(texVelA) },
+            { binding: 2, resource: v(texVelB) },
+            { binding: 3, resource: v(texDiv) },
+            { binding: 4, resource: fluidSampler },
+        ],
+    });
+}
+
+function updateParams() {
+    const data = new ArrayBuffer(128);
+    const v = new DataView(data);
+
+    v.setUint32(0, W, true);
+    v.setUint32(4, H, true);
+    v.setUint32(8, frame, true);
+    v.setUint32(12, heatOn, true);
+
+    v.setFloat32(16, PARAMS.heatRate, true);
+    v.setFloat32(20, PARAMS.heatSpread, true);
+    v.setFloat32(24, PARAMS.coolRate, true);
+    v.setFloat32(28, PARAMS.radiantHeat, true);
+    v.setFloat32(32, PARAMS.heatSourceWidth, true);
+
+    v.setFloat32(36, PARAMS.fluidInfluence, true);
+    v.setFloat32(40, PARAMS.fluidScale, true);
+    v.setFloat32(44, PARAMS.fluidBuoyancy, true);
+    v.setFloat32(48, PARAMS.fluidDecay, true);
+
+    v.setFloat32(52, PARAMS.cohesionStrength, true);
+    v.setFloat32(56, PARAMS.cohesionRadius, true);
+
+    v.setFloat32(60, PARAMS.buoyancyScale, true);
+    v.setFloat32(64, PARAMS.accDiffusion, true);
+    v.setFloat32(68, PARAMS.accDecay, true);
+    v.setFloat32(72, PARAMS.velocityDamping, true);
+    v.setFloat32(76, PARAMS.velocityThreshold, true);
+    v.setFloat32(80, PARAMS.moveChanceScale, true);
+    v.setFloat32(84, PARAMS.surfaceEnergy, true);
+    v.setFloat32(88, PARAMS.brownianStrength, true);
+
+    v.setFloat32(92, Math.random() * 10000, true);  // seed
+    v.setUint32(96, showVelocity, true);
+
+    device.queue.writeBuffer(paramsBuffer, 0, data);
+}
+
+function tick(encoder) {
+    frame++;
+    updateParams();
+
+    const fwg = Math.ceil(FW / 16);
+    const fhg = Math.ceil(FH / 16);
+    const cwg = Math.ceil(W / 16);
+    const chg = Math.ceil(H / 16);
+
+    const bgCA = (frame % 2 === 0) ? bgCA_A : bgCA_B;
+
+    // === FLUID SIMULATION ===
+
+    // 1. Add forces from wax buoyancy: VelA -> VelB
+    {
+        const pass = encoder.beginComputePass();
+        pass.setPipeline(pipelineFluidForce);
+        pass.setBindGroup(0, bgCA, [0]);
+        pass.setBindGroup(1, bgFluidForce);
+        pass.dispatchWorkgroups(fwg, fhg);
+        pass.end();
+    }
+
+    // 2. Advect: VelB -> VelA
+    {
+        const pass = encoder.beginComputePass();
+        pass.setPipeline(pipelineFluidAdvect);
+        pass.setBindGroup(0, bgCA, [0]);
+        pass.setBindGroup(1, bgFluidAdvectAB);
+        pass.dispatchWorkgroups(fwg, fhg);
+        pass.end();
+    }
+
+    // 3. Compute divergence: VelA -> Div
+    {
+        const pass = encoder.beginComputePass();
+        pass.setPipeline(pipelineFluidDiv);
+        pass.setBindGroup(0, bgCA, [0]);
+        pass.setBindGroup(1, bgFluidDivA);
+        pass.dispatchWorkgroups(fwg, fhg);
+        pass.end();
+    }
+
+    // 4. Jacobi pressure solve (12 iterations)
+    for (let i = 0; i < 12; i++) {
+        const pass = encoder.beginComputePass();
+        pass.setPipeline(pipelineFluidJacobi);
+        pass.setBindGroup(0, bgCA, [0]);
+        pass.setBindGroup(1, (i % 2 === 0) ? bgFluidJacobiA : bgFluidJacobiB);
+        pass.dispatchWorkgroups(fwg, fhg);
+        pass.end();
+    }
+
+    // 5. Subtract pressure gradient: VelA, PressA -> VelB
+    {
+        const pass = encoder.beginComputePass();
+        pass.setPipeline(pipelineFluidSubtract);
+        pass.setBindGroup(0, bgCA, [0]);
+        pass.setBindGroup(1, bgFluidSubA);
+        pass.dispatchWorkgroups(fwg, fhg);
+        pass.end();
+    }
+
+    // Copy VelB -> VelA for next frame and for CA to sample
+    encoder.copyTextureToTexture(
+        { texture: texVelB },
+        { texture: texVelA },
+        [FW, FH]
+    );
+
+    // === CA SIMULATION ===
+
+    // Temperature update
+    {
+        const pass = encoder.beginComputePass();
+        pass.setPipeline(pipelineTemp);
+        pass.setBindGroup(0, bgCA, [0]);
+        pass.setBindGroup(1, bgFluidRenderA);
+        pass.dispatchWorkgroups(cwg, chg);
+        pass.end();
+    }
+
+    // Forces + fluid coupling
+    {
+        const pass = encoder.beginComputePass();
+        pass.setPipeline(pipelineForces);
+        pass.setBindGroup(0, bgCA, [0]);
+        pass.setBindGroup(1, bgFluidRenderA);
+        pass.dispatchWorkgroups(cwg, chg);
+        pass.end();
+    }
+
+    // Movement (4 checkerboard passes)
+    for (let p = 0; p < 4; p++) {
+        const pass = encoder.beginComputePass();
+        pass.setPipeline(pipelineMove);
+        pass.setBindGroup(0, bgCA, [p * 256]);
+        pass.setBindGroup(1, bgFluidRenderA);
+        pass.dispatchWorkgroups(cwg, chg);
+        pass.end();
+    }
+}
+
+function loop() {
+    if (!device) return;
+
+    const encoder = device.createCommandEncoder();
+
+    if (!paused) {
+        for (let i = 0; i < ff; i++) {
+            tick(encoder);
+        }
+    }
+
+    // Render
+    const textureView = context.getCurrentTexture().createView();
+    const renderPass = encoder.beginRenderPass({
+        colorAttachments: [{
+            view: textureView,
+            clearValue: { r: 0, g: 0, b: 0, a: 1 },
+            loadOp: 'clear',
+            storeOp: 'store',
+        }],
+    });
+
+    renderPass.setPipeline(pipelineRender);
+    const renderBgCA = (frame % 2 === 0) ? bgCA_A : bgCA_B;
+    renderPass.setBindGroup(0, renderBgCA, [0]);
+    renderPass.setBindGroup(1, bgFluidRenderA);
+    renderPass.draw(6);
+    renderPass.end();
+
+    device.queue.submit([encoder.finish()]);
+
+    document.getElementById('stats').innerHTML =
+        `Tick: ${frame} | Grid: ${W}x${H} | Fluid: ${FW}x${FH} | ${showVelocity ? 'VEL' : 'WAX'}`;
+
+    requestAnimationFrame(loop);
+}
+
+// ============================================
+// UI
+// ============================================
+function setupUI() {
+    const container = document.getElementById('params');
+    container.innerHTML = '';
+
+    for (const key in PARAM_CONFIG) {
+        const config = PARAM_CONFIG[key];
+
+        if (config.section) {
+            const section = document.createElement('div');
+            section.className = 'section';
+            section.textContent = config.section;
+            container.appendChild(section);
+        }
+
+        const row = document.createElement('div');
+        row.className = 'param-row';
+
+        const label = document.createElement('label');
+        label.textContent = key;
+
+        const input = document.createElement('input');
+        input.type = 'number';
+        input.step = config.step;
+        input.value = PARAMS[key];
+
+        const hint = document.createElement('span');
+        hint.className = 'range-hint';
+        hint.textContent = `(${config.min}-${config.max})`;
+
+        input.onchange = () => {
+            let val = parseFloat(input.value);
+            if (config.round) val = Math.round(val);
+            PARAMS[key] = val;
+            if (key === 'cellSize' || key === 'initialWaxHeight') {
+                resize();
+            }
+        };
+
+        row.appendChild(label);
+        row.appendChild(input);
+        row.appendChild(hint);
+        container.appendChild(row);
+    }
+}
+
+// Controls
+document.getElementById('toggleParams').onclick = () => {
+    const p = document.getElementById('params');
+    const btn = document.getElementById('toggleParams');
+    p.style.display = p.style.display === 'none' ? '' : 'none';
+    btn.textContent = p.style.display === 'none' ? 'Show' : 'Hide';
+};
+
+document.getElementById('ff').onclick = (e) => {
+    ff = ff === 1 ? 10 : ff === 10 ? 100 : 1;
+    e.target.textContent = ff + 'x';
+};
+
+document.getElementById('pp').onclick = (e) => {
+    paused = !paused;
+    e.target.textContent = paused ? '▶' : '||';
+};
+
+document.getElementById('heat').onclick = (e) => {
+    heatOn = 1 - heatOn;
+    e.target.textContent = heatOn ? 'Heat ON' : 'Heat OFF';
+};
+
+document.getElementById('reset').onclick = () => resize();
+
+document.getElementById('toggleView').onclick = (e) => {
+    showVelocity = 1 - showVelocity;
+    e.target.textContent = showVelocity ? 'View: VEL' : 'View: WAX';
+};
+
+window.addEventListener('keydown', (e) => {
+    if (e.code === 'Space') { paused = !paused; e.preventDefault(); }
+    if (e.code === 'KeyR') resize();
+    if (e.code === 'KeyV') { showVelocity = 1 - showVelocity; }
+});
+
+init();
+</script>
+</body>
+</html>

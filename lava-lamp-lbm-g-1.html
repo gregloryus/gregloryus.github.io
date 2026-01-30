@@ -1,0 +1,418 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Lava Lamp LBM (Fluid Dynamics)</title>
+    <style>
+        body { margin: 0; overflow: hidden; background: #000; }
+        canvas { display: block; width: 100vw; height: 100vh; image-rendering: pixelated; }
+        #controls { position: absolute; top: 10px; left: 10px; color: #888; font-family: monospace; background: rgba(0,0,0,0.8); padding: 10px; pointer-events: none; }
+    </style>
+</head>
+<body>
+    <div id="controls">
+        Lava Lamp: Lattice Boltzmann (Track B)<br>
+        Resolution: <span id="res-display"></span><br>
+        <span id="status">Simulating Fluid...</span>
+    </div>
+    <canvas id="glcanvas"></canvas>
+
+    <script id="vs" type="x-shader/x-vertex">
+        #version 300 es
+        in vec4 position;
+        out vec2 uv;
+        void main() {
+            uv = position.xy * 0.5 + 0.5;
+            gl_Position = position;
+        }
+    </script>
+
+    <script id="fs-lbm" type="x-shader/x-fragment">
+        #version 300 es
+        precision highp float;
+
+        // We use 3 Textures to store the 9 Lattice Directions (D2Q9) + Scalars
+        // Tex0: f0, f1, f2, f3 (Center, E, N, W) - Wait, D2Q9 mapping below
+        // Tex1: f4, f5, f6, f7 (S, NE, NW, SW)
+        // Tex2: f8, Rho, Temp, Wax (SE, Density, Temperature, WaxConcentration)
+        
+        uniform sampler2D uTex0;
+        uniform sampler2D uTex1;
+        uniform sampler2D uTex2;
+        uniform vec2 uRes;
+        uniform float uTime;
+
+        // Output to 3 textures simultaneously
+        layout(location = 0) out vec4 outTex0;
+        layout(location = 1) out vec4 outTex1;
+        layout(location = 2) out vec4 outTex2;
+
+        in vec2 uv;
+
+        // --- LBM CONSTANTS ---
+        const float omega = 1.6; // Relaxation parameter (1.0 < w < 2.0). High = Low Viscosity.
+        
+        // Direction vectors for D2Q9
+        // 0:Center, 1:E, 2:N, 3:W, 4:S, 5:NE, 6:NW, 7:SW, 8:SE
+        const vec2 e[9] = vec2[](
+            vec2(0,0), vec2(1,0), vec2(0,1), vec2(-1,0), vec2(0,-1),
+            vec2(1,1), vec2(-1,1), vec2(-1,-1), vec2(1,-1)
+        );
+
+        // Weights
+        const float w0 = 4.0/9.0;
+        const float w1 = 1.0/9.0;
+        const float w2 = 1.0/36.0;
+
+        float getWeight(int i) {
+            if (i==0) return w0;
+            if (i<=4) return w1;
+            return w2;
+        }
+
+        // Helper to read f_i from the correct texture channel
+        float readF(int i, vec2 pos) {
+            vec4 t0 = texture(uTex0, pos);
+            vec4 t1 = texture(uTex1, pos);
+            vec4 t2 = texture(uTex2, pos);
+            
+            if(i==0) return t0.r;
+            if(i==1) return t0.g;
+            if(i==2) return t0.b;
+            if(i==3) return t0.a;
+            if(i==4) return t1.r;
+            if(i==5) return t1.g;
+            if(i==6) return t1.b;
+            if(i==7) return t1.a;
+            if(i==8) return t2.r;
+            return 0.0;
+        }
+
+        void main() {
+            vec2 px = 1.0 / uRes;
+            
+            // --- 1. STREAMING STEP (Pull from neighbors) ---
+            float f[9];
+            for(int i=0; i<9; i++) {
+                // To get f_i at current pixel, we read f_i from the neighbor 
+                // in the OPPOSITE direction (-e[i])
+                f[i] = readF(i, uv - e[i] * px);
+            }
+
+            // --- 2. MACROSCOPIC VARIABLES ---
+            float rho = 0.0;
+            vec2 u = vec2(0.0);
+            for(int i=0; i<9; i++) {
+                rho += f[i];
+                u += e[i] * f[i];
+            }
+            
+            // Normalize velocity (safeguard against zero density)
+            if (rho > 0.001) u /= rho;
+            else { u = vec2(0.0); rho = 1.0; }
+
+            // Retrieve Scalars (advected semi-lagrangian style ideally, but local here for simplicity)
+            // Ideally we stream these too, but let's read from center for diffusion base
+            vec4 centerData = texture(uTex2, uv);
+            float T = centerData.b;
+            float Wax = centerData.a;
+            
+            // Advect Scalars using the computed velocity 'u'
+            // Simple backtrace approximation
+            vec2 backPos = uv - u * px * 2.0; // *2.0 speedup
+            vec4 backData = texture(uTex2, backPos);
+            T = backData.b;
+            Wax = backData.a;
+
+            // --- 3. PHYSICS FORCING (The Lava Lamp Logic) ---
+            
+            // Buoyancy: Modifies velocity.
+            // Hot wax rises (T -> 1.0). Cold wax sinks (T -> 0.0).
+            // Wax creates drag? Maybe.
+            // Force F = (0, alpha * (T - T_ambient))
+            
+            float T_ambient = 0.0; // Base temp
+            float lift = 0.006 * (T - T_ambient);
+            
+            // Gravity: Wax is heavier than oil? Or lighter?
+            // Let's say Wax is heavier, but expands when hot.
+            // Net force: Up if Hot, Down if Cold.
+            u.y += lift;
+            
+            // --- 4. COLLISION STEP (BGK) ---
+            float f_eq[9];
+            float u_sq = dot(u, u);
+            float c_sq = 1.0/3.0; // Speed of sound squared
+            
+            for(int i=0; i<9; i++) {
+                float eu = dot(e[i], u);
+                f_eq[i] = getWeight(i) * rho * (1.0 + 3.0*eu + 4.5*eu*eu - 1.5*u_sq);
+                
+                // Relax
+                f[i] = mix(f[i], f_eq[i], omega);
+            }
+
+            // --- 5. SCALAR DYNAMICS ---
+            
+            // Thermal Diffusion
+            // Simple 5-point laplacian check on T
+            float tN = texture(uTex2, uv + vec2(0, px.y)).b;
+            float tS = texture(uTex2, uv - vec2(0, px.y)).b;
+            float tE = texture(uTex2, uv + vec2(px.x, 0)).b;
+            float tW = texture(uTex2, uv - vec2(px.x, 0)).b;
+            float lapT = tN + tS + tE + tW - 4.0 * T;
+            T += 0.002 * lapT; // Diffusion rate
+
+            // Boundary Heating
+            if (uv.y < 0.02) T = mix(T, 1.0, 0.2); // Heater
+            if (uv.y > 0.98) T = mix(T, 0.0, 0.1); // Cooler
+
+            // Wax Sharpening (Phase Field Surrogate)
+            // Push Wax towards 0.0 or 1.0 to prevent diffusion "fog"
+            // This is the "Anti-Diffusion"
+            if (Wax > 0.01 && Wax < 0.99) {
+                // Nudge towards nearest extreme
+                float target = (Wax > 0.5) ? 1.0 : 0.0;
+                Wax = mix(Wax, target, 0.02); // Sharpening strength
+            }
+            // Clamp
+            Wax = clamp(Wax, 0.0, 1.0);
+
+            // --- OUTPUT ---
+            // Pack distributions back into textures
+            outTex0 = vec4(f[0], f[1], f[2], f[3]);
+            outTex1 = vec4(f[4], f[5], f[6], f[7]);
+            outTex2 = vec4(f[8], rho, T, Wax);
+        }
+    </script>
+
+    <script id="fs-render" type="x-shader/x-fragment">
+        #version 300 es
+        precision highp float;
+        uniform sampler2D uTex2; // Contains Rho, T, Wax
+        in vec2 uv;
+        out vec4 fragColor;
+
+        void main() {
+            vec4 data = texture(uTex2, uv);
+            float rho = data.g; // density (fluid pressure visualization)
+            float temp = data.b;
+            float wax = data.a;
+
+            vec3 cBackground = vec3(0.05, 0.05, 0.1) * (0.8 + 0.2 * rho); // Visualize fluid pressure subtly
+            vec3 cWaxCold = vec3(0.2, 0.0, 0.2);
+            vec3 cWaxHot = vec3(1.0, 0.4, 0.1);
+            
+            vec3 cWax = mix(cWaxCold, cWaxHot, temp);
+            
+            // Soft Blob Render
+            float alpha = smoothstep(0.4, 0.8, wax);
+            vec3 color = mix(cBackground, cWax, alpha);
+            
+            // Add glow
+            if(wax > 0.2) color += cWax * 0.3 * temp;
+
+            fragColor = vec4(color, 1.0);
+        }
+    </script>
+
+    <script>
+        // --- CONFIG ---
+        const SCALE = 4; // LBM is expensive; run at lower res
+        // --------------
+
+        const canvas = document.getElementById('glcanvas');
+        const gl = canvas.getContext('webgl2');
+
+        if (!gl) alert("WebGL 2.0 needed");
+        if (!gl.getExtension('EXT_color_buffer_float')) alert('Need EXT_color_buffer_float');
+
+        // Check for MRT support (Multiple Render Targets)
+        const maxDrawBuffers = gl.getParameter(gl.MAX_DRAW_BUFFERS);
+        if (maxDrawBuffers < 3) alert("Need GPU supporting 3 DrawBuffers");
+
+        function createShader(gl, type, source) {
+            const shader = gl.createShader(type);
+            gl.shaderSource(shader, source);
+            gl.compileShader(shader);
+            if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+                console.error(gl.getShaderInfoLog(shader));
+                return null;
+            }
+            return shader;
+        }
+
+        function createProgram(gl, vsSrc, fsSrc) {
+            const vs = createShader(gl, gl.VERTEX_SHADER, vsSrc);
+            const fs = createShader(gl, gl.FRAGMENT_SHADER, fsSrc);
+            const prog = gl.createProgram();
+            gl.attachShader(prog, vs);
+            gl.attachShader(prog, fs);
+            gl.linkProgram(prog);
+            return prog;
+        }
+
+        const vsSrc = document.getElementById('vs').text.trim();
+        const fsLbmSrc = document.getElementById('fs-lbm').text.trim();
+        const fsRenderSrc = document.getElementById('fs-render').text.trim();
+
+        const progLBM = createProgram(gl, vsSrc, fsLbmSrc);
+        const progRender = createProgram(gl, vsSrc, fsRenderSrc);
+
+        const quadBuffer = gl.createBuffer();
+        gl.bindBuffer(gl.ARRAY_BUFFER, quadBuffer);
+        gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 1, -1, -1, 1, -1, 1, 1, -1, 1, 1]), gl.STATIC_DRAW);
+
+        const vao = gl.createVertexArray();
+        gl.bindVertexArray(vao);
+        gl.enableVertexAttribArray(0);
+        gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
+
+        let simWidth, simHeight;
+        // We need Double Buffering for 3 textures = 6 textures total
+        let texSetA = [], texSetB = []; 
+        let fboA, fboB;
+
+        function createTex() {
+            const t = gl.createTexture();
+            gl.bindTexture(gl.TEXTURE_2D, t);
+            gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA16F, simWidth, simHeight, 0, gl.RGBA, gl.FLOAT, null);
+            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR); // Linear for smoother advection
+            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+            return t;
+        }
+
+        function initSimulation() {
+            simWidth = Math.ceil(window.innerWidth / SCALE);
+            simHeight = Math.ceil(window.innerHeight / SCALE);
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+            document.getElementById('res-display').innerText = `${simWidth}x${simHeight}`;
+
+            // Clean up
+            texSetA.forEach(t => gl.deleteTexture(t));
+            texSetB.forEach(t => gl.deleteTexture(t));
+            if(fboA) gl.deleteFramebuffer(fboA);
+            if(fboB) gl.deleteFramebuffer(fboB);
+            
+            texSetA = [createTex(), createTex(), createTex()];
+            texSetB = [createTex(), createTex(), createTex()];
+
+            // Initial Condition
+            const size = simWidth * simHeight * 4;
+            const data0 = new Float32Array(size); // f0..f3
+            const data1 = new Float32Array(size); // f4..f7
+            const data2 = new Float32Array(size); // f8, rho, T, Wax
+            
+            // Equilibrium weights
+            const w0=4/9, w1=1/9, w2=1/36;
+
+            for(let i=0; i<size/4; i++) {
+                // Initialize uniform density rho=1.0
+                data0[i*4+0] = w0; // f0
+                data0[i*4+1] = w1; // f1
+                data0[i*4+2] = w1; // f2
+                data0[i*4+3] = w1; // f3
+                
+                data1[i*4+0] = w1; // f4
+                data1[i*4+1] = w2; // f5
+                data1[i*4+2] = w2; // f6
+                data1[i*4+3] = w2; // f7
+                
+                data2[i*4+0] = w2; // f8
+                data2[i*4+1] = 1.0; // Rho
+                
+                // Temp & Wax Setup
+                const x = (i % simWidth);
+                const y = Math.floor(i / simWidth);
+                
+                let wax = 0.0;
+                let temp = 0.0;
+                
+                // Blob at bottom
+                if (y < simHeight * 0.15) {
+                    // Wavy surface
+                    if (y < simHeight * (0.1 + 0.05 * Math.sin(x*0.05))) {
+                        wax = 1.0;
+                        temp = 0.0; // Start cold
+                    }
+                }
+                
+                data2[i*4+2] = temp;
+                data2[i*4+3] = wax;
+            }
+
+            // Upload Init Data to Set A
+            gl.bindTexture(gl.TEXTURE_2D, texSetA[0]);
+            gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, simWidth, simHeight, gl.RGBA, gl.FLOAT, data0);
+            gl.bindTexture(gl.TEXTURE_2D, texSetA[1]);
+            gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, simWidth, simHeight, gl.RGBA, gl.FLOAT, data1);
+            gl.bindTexture(gl.TEXTURE_2D, texSetA[2]);
+            gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, simWidth, simHeight, gl.RGBA, gl.FLOAT, data2);
+
+            // Create FBOs
+            fboA = gl.createFramebuffer();
+            gl.bindFramebuffer(gl.FRAMEBUFFER, fboA);
+            gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, texSetA[0], 0);
+            gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT1, gl.TEXTURE_2D, texSetA[1], 0);
+            gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT2, gl.TEXTURE_2D, texSetA[2], 0);
+
+            fboB = gl.createFramebuffer();
+            gl.bindFramebuffer(gl.FRAMEBUFFER, fboB);
+            gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, texSetB[0], 0);
+            gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT1, gl.TEXTURE_2D, texSetB[1], 0);
+            gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT2, gl.TEXTURE_2D, texSetB[2], 0);
+            
+            gl.drawBuffers([gl.COLOR_ATTACHMENT0, gl.COLOR_ATTACHMENT1, gl.COLOR_ATTACHMENT2]);
+            gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+        }
+
+        window.addEventListener('resize', initSimulation);
+        initSimulation();
+
+        function render() {
+            gl.viewport(0, 0, simWidth, simHeight);
+
+            // 1. LBM Step (Read A -> Write B)
+            gl.bindFramebuffer(gl.FRAMEBUFFER, fboB);
+            gl.drawBuffers([gl.COLOR_ATTACHMENT0, gl.COLOR_ATTACHMENT1, gl.COLOR_ATTACHMENT2]);
+            
+            gl.useProgram(progLBM);
+            
+            gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, texSetA[0]);
+            gl.uniform1i(gl.getUniformLocation(progLBM, "uTex0"), 0);
+            
+            gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_2D, texSetA[1]);
+            gl.uniform1i(gl.getUniformLocation(progLBM, "uTex1"), 1);
+            
+            gl.activeTexture(gl.TEXTURE2); gl.bindTexture(gl.TEXTURE_2D, texSetA[2]);
+            gl.uniform1i(gl.getUniformLocation(progLBM, "uTex2"), 2);
+            
+            gl.uniform2f(gl.getUniformLocation(progLBM, "uRes"), simWidth, simHeight);
+            
+            gl.bindVertexArray(vao);
+            gl.drawArrays(gl.TRIANGLES, 0, 6);
+
+            // Swap
+            let temp = texSetA; texSetA = texSetB; texSetB = temp;
+            let tempFbo = fboA; fboA = fboB; fboB = tempFbo;
+
+            // 2. Render Step (Read Current A)
+            gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+            gl.viewport(0, 0, canvas.width, canvas.height);
+            
+            gl.useProgram(progRender);
+            gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, texSetA[2]); // Tex2 has scalars
+            gl.uniform1i(gl.getUniformLocation(progRender, "uTex2"), 0);
+            
+            gl.drawArrays(gl.TRIANGLES, 0, 6);
+
+            requestAnimationFrame(render);
+        }
+        requestAnimationFrame(render);
+    </script>
+</body>
+</html>

@@ -1,0 +1,1401 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Lava Lamp LBM v13 (WebGL 2)</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        html, body { height: 100%; overflow: hidden; background: #0a0a12; }
+        #canvas { display: block; }
+        #ui { position: absolute; top: 4px; left: 6px; color: #fff; font: 9px monospace; background: rgba(0,0,0,0.8); padding: 4px 6px; border-radius: 3px; }
+        #controls { position: absolute; top: 4px; right: 6px; display: flex; gap: 2px; }
+        #controls button { padding: 3px 8px; background: #222; color: #fff; border: 1px solid #555; cursor: pointer; font: 9px monospace; }
+        #params { position: absolute; top: 28px; left: 0; right: 0; color: #ccc; font: 7px monospace; background: rgba(0,0,0,0.9); padding: 4px 8px; display: flex; flex-wrap: wrap; gap: 2px 12px; align-items: center; }
+        #params label { display: flex; align-items: center; gap: 3px; white-space: nowrap; }
+        #params input[type="number"] { width: 45px; background: #222; color: #fff; border: 1px solid #444; padding: 1px 2px; font: 7px monospace; }
+        #params .section { color: #666; font-weight: bold; margin-left: 6px; }
+        #params .section:first-child { margin-left: 0; }
+    </style>
+</head>
+<body>
+<canvas id="canvas"></canvas>
+<div id="ui">
+    <div>Lava Lamp LBM v13 (Heat Advection)</div>
+    <div id="stats"></div>
+</div>
+<div id="controls">
+    <button id="ff">1x</button>
+    <button id="pp">||</button>
+    <button id="rr">Reset</button>
+    <button id="toggleParams">Params</button>
+</div>
+<div id="params">
+    <span class="section">Shan-Chen</span>
+    <label>G_AA<input type="number" id="p_gAA" step="0.5" value="-7.0" title="Wax cohesion (more negative = denser, less wispy wax)"></label>
+    <label>G_BB<input type="number" id="p_gBB" step="0.5" value="0"></label>
+    <label>G_AB<input type="number" id="p_gAB" step="0.5" value="7.0" title="Cross-repulsion (higher = sharper wax/water boundary)"></label>
+    <span class="section">Density</span>
+    <label>Wax<input type="number" id="p_rhoWax" step="0.05" value="1.2"></label>
+    <label>Water<input type="number" id="p_rhoWater" step="0.05" value="1.0"></label>
+    <label>WaxH<input type="number" id="p_waxH" step="0.02" value="0.15"></label>
+    <span class="section">Viscosity</span>
+    <label>TauWaxC<input type="number" id="p_tauWaxC" step="0.1" value="1.4"></label>
+    <label>TauWaxH<input type="number" id="p_tauWaxH" step="0.05" value="0.9"></label>
+    <label>TauWater<input type="number" id="p_tauWater" step="0.05" value="1.0"></label>
+    <label>TransT<input type="number" id="p_transT" step="0.05" value="0.5"></label>
+    <label>Sharp<input type="number" id="p_sharp" step="1" value="15"></label>
+    <span class="section">Forces</span>
+    <label>Buoy<input type="number" id="p_buoy" step="0.001" value="0.012"></label>
+    <label>Grav<input type="number" id="p_grav" step="0.0001" value="0.0003"></label>
+    <label>BuoyT<input type="number" id="p_buoyT" step="0.05" value="0.5"></label>
+    <label>BuoySharp<input type="number" id="p_buoySharp" step="1" value="20"></label>
+    <span class="section">Temp</span>
+    <label>Heat<input type="number" id="p_heatR" step="0.001" value="0.005"></label>
+    <label>Cool<input type="number" id="p_coolR" step="0.001" value="0.004"></label>
+    <label>Diff<input type="number" id="p_diffuse" step="0.01" value="0.02"></label>
+    <label>WaxT0<input type="number" id="p_initWaxT" step="0.05" value="0.2"></label>
+    <label>WaterT0<input type="number" id="p_initWaterT" step="0.05" value="0.35"></label>
+    <label>ThermExp<input type="number" id="p_thermExp" step="0.05" value="0.2" title="Thermal expansion (hot wax weighs less, 0.2 = 20% lighter at max temp)"></label>
+    <span class="section">Zones</span>
+    <label>HeatY<input type="number" id="p_heatZone" step="0.02" value="0.85"></label>
+    <label>HeatHF<input type="number" id="p_heatFall" step="0.5" value="2"></label>
+    <label>CoolY<input type="number" id="p_coolZone" step="0.02" value="0.25"></label>
+    <span class="section">Other</span>
+    <label>Cell<input type="number" id="p_cell" step="1" value="4"></label>
+</div>
+
+<!-- Vertex shader - shared by all passes -->
+<script id="vs-quad" type="x-shader/x-vertex">#version 300 es
+in vec2 a_position;
+out vec2 v_texCoord;
+void main() {
+    v_texCoord = a_position * 0.5 + 0.5;
+    gl_Position = vec4(a_position, 0.0, 1.0);
+}
+</script>
+
+<!-- Initialization shader -->
+<script id="fs-init" type="x-shader/x-fragment">#version 300 es
+precision highp float;
+in vec2 v_texCoord;
+
+uniform vec2 u_resolution;
+uniform float u_rhoWax;
+uniform float u_rhoWater;
+uniform float u_waxHeightFrac;
+uniform float u_initWaxTemp;
+uniform float u_initWaterTemp;
+uniform float u_seed;
+
+layout(location = 0) out vec4 fA_0123;
+layout(location = 1) out vec4 fA_4567;
+layout(location = 2) out vec4 fA_8_temp;
+layout(location = 3) out vec4 fB_0123;
+layout(location = 4) out vec4 fB_4567;
+layout(location = 5) out vec4 fB_8_macro;
+
+// D2Q9 weights
+const float w0 = 4.0 / 9.0;
+const float w1 = 1.0 / 9.0;
+const float w5 = 1.0 / 36.0;
+
+// Simple hash for noise
+float hash(vec2 p) {
+    return fract(sin(dot(p + u_seed, vec2(127.1, 311.7))) * 43758.5453);
+}
+
+void main() {
+    vec2 pos = v_texCoord;
+    float y = pos.y;  // WebGL: y=0 is BOTTOM, y=1 is TOP
+
+    // Wax at bottom, water on top
+    // waxHeightFrac = 0.15 means wax fills bottom 15%
+    // Interface is at y = 0.15 (waxHeightFrac from bottom)
+    float interfaceY = u_waxHeightFrac;  // 0.15
+    float interfaceWidth = 3.0 / u_resolution.y;
+
+    // Smooth blend: blend=1 below interface (wax), blend=0 above (water)
+    float distFromInterface = interfaceY - y;  // positive below interface, negative above
+    float blend = 0.5 * (1.0 + tanh(distFromInterface / interfaceWidth));
+
+    // Add small noise at initialization
+    float noise = (hash(pos * u_resolution) - 0.5) * 0.02;
+
+    float rhoA = blend * u_rhoWax * (1.0 + noise);
+    float rhoB = (1.0 - blend) * u_rhoWater * (1.0 + noise);
+    float temp = blend * u_initWaxTemp + (1.0 - blend) * u_initWaterTemp;
+
+    // Initialize at equilibrium (velocity = 0)
+    // f_eq = w_k * rho * (1 + 3*cu + 4.5*cu^2 - 1.5*u^2) with u=0 => f_eq = w_k * rho
+
+    // Wax distributions
+    fA_0123 = vec4(w0 * rhoA, w1 * rhoA, w1 * rhoA, w1 * rhoA);
+    fA_4567 = vec4(w1 * rhoA, w5 * rhoA, w5 * rhoA, w5 * rhoA);
+    fA_8_temp = vec4(w5 * rhoA, temp, 0.0, 0.0);
+
+    // Water distributions
+    fB_0123 = vec4(w0 * rhoB, w1 * rhoB, w1 * rhoB, w1 * rhoB);
+    fB_4567 = vec4(w1 * rhoB, w5 * rhoB, w5 * rhoB, w5 * rhoB);
+    fB_8_macro = vec4(w5 * rhoB, 0.0, 0.0, 0.0);
+}
+</script>
+
+<!-- Macroscopic quantities computation -->
+<script id="fs-macro" type="x-shader/x-fragment">#version 300 es
+precision highp float;
+in vec2 v_texCoord;
+
+uniform sampler2D u_fA_0123;
+uniform sampler2D u_fA_4567;
+uniform sampler2D u_fA_8_temp;
+uniform sampler2D u_fB_0123;
+uniform sampler2D u_fB_4567;
+uniform sampler2D u_fB_8_macro;
+
+// Output: rhoA, rhoB, ux, uy in one texture; psiA, psiB, temp, spare in another
+layout(location = 0) out vec4 macro;  // rhoA, rhoB, ux, uy
+layout(location = 1) out vec4 psiTemp; // psiA, psiB, temp, spare
+
+// D2Q9 velocities: cx = [0, 1, 0, -1, 0, 1, -1, -1, 1]
+//                  cy = [0, 0, -1, 0, 1, -1, -1, 1, 1]
+// Note: in texture coords, y increases upward, so cy[2]=-1 means down in screen
+
+const vec2 c[9] = vec2[9](
+    vec2(0, 0),   // 0: rest
+    vec2(1, 0),   // 1: right
+    vec2(0, -1),  // 2: down (in screen coords)
+    vec2(-1, 0),  // 3: left
+    vec2(0, 1),   // 4: up (in screen coords)
+    vec2(1, -1),  // 5: right-down
+    vec2(-1, -1), // 6: left-down
+    vec2(-1, 1),  // 7: left-up
+    vec2(1, 1)    // 8: right-up
+);
+
+float computePsi(float rho) {
+    return 1.0 - exp(-rho);
+}
+
+void main() {
+    vec4 fA0123 = texture(u_fA_0123, v_texCoord);
+    vec4 fA4567 = texture(u_fA_4567, v_texCoord);
+    vec4 fA8t = texture(u_fA_8_temp, v_texCoord);
+
+    vec4 fB0123 = texture(u_fB_0123, v_texCoord);
+    vec4 fB4567 = texture(u_fB_4567, v_texCoord);
+    vec4 fB8m = texture(u_fB_8_macro, v_texCoord);
+
+    // Extract distributions
+    float fA[9];
+    fA[0] = fA0123.x; fA[1] = fA0123.y; fA[2] = fA0123.z; fA[3] = fA0123.w;
+    fA[4] = fA4567.x; fA[5] = fA4567.y; fA[6] = fA4567.z; fA[7] = fA4567.w;
+    fA[8] = fA8t.x;
+
+    float fB[9];
+    fB[0] = fB0123.x; fB[1] = fB0123.y; fB[2] = fB0123.z; fB[3] = fB0123.w;
+    fB[4] = fB4567.x; fB[5] = fB4567.y; fB[6] = fB4567.z; fB[7] = fB4567.w;
+    fB[8] = fB8m.x;
+
+    // Compute densities
+    float rhoA = 0.0, rhoB = 0.0;
+    vec2 momA = vec2(0.0), momB = vec2(0.0);
+
+    for (int k = 0; k < 9; k++) {
+        rhoA += fA[k];
+        rhoB += fB[k];
+        momA += fA[k] * c[k];
+        momB += fB[k] * c[k];
+    }
+
+    // Shared velocity
+    float rhoTotal = rhoA + rhoB;
+    vec2 u = vec2(0.0);
+    if (rhoTotal > 0.001) {
+        u = (momA + momB) / rhoTotal;
+    }
+
+    // Pseudopotentials
+    float psiA = rhoA > 0.001 ? computePsi(rhoA) : 0.0;
+    float psiB = rhoB > 0.001 ? computePsi(rhoB) : 0.0;
+
+    // Temperature stored in fA_8_temp.y
+    float temp = fA8t.y;
+
+    macro = vec4(rhoA, rhoB, u.x, u.y);
+    psiTemp = vec4(psiA, psiB, temp, 0.0);
+}
+</script>
+
+<!-- Force computation -->
+<script id="fs-force" type="x-shader/x-fragment">#version 300 es
+precision highp float;
+in vec2 v_texCoord;
+
+uniform sampler2D u_macro;
+uniform sampler2D u_psiTemp;
+uniform vec2 u_resolution;
+uniform vec2 u_texelSize;
+
+// Shan-Chen parameters
+uniform float u_G_AA;
+uniform float u_G_BB;
+uniform float u_G_AB;
+uniform float u_sharpness;
+uniform float u_transitionTemp;
+
+// Force parameters
+uniform float u_gravity;
+uniform float u_buoyancy;
+uniform float u_buoyThreshold;
+uniform float u_buoySharpness;
+uniform float u_thermalExpansion;  // Density reduction when hot (0 = disabled)
+
+layout(location = 0) out vec4 forceA; // Fx_A, Fy_A, spare, spare
+layout(location = 1) out vec4 forceB; // Fx_B, Fy_B, spare, spare
+
+// D2Q9 velocities and weights for neighbors (k=1..8)
+const vec2 c[9] = vec2[9](
+    vec2(0, 0),
+    vec2(1, 0), vec2(0, -1), vec2(-1, 0), vec2(0, 1),
+    vec2(1, -1), vec2(-1, -1), vec2(-1, 1), vec2(1, 1)
+);
+const float w[9] = float[9](
+    0.444444444, 0.111111111, 0.111111111, 0.111111111, 0.111111111,
+    0.027777778, 0.027777778, 0.027777778, 0.027777778
+);
+
+float sigmoid(float x) {
+    if (x > 15.0) return 1.0;
+    if (x < -15.0) return 0.0;
+    return 1.0 / (1.0 + exp(-x));
+}
+
+void main() {
+    vec4 m = texture(u_macro, v_texCoord);
+    vec4 pt = texture(u_psiTemp, v_texCoord);
+
+    float rhoA = m.x;
+    float rhoB = m.y;
+    float psiA = pt.x;
+    float psiB = pt.y;
+    float temp = pt.z;
+
+    // Compute Shan-Chen interaction sums
+    vec2 sumPsiA = vec2(0.0);
+    vec2 sumPsiB = vec2(0.0);
+
+    for (int k = 1; k < 9; k++) {
+        vec2 neighborCoord = v_texCoord + c[k] * u_texelSize;
+
+        // Handle boundaries: wrap X, clamp Y
+        neighborCoord.x = fract(neighborCoord.x);
+        neighborCoord.y = clamp(neighborCoord.y, 0.0, 1.0);
+
+        vec4 npt = texture(u_psiTemp, neighborCoord);
+        float nPsiA = npt.x;
+        float nPsiB = npt.y;
+
+        sumPsiA += w[k] * nPsiA * c[k];
+        sumPsiB += w[k] * nPsiB * c[k];
+    }
+
+    // Temperature-dependent cohesion (hot wax is less cohesive)
+    float cohesionReduction = sigmoid(u_sharpness * (temp - u_transitionTemp));
+    float effectiveG_AA = u_G_AA * (1.0 - 0.4 * cohesionReduction);
+
+    // DILUTE WAX CONSOLIDATION: boost cohesion when wax is spread thin
+    // This prevents wax from dissolving into wispy nothingness
+    // When rhoA is low (dilute), increase cohesion to pull it back together
+    float dilutionFactor = 1.0 - clamp(rhoA / 0.5, 0.0, 1.0);  // 1.0 when very dilute, 0 when dense
+    effectiveG_AA *= (1.0 + dilutionFactor * 0.5);  // Up to 50% stronger cohesion when dilute
+
+    // Shan-Chen forces
+    vec2 FA = -psiA * (effectiveG_AA * sumPsiA + u_G_AB * sumPsiB);
+    vec2 FB = -psiB * (u_G_AB * sumPsiA + u_G_BB * sumPsiB);
+
+    // Gravity and buoyancy for wax
+    // WebGL: +y is UP (toward top of screen), -y is DOWN (toward bottom)
+    if (rhoA > 0.1) {
+        // THERMAL EXPANSION: hot wax has lower effective density
+        // effectiveRho = rhoA * (1 - thermalExpansion * temp)
+        // This creates natural buoyancy - hot wax weighs less!
+        float thermalFactor = 1.0 - u_thermalExpansion * temp;
+        float effectiveRhoForGravity = rhoA * thermalFactor;
+
+        // Gravity pushes DOWN (negative y) - uses effective density
+        FA.y -= u_gravity * effectiveRhoForGravity;
+
+        // DIRECT BUOYANCY (threshold-gated) - can be used in addition to or instead of thermal expansion
+        // Set Buoy=0 and ThermExp>0 for pure density-based buoyancy
+        // Set Buoy>0 and ThermExp=0 for direct force buoyancy (original method)
+        // Or use both for stronger effect
+        float buoyancyGate = sigmoid(u_buoySharpness * (temp - u_buoyThreshold));
+        float excessTemp = max(0.0, temp - u_buoyThreshold);
+        float liftForce = u_buoyancy * rhoA * buoyancyGate * (1.0 + excessTemp * 3.0);
+        FA.y += liftForce;
+    }
+
+    forceA = vec4(FA, 0.0, 0.0);
+    forceB = vec4(FB, 0.0, 0.0);
+}
+</script>
+
+<!-- Collision shader for wax -->
+<script id="fs-collision-wax" type="x-shader/x-fragment">#version 300 es
+precision highp float;
+in vec2 v_texCoord;
+
+uniform sampler2D u_fA_0123;
+uniform sampler2D u_fA_4567;
+uniform sampler2D u_fA_8_temp;
+uniform sampler2D u_macro;
+uniform sampler2D u_psiTemp;
+uniform sampler2D u_forceA;
+
+uniform float u_tauWaxCold;
+uniform float u_tauWaxHot;
+uniform float u_sharpness;
+uniform float u_transitionTemp;
+
+layout(location = 0) out vec4 out_fA_0123;
+layout(location = 1) out vec4 out_fA_4567;
+layout(location = 2) out vec4 out_fA_8_temp;
+
+const vec2 c[9] = vec2[9](
+    vec2(0, 0),
+    vec2(1, 0), vec2(0, -1), vec2(-1, 0), vec2(0, 1),
+    vec2(1, -1), vec2(-1, -1), vec2(-1, 1), vec2(1, 1)
+);
+const float w[9] = float[9](
+    0.444444444, 0.111111111, 0.111111111, 0.111111111, 0.111111111,
+    0.027777778, 0.027777778, 0.027777778, 0.027777778
+);
+
+float sigmoid(float x) {
+    if (x > 15.0) return 1.0;
+    if (x < -15.0) return 0.0;
+    return 1.0 / (1.0 + exp(-x));
+}
+
+void main() {
+    vec4 fA0123 = texture(u_fA_0123, v_texCoord);
+    vec4 fA4567 = texture(u_fA_4567, v_texCoord);
+    vec4 fA8t = texture(u_fA_8_temp, v_texCoord);
+
+    vec4 m = texture(u_macro, v_texCoord);
+    vec4 pt = texture(u_psiTemp, v_texCoord);
+    vec4 frc = texture(u_forceA, v_texCoord);
+
+    float rhoA = m.x;
+    vec2 u = vec2(m.z, m.w);
+    float temp = pt.z;
+    vec2 FA = frc.xy;
+
+    // Temperature-dependent tau
+    float softness = sigmoid(u_sharpness * (temp - u_transitionTemp));
+    float tau = u_tauWaxCold * (1.0 - softness) + u_tauWaxHot * softness;
+    float invTau = 1.0 / tau;
+    float forceFactor = 1.0 - 0.5 * invTau;
+
+    // Skip if no wax
+    if (rhoA < 0.01) {
+        out_fA_0123 = fA0123;
+        out_fA_4567 = fA4567;
+        out_fA_8_temp = fA8t;
+        return;
+    }
+
+    // Velocity with force correction
+    vec2 v = u + FA / rhoA * 0.5;
+
+    // Velocity clamp
+    float uMagSq = dot(v, v);
+    if (uMagSq > 0.01) {
+        v *= 0.1 / sqrt(uMagSq);
+    }
+
+    float usq = dot(v, v);
+
+    // Extract distributions
+    float fA[9];
+    fA[0] = fA0123.x; fA[1] = fA0123.y; fA[2] = fA0123.z; fA[3] = fA0123.w;
+    fA[4] = fA4567.x; fA[5] = fA4567.y; fA[6] = fA4567.z; fA[7] = fA4567.w;
+    fA[8] = fA8t.x;
+
+    // BGK collision with Guo forcing
+    float newF[9];
+    for (int k = 0; k < 9; k++) {
+        float cu = dot(c[k], v);
+        float feq = w[k] * rhoA * (1.0 + 3.0 * cu + 4.5 * cu * cu - 1.5 * usq);
+
+        vec2 cv = c[k] - v;
+        float Fi = w[k] * forceFactor * (
+            (3.0 * cv.x + 9.0 * cu * c[k].x) * FA.x +
+            (3.0 * cv.y + 9.0 * cu * c[k].y) * FA.y
+        );
+
+        newF[k] = fA[k] - (fA[k] - feq) * invTau + Fi;
+    }
+
+    out_fA_0123 = vec4(newF[0], newF[1], newF[2], newF[3]);
+    out_fA_4567 = vec4(newF[4], newF[5], newF[6], newF[7]);
+    out_fA_8_temp = vec4(newF[8], temp, 0.0, 0.0); // Preserve temperature
+}
+</script>
+
+<!-- Collision shader for water -->
+<script id="fs-collision-water" type="x-shader/x-fragment">#version 300 es
+precision highp float;
+in vec2 v_texCoord;
+
+uniform sampler2D u_fB_0123;
+uniform sampler2D u_fB_4567;
+uniform sampler2D u_fB_8_macro;
+uniform sampler2D u_macro;
+uniform sampler2D u_forceB;
+
+uniform float u_tauWater;
+
+layout(location = 0) out vec4 out_fB_0123;
+layout(location = 1) out vec4 out_fB_4567;
+layout(location = 2) out vec4 out_fB_8_macro;
+
+const vec2 c[9] = vec2[9](
+    vec2(0, 0),
+    vec2(1, 0), vec2(0, -1), vec2(-1, 0), vec2(0, 1),
+    vec2(1, -1), vec2(-1, -1), vec2(-1, 1), vec2(1, 1)
+);
+const float w[9] = float[9](
+    0.444444444, 0.111111111, 0.111111111, 0.111111111, 0.111111111,
+    0.027777778, 0.027777778, 0.027777778, 0.027777778
+);
+
+void main() {
+    vec4 fB0123 = texture(u_fB_0123, v_texCoord);
+    vec4 fB4567 = texture(u_fB_4567, v_texCoord);
+    vec4 fB8m = texture(u_fB_8_macro, v_texCoord);
+
+    vec4 m = texture(u_macro, v_texCoord);
+    vec4 frc = texture(u_forceB, v_texCoord);
+
+    float rhoB = m.y;
+    vec2 u = vec2(m.z, m.w);
+    vec2 FB = frc.xy;
+
+    float invTau = 1.0 / u_tauWater;
+    float forceFactor = 1.0 - 0.5 * invTau;
+
+    // Skip if no water
+    if (rhoB < 0.01) {
+        out_fB_0123 = fB0123;
+        out_fB_4567 = fB4567;
+        out_fB_8_macro = fB8m;
+        return;
+    }
+
+    // Velocity with force correction
+    vec2 v = u + FB / rhoB * 0.5;
+
+    // Velocity clamp
+    float uMagSq = dot(v, v);
+    if (uMagSq > 0.01) {
+        v *= 0.1 / sqrt(uMagSq);
+    }
+
+    float usq = dot(v, v);
+
+    // Extract distributions
+    float fB[9];
+    fB[0] = fB0123.x; fB[1] = fB0123.y; fB[2] = fB0123.z; fB[3] = fB0123.w;
+    fB[4] = fB4567.x; fB[5] = fB4567.y; fB[6] = fB4567.z; fB[7] = fB4567.w;
+    fB[8] = fB8m.x;
+
+    // BGK collision with Guo forcing
+    float newF[9];
+    for (int k = 0; k < 9; k++) {
+        float cu = dot(c[k], v);
+        float feq = w[k] * rhoB * (1.0 + 3.0 * cu + 4.5 * cu * cu - 1.5 * usq);
+
+        vec2 cv = c[k] - v;
+        float Fi = w[k] * forceFactor * (
+            (3.0 * cv.x + 9.0 * cu * c[k].x) * FB.x +
+            (3.0 * cv.y + 9.0 * cu * c[k].y) * FB.y
+        );
+
+        newF[k] = fB[k] - (fB[k] - feq) * invTau + Fi;
+    }
+
+    out_fB_0123 = vec4(newF[0], newF[1], newF[2], newF[3]);
+    out_fB_4567 = vec4(newF[4], newF[5], newF[6], newF[7]);
+    out_fB_8_macro = vec4(newF[8], 0.0, 0.0, 0.0);
+}
+</script>
+
+<!-- Streaming shader for wax with temperature advection -->
+<script id="fs-stream-wax" type="x-shader/x-fragment">#version 300 es
+precision highp float;
+in vec2 v_texCoord;
+
+uniform sampler2D u_fA_0123;
+uniform sampler2D u_fA_4567;
+uniform sampler2D u_fA_8_temp;
+uniform vec2 u_texelSize;
+uniform vec2 u_resolution;
+
+layout(location = 0) out vec4 out_fA_0123;
+layout(location = 1) out vec4 out_fA_4567;
+layout(location = 2) out vec4 out_fA_8_temp;
+
+// Streaming: gather from neighbors
+// To get f_k at position x, we pull from position x - c_k
+const vec2 c[9] = vec2[9](
+    vec2(0, 0),
+    vec2(1, 0), vec2(0, -1), vec2(-1, 0), vec2(0, 1),
+    vec2(1, -1), vec2(-1, -1), vec2(-1, 1), vec2(1, 1)
+);
+// Opposite directions for bounce-back
+const int opposite[9] = int[9](0, 3, 4, 1, 2, 7, 8, 5, 6);
+
+float getFA(sampler2D t0123, sampler2D t4567, sampler2D t8temp, vec2 coord, int k) {
+    vec4 v;
+    if (k < 4) {
+        v = texture(t0123, coord);
+        if (k == 0) return v.x;
+        if (k == 1) return v.y;
+        if (k == 2) return v.z;
+        return v.w;
+    } else if (k < 8) {
+        v = texture(t4567, coord);
+        if (k == 4) return v.x;
+        if (k == 5) return v.y;
+        if (k == 6) return v.z;
+        return v.w;
+    } else {
+        return texture(t8temp, coord).x;
+    }
+}
+
+void main() {
+    float newF[9];
+
+    // TEMPERATURE ADVECTION: gather temperature weighted by incoming mass
+    // Temperature travels WITH the wax - each f_k carries temperature from its source
+    float tempSum = 0.0;
+    float massSum = 0.0;
+
+    for (int k = 0; k < 9; k++) {
+        // Pull from upstream neighbor
+        vec2 srcCoord = v_texCoord - c[k] * u_texelSize;
+
+        // Handle boundaries
+        srcCoord.x = fract(srcCoord.x); // Wrap X
+
+        // Check Y boundaries for bounce-back
+        if (srcCoord.y < 0.0 || srcCoord.y > 1.0) {
+            // Bounce-back: take from current cell, opposite direction
+            newF[k] = getFA(u_fA_0123, u_fA_4567, u_fA_8_temp, v_texCoord, opposite[k]);
+            // Temperature from current cell for bounce-back
+            float srcTemp = texture(u_fA_8_temp, v_texCoord).y;
+            tempSum += newF[k] * srcTemp;
+            massSum += newF[k];
+        } else {
+            newF[k] = getFA(u_fA_0123, u_fA_4567, u_fA_8_temp, srcCoord, k);
+            // Temperature from source cell - THIS IS THE KEY FIX!
+            // Each distribution carries the temperature of where it came from
+            float srcTemp = texture(u_fA_8_temp, srcCoord).y;
+            tempSum += newF[k] * srcTemp;
+            massSum += newF[k];
+        }
+    }
+
+    // Compute mass-weighted average temperature
+    float temp = (massSum > 0.001) ? tempSum / massSum : texture(u_fA_8_temp, v_texCoord).y;
+
+    out_fA_0123 = vec4(newF[0], newF[1], newF[2], newF[3]);
+    out_fA_4567 = vec4(newF[4], newF[5], newF[6], newF[7]);
+    out_fA_8_temp = vec4(newF[8], temp, 0.0, 0.0);
+}
+</script>
+
+<!-- Streaming shader for water -->
+<script id="fs-stream-water" type="x-shader/x-fragment">#version 300 es
+precision highp float;
+in vec2 v_texCoord;
+
+uniform sampler2D u_fB_0123;
+uniform sampler2D u_fB_4567;
+uniform sampler2D u_fB_8_macro;
+uniform vec2 u_texelSize;
+
+layout(location = 0) out vec4 out_fB_0123;
+layout(location = 1) out vec4 out_fB_4567;
+layout(location = 2) out vec4 out_fB_8_macro;
+
+const vec2 c[9] = vec2[9](
+    vec2(0, 0),
+    vec2(1, 0), vec2(0, -1), vec2(-1, 0), vec2(0, 1),
+    vec2(1, -1), vec2(-1, -1), vec2(-1, 1), vec2(1, 1)
+);
+const int opposite[9] = int[9](0, 3, 4, 1, 2, 7, 8, 5, 6);
+
+float getFB(sampler2D t0123, sampler2D t4567, sampler2D t8, vec2 coord, int k) {
+    vec4 v;
+    if (k < 4) {
+        v = texture(t0123, coord);
+        if (k == 0) return v.x;
+        if (k == 1) return v.y;
+        if (k == 2) return v.z;
+        return v.w;
+    } else if (k < 8) {
+        v = texture(t4567, coord);
+        if (k == 4) return v.x;
+        if (k == 5) return v.y;
+        if (k == 6) return v.z;
+        return v.w;
+    } else {
+        return texture(t8, coord).x;
+    }
+}
+
+void main() {
+    float newF[9];
+
+    for (int k = 0; k < 9; k++) {
+        vec2 srcCoord = v_texCoord - c[k] * u_texelSize;
+        srcCoord.x = fract(srcCoord.x);
+
+        if (srcCoord.y < 0.0 || srcCoord.y > 1.0) {
+            newF[k] = getFB(u_fB_0123, u_fB_4567, u_fB_8_macro, v_texCoord, opposite[k]);
+        } else {
+            newF[k] = getFB(u_fB_0123, u_fB_4567, u_fB_8_macro, srcCoord, k);
+        }
+    }
+
+    out_fB_0123 = vec4(newF[0], newF[1], newF[2], newF[3]);
+    out_fB_4567 = vec4(newF[4], newF[5], newF[6], newF[7]);
+    out_fB_8_macro = vec4(newF[8], 0.0, 0.0, 0.0);
+}
+</script>
+
+<!-- Temperature evolution shader (diffusion + sources only, advection is in streaming) -->
+<script id="fs-temp" type="x-shader/x-fragment">#version 300 es
+precision highp float;
+in vec2 v_texCoord;
+
+uniform sampler2D u_fA_8_temp;
+uniform sampler2D u_macro;
+uniform vec2 u_texelSize;
+uniform vec2 u_resolution;
+
+uniform float u_rhoWax;
+uniform float u_heatRate;
+uniform float u_coolRate;
+uniform float u_tempDiffusion;
+uniform float u_heatZoneStart;
+uniform float u_heatHorizFalloff;
+uniform float u_coolZoneEnd;
+
+layout(location = 0) out vec4 out_fA_8_temp;
+
+void main() {
+    vec4 fA8t = texture(u_fA_8_temp, v_texCoord);
+    vec4 m = texture(u_macro, v_texCoord);
+
+    float f8 = fA8t.x;
+    float t = fA8t.y;  // Temperature was already advected in streaming step!
+    float rhoA = m.x;
+
+    // =========================================
+    // HEAT DIFFUSION - temperature spreads to neighbors
+    // =========================================
+    float sum = t;
+    float count = 1.0;
+
+    vec2 offsets[4] = vec2[4](
+        vec2(-1, 0), vec2(1, 0), vec2(0, -1), vec2(0, 1)
+    );
+
+    for (int d = 0; d < 4; d++) {
+        vec2 nCoord = v_texCoord + offsets[d] * u_texelSize;
+        nCoord.x = fract(nCoord.x);
+
+        if (nCoord.y >= 0.0 && nCoord.y <= 1.0) {
+            vec4 nM = texture(u_macro, nCoord);
+            vec4 nT = texture(u_fA_8_temp, nCoord);
+            // Weight diffusion by how much wax connects the cells
+            float wt = min(rhoA, nM.x) / u_rhoWax;
+            sum += nT.y * wt;
+            count += wt;
+        }
+    }
+
+    t += (sum / count - t) * u_tempDiffusion;
+
+    // =========================================
+    // HEAT SOURCES AND SINKS
+    // =========================================
+    float y = v_texCoord.y; // 0 = bottom, 1 = top
+    float x = v_texCoord.x;
+
+    // Bottom heating (y close to 0.0)
+    float heatZoneTop = 1.0 - u_heatZoneStart;
+    if (y < heatZoneTop && rhoA > 0.05) {
+        float vertInt = 1.0 - y / heatZoneTop;
+        float centerDist = abs(x - 0.5) * 2.0;
+        float horizInt = pow(1.0 - centerDist, u_heatHorizFalloff);
+        t += u_heatRate * vertInt * horizInt;
+    }
+
+    // Top cooling (y close to 1.0)
+    float coolZoneBottom = 1.0 - u_coolZoneEnd;
+    if (y > coolZoneBottom && rhoA > 0.05) {
+        float intensity = (y - coolZoneBottom) / (1.0 - coolZoneBottom);
+        t -= u_coolRate * intensity;
+    }
+
+    t = clamp(t, 0.0, 1.0);
+
+    out_fA_8_temp = vec4(f8, t, 0.0, 0.0);
+}
+</script>
+
+<!-- Render shader -->
+<script id="fs-render" type="x-shader/x-fragment">#version 300 es
+precision highp float;
+in vec2 v_texCoord;
+
+uniform sampler2D u_macro;
+uniform sampler2D u_psiTemp;
+uniform float u_rhoWax;
+
+out vec4 fragColor;
+
+void main() {
+    vec4 m = texture(u_macro, v_texCoord);
+    vec4 pt = texture(u_psiTemp, v_texCoord);
+
+    float rhoA = m.x;
+    float t = pt.z;
+
+    // Background color (dark blue)
+    vec3 bg = vec3(10.0/255.0, 10.0/255.0, 20.0/255.0);
+    vec3 color = bg;
+
+    if (rhoA > 0.02) {
+        // Wax color based on temperature
+        vec3 waxColor;
+        if (t < 0.35) {
+            // Cold: purple
+            float f = t / 0.35;
+            waxColor = vec3(60.0 + 90.0 * f, 20.0 + 30.0 * f, 120.0 - 40.0 * f) / 255.0;
+        } else if (t < 0.6) {
+            // Warm: orange
+            float f = (t - 0.35) / 0.25;
+            waxColor = vec3(150.0 + 70.0 * f, 50.0 + 80.0 * f, 80.0 - 60.0 * f) / 255.0;
+        } else {
+            // Hot: yellow
+            float f = (t - 0.6) / 0.4;
+            waxColor = vec3(220.0 + 35.0 * f, 130.0 + 125.0 * f, 20.0 + 60.0 * f) / 255.0;
+        }
+
+        // Blend wax color with background based on wax density
+        float waxAlpha = min(1.0, rhoA / u_rhoWax);
+        color = mix(bg, waxColor, waxAlpha);
+    }
+
+    // Heater glow at bottom (y close to 0 in WebGL coords)
+    float y = v_texCoord.y;
+    if (y < 0.03) {
+        float glowIntensity = 1.0 - y / 0.03;
+        vec3 glowColor = vec3(1.0, 0.235, 0.0);
+        color = mix(color, glowColor, glowIntensity * 0.7);
+    }
+
+    fragColor = vec4(color, 1.0);
+}
+</script>
+
+<script>
+// ============================================================
+// Lava Lamp LBM v12 - WebGL 2 Implementation
+// ============================================================
+
+const canvas = document.getElementById('canvas');
+const gl = canvas.getContext('webgl2');
+
+if (!gl) {
+    alert('WebGL 2 not supported. Please use a modern browser.');
+    throw new Error('WebGL 2 not supported');
+}
+
+// Enable float textures
+const ext = gl.getExtension('EXT_color_buffer_float');
+if (!ext) {
+    alert('EXT_color_buffer_float not supported');
+    throw new Error('EXT_color_buffer_float not supported');
+}
+
+let P = {};
+let W, H;
+let frame = 0, paused = false, ff = 1;
+let initialMassA = 0, initialMassB = 0;
+
+// Texture sets (ping-pong)
+let textures = { read: {}, write: {} };
+let framebuffers = {};
+let programs = {};
+
+// Fullscreen quad
+let quadVAO, quadVBO;
+
+function readParams() {
+    P = {
+        CELL: parseFloat(document.getElementById('p_cell').value),
+        G_AA: parseFloat(document.getElementById('p_gAA').value),
+        G_BB: parseFloat(document.getElementById('p_gBB').value),
+        G_AB: parseFloat(document.getElementById('p_gAB').value),
+        RHO_WAX: parseFloat(document.getElementById('p_rhoWax').value),
+        RHO_WATER: parseFloat(document.getElementById('p_rhoWater').value),
+        WAX_HEIGHT_FRAC: parseFloat(document.getElementById('p_waxH').value),
+        TAU_WAX_COLD: parseFloat(document.getElementById('p_tauWaxC').value),
+        TAU_WAX_HOT: parseFloat(document.getElementById('p_tauWaxH').value),
+        TAU_WATER: parseFloat(document.getElementById('p_tauWater').value),
+        TRANSITION_TEMP: parseFloat(document.getElementById('p_transT').value),
+        SHARPNESS: parseFloat(document.getElementById('p_sharp').value),
+        THERMAL_BUOYANCY: parseFloat(document.getElementById('p_buoy').value),
+        BASE_GRAVITY: parseFloat(document.getElementById('p_grav').value),
+        BUOYANCY_THRESHOLD: parseFloat(document.getElementById('p_buoyT').value),
+        BUOYANCY_SHARPNESS: parseFloat(document.getElementById('p_buoySharp').value),
+        HEAT_RATE: parseFloat(document.getElementById('p_heatR').value),
+        COOL_RATE: parseFloat(document.getElementById('p_coolR').value),
+        TEMP_DIFFUSION: parseFloat(document.getElementById('p_diffuse').value),
+        INIT_WAX_TEMP: parseFloat(document.getElementById('p_initWaxT').value),
+        INIT_WATER_TEMP: parseFloat(document.getElementById('p_initWaterT').value),
+        THERMAL_EXPANSION: parseFloat(document.getElementById('p_thermExp').value),
+        HEAT_ZONE_START: parseFloat(document.getElementById('p_heatZone').value),
+        HEAT_HORIZ_FALLOFF: parseFloat(document.getElementById('p_heatFall').value),
+        COOL_ZONE_END: parseFloat(document.getElementById('p_coolZone').value)
+    };
+}
+
+function compileShader(type, source) {
+    const shader = gl.createShader(type);
+    gl.shaderSource(shader, source);
+    gl.compileShader(shader);
+    if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+        console.error('Shader compile error:', gl.getShaderInfoLog(shader));
+        console.error('Source:', source);
+        throw new Error('Shader compilation failed');
+    }
+    return shader;
+}
+
+function createProgram(vsId, fsId) {
+    const vsSource = document.getElementById(vsId).textContent;
+    const fsSource = document.getElementById(fsId).textContent;
+
+    const vs = compileShader(gl.VERTEX_SHADER, vsSource);
+    const fs = compileShader(gl.FRAGMENT_SHADER, fsSource);
+
+    const program = gl.createProgram();
+    gl.attachShader(program, vs);
+    gl.attachShader(program, fs);
+    gl.linkProgram(program);
+
+    if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
+        console.error('Program link error:', gl.getProgramInfoLog(program));
+        throw new Error('Program linking failed');
+    }
+
+    // Cache uniform locations
+    program.uniforms = {};
+    const numUniforms = gl.getProgramParameter(program, gl.ACTIVE_UNIFORMS);
+    for (let i = 0; i < numUniforms; i++) {
+        const info = gl.getActiveUniform(program, i);
+        program.uniforms[info.name] = gl.getUniformLocation(program, info.name);
+    }
+
+    return program;
+}
+
+function createTexture(width, height) {
+    const tex = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, tex);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA32F, width, height, 0, gl.RGBA, gl.FLOAT, null);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.REPEAT);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    return tex;
+}
+
+function createFramebuffer(colorAttachments) {
+    const fb = gl.createFramebuffer();
+    gl.bindFramebuffer(gl.FRAMEBUFFER, fb);
+
+    const drawBuffers = [];
+    for (let i = 0; i < colorAttachments.length; i++) {
+        gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0 + i, gl.TEXTURE_2D, colorAttachments[i], 0);
+        drawBuffers.push(gl.COLOR_ATTACHMENT0 + i);
+    }
+    gl.drawBuffers(drawBuffers);
+
+    const status = gl.checkFramebufferStatus(gl.FRAMEBUFFER);
+    if (status !== gl.FRAMEBUFFER_COMPLETE) {
+        console.error('Framebuffer incomplete:', status);
+        throw new Error('Framebuffer incomplete');
+    }
+
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    return fb;
+}
+
+function initGL() {
+    // Create quad VAO
+    quadVAO = gl.createVertexArray();
+    gl.bindVertexArray(quadVAO);
+
+    quadVBO = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, quadVBO);
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([
+        -1, -1, 1, -1, -1, 1,
+        -1, 1, 1, -1, 1, 1
+    ]), gl.STATIC_DRAW);
+
+    gl.enableVertexAttribArray(0);
+    gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
+
+    // Create programs
+    programs.init = createProgram('vs-quad', 'fs-init');
+    programs.macro = createProgram('vs-quad', 'fs-macro');
+    programs.force = createProgram('vs-quad', 'fs-force');
+    programs.collisionWax = createProgram('vs-quad', 'fs-collision-wax');
+    programs.collisionWater = createProgram('vs-quad', 'fs-collision-water');
+    programs.streamWax = createProgram('vs-quad', 'fs-stream-wax');
+    programs.streamWater = createProgram('vs-quad', 'fs-stream-water');
+    programs.temp = createProgram('vs-quad', 'fs-temp');
+    programs.render = createProgram('vs-quad', 'fs-render');
+}
+
+function createTextures() {
+    // Distribution textures (ping-pong pairs)
+    const texNames = ['fA_0123', 'fA_4567', 'fA_8_temp', 'fB_0123', 'fB_4567', 'fB_8_macro'];
+
+    textures.read = {};
+    textures.write = {};
+
+    for (const name of texNames) {
+        textures.read[name] = createTexture(W, H);
+        textures.write[name] = createTexture(W, H);
+    }
+
+    // Auxiliary textures (not ping-ponged)
+    textures.macro = createTexture(W, H);
+    textures.psiTemp = createTexture(W, H);
+    textures.forceA = createTexture(W, H);
+    textures.forceB = createTexture(W, H);
+
+    // Create framebuffers
+    framebuffers.init = createFramebuffer([
+        textures.read.fA_0123, textures.read.fA_4567, textures.read.fA_8_temp,
+        textures.read.fB_0123, textures.read.fB_4567, textures.read.fB_8_macro
+    ]);
+
+    framebuffers.macro = createFramebuffer([textures.macro, textures.psiTemp]);
+    framebuffers.force = createFramebuffer([textures.forceA, textures.forceB]);
+
+    framebuffers.collisionWax = createFramebuffer([
+        textures.write.fA_0123, textures.write.fA_4567, textures.write.fA_8_temp
+    ]);
+
+    framebuffers.collisionWater = createFramebuffer([
+        textures.write.fB_0123, textures.write.fB_4567, textures.write.fB_8_macro
+    ]);
+
+    // After collision, swap read/write for streaming
+    framebuffers.streamWax = createFramebuffer([
+        textures.read.fA_0123, textures.read.fA_4567, textures.read.fA_8_temp
+    ]);
+
+    framebuffers.streamWater = createFramebuffer([
+        textures.read.fB_0123, textures.read.fB_4567, textures.read.fB_8_macro
+    ]);
+
+    // Temp update writes back to fA_8_temp
+    framebuffers.temp = createFramebuffer([textures.write.fA_8_temp]);
+}
+
+function bindTexture(unit, texture) {
+    gl.activeTexture(gl.TEXTURE0 + unit);
+    gl.bindTexture(gl.TEXTURE_2D, texture);
+}
+
+function runProgram(program, fb, uniforms) {
+    gl.useProgram(program);
+
+    // Set uniforms
+    let texUnit = 0;
+    for (const [name, value] of Object.entries(uniforms)) {
+        const loc = program.uniforms[name];
+        if (loc === undefined) continue;
+
+        if (value instanceof WebGLTexture) {
+            gl.uniform1i(loc, texUnit);
+            bindTexture(texUnit, value);
+            texUnit++;
+        } else if (Array.isArray(value)) {
+            if (value.length === 2) gl.uniform2fv(loc, value);
+            else if (value.length === 3) gl.uniform3fv(loc, value);
+            else if (value.length === 4) gl.uniform4fv(loc, value);
+        } else {
+            gl.uniform1f(loc, value);
+        }
+    }
+
+    gl.bindFramebuffer(gl.FRAMEBUFFER, fb);
+    if (fb) {
+        gl.viewport(0, 0, W, H);
+    } else {
+        gl.viewport(0, 0, canvas.width, canvas.height);
+    }
+
+    gl.bindVertexArray(quadVAO);
+    gl.drawArrays(gl.TRIANGLES, 0, 6);
+}
+
+function swapTextures() {
+    // Swap read/write textures
+    const temp = textures.read;
+    textures.read = textures.write;
+    textures.write = temp;
+
+    // Update framebuffers with swapped textures
+    gl.bindFramebuffer(gl.FRAMEBUFFER, framebuffers.collisionWax);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, textures.write.fA_0123, 0);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT1, gl.TEXTURE_2D, textures.write.fA_4567, 0);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT2, gl.TEXTURE_2D, textures.write.fA_8_temp, 0);
+
+    gl.bindFramebuffer(gl.FRAMEBUFFER, framebuffers.collisionWater);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, textures.write.fB_0123, 0);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT1, gl.TEXTURE_2D, textures.write.fB_4567, 0);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT2, gl.TEXTURE_2D, textures.write.fB_8_macro, 0);
+
+    gl.bindFramebuffer(gl.FRAMEBUFFER, framebuffers.streamWax);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, textures.read.fA_0123, 0);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT1, gl.TEXTURE_2D, textures.read.fA_4567, 0);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT2, gl.TEXTURE_2D, textures.read.fA_8_temp, 0);
+
+    gl.bindFramebuffer(gl.FRAMEBUFFER, framebuffers.streamWater);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, textures.read.fB_0123, 0);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT1, gl.TEXTURE_2D, textures.read.fB_4567, 0);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT2, gl.TEXTURE_2D, textures.read.fB_8_macro, 0);
+
+    gl.bindFramebuffer(gl.FRAMEBUFFER, framebuffers.temp);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, textures.write.fA_8_temp, 0);
+
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+}
+
+function initialize() {
+    readParams();
+
+    // Run init shader
+    runProgram(programs.init, framebuffers.init, {
+        u_resolution: [W, H],
+        u_rhoWax: P.RHO_WAX,
+        u_rhoWater: P.RHO_WATER,
+        u_waxHeightFrac: P.WAX_HEIGHT_FRAC,
+        u_initWaxTemp: P.INIT_WAX_TEMP,
+        u_initWaterTemp: P.INIT_WATER_TEMP,
+        u_seed: Math.random() * 1000
+    });
+
+    // Compute initial mass
+    computeInitialMass();
+
+    frame = 0;
+}
+
+function computeInitialMass() {
+    // Read back macro data to compute initial mass
+    runProgram(programs.macro, framebuffers.macro, {
+        u_fA_0123: textures.read.fA_0123,
+        u_fA_4567: textures.read.fA_4567,
+        u_fA_8_temp: textures.read.fA_8_temp,
+        u_fB_0123: textures.read.fB_0123,
+        u_fB_4567: textures.read.fB_4567,
+        u_fB_8_macro: textures.read.fB_8_macro
+    });
+
+    // Read back macro texture
+    const pixels = new Float32Array(W * H * 4);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, framebuffers.macro);
+    gl.readPixels(0, 0, W, H, gl.RGBA, gl.FLOAT, pixels);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+
+    initialMassA = 0;
+    initialMassB = 0;
+    for (let i = 0; i < W * H; i++) {
+        initialMassA += pixels[i * 4];
+        initialMassB += pixels[i * 4 + 1];
+    }
+}
+
+function tick() {
+    frame++;
+    const texel = [1.0 / W, 1.0 / H];
+
+    // Step 1: Compute macroscopic quantities
+    runProgram(programs.macro, framebuffers.macro, {
+        u_fA_0123: textures.read.fA_0123,
+        u_fA_4567: textures.read.fA_4567,
+        u_fA_8_temp: textures.read.fA_8_temp,
+        u_fB_0123: textures.read.fB_0123,
+        u_fB_4567: textures.read.fB_4567,
+        u_fB_8_macro: textures.read.fB_8_macro
+    });
+
+    // Step 2: Compute forces (with thermal expansion option)
+    runProgram(programs.force, framebuffers.force, {
+        u_macro: textures.macro,
+        u_psiTemp: textures.psiTemp,
+        u_resolution: [W, H],
+        u_texelSize: texel,
+        u_G_AA: P.G_AA,
+        u_G_BB: P.G_BB,
+        u_G_AB: P.G_AB,
+        u_sharpness: P.SHARPNESS,
+        u_transitionTemp: P.TRANSITION_TEMP,
+        u_gravity: P.BASE_GRAVITY,
+        u_buoyancy: P.THERMAL_BUOYANCY,
+        u_buoyThreshold: P.BUOYANCY_THRESHOLD,
+        u_buoySharpness: P.BUOYANCY_SHARPNESS,
+        u_thermalExpansion: P.THERMAL_EXPANSION
+    });
+
+    // Step 3: Collision for wax
+    runProgram(programs.collisionWax, framebuffers.collisionWax, {
+        u_fA_0123: textures.read.fA_0123,
+        u_fA_4567: textures.read.fA_4567,
+        u_fA_8_temp: textures.read.fA_8_temp,
+        u_macro: textures.macro,
+        u_psiTemp: textures.psiTemp,
+        u_forceA: textures.forceA,
+        u_tauWaxCold: P.TAU_WAX_COLD,
+        u_tauWaxHot: P.TAU_WAX_HOT,
+        u_sharpness: P.SHARPNESS,
+        u_transitionTemp: P.TRANSITION_TEMP
+    });
+
+    // Step 4: Collision for water
+    runProgram(programs.collisionWater, framebuffers.collisionWater, {
+        u_fB_0123: textures.read.fB_0123,
+        u_fB_4567: textures.read.fB_4567,
+        u_fB_8_macro: textures.read.fB_8_macro,
+        u_macro: textures.macro,
+        u_forceB: textures.forceB,
+        u_tauWater: P.TAU_WATER
+    });
+
+    // Step 5: Streaming for wax (read from write textures after collision, write to read textures)
+    runProgram(programs.streamWax, framebuffers.streamWax, {
+        u_fA_0123: textures.write.fA_0123,
+        u_fA_4567: textures.write.fA_4567,
+        u_fA_8_temp: textures.write.fA_8_temp,
+        u_texelSize: texel,
+        u_resolution: [W, H]
+    });
+
+    // Step 6: Streaming for water
+    runProgram(programs.streamWater, framebuffers.streamWater, {
+        u_fB_0123: textures.write.fB_0123,
+        u_fB_4567: textures.write.fB_4567,
+        u_fB_8_macro: textures.write.fB_8_macro,
+        u_texelSize: texel
+    });
+
+    // Step 7: Temperature evolution (advection handled in streaming, this does diffusion + sources)
+    runProgram(programs.temp, framebuffers.temp, {
+        u_fA_8_temp: textures.read.fA_8_temp,
+        u_macro: textures.macro,
+        u_texelSize: texel,
+        u_resolution: [W, H],
+        u_rhoWax: P.RHO_WAX,
+        u_heatRate: P.HEAT_RATE,
+        u_coolRate: P.COOL_RATE,
+        u_tempDiffusion: P.TEMP_DIFFUSION,
+        u_heatZoneStart: P.HEAT_ZONE_START,
+        u_heatHorizFalloff: P.HEAT_HORIZ_FALLOFF,
+        u_coolZoneEnd: P.COOL_ZONE_END
+    });
+
+    // Copy updated temperature back to read texture
+    // We need to copy fA_8_temp from write to read, keeping f8 from read
+    // Actually, let's handle this differently - swap the temp textures
+    const tempTex = textures.read.fA_8_temp;
+    textures.read.fA_8_temp = textures.write.fA_8_temp;
+    textures.write.fA_8_temp = tempTex;
+
+    // Update framebuffers that reference fA_8_temp
+    gl.bindFramebuffer(gl.FRAMEBUFFER, framebuffers.collisionWax);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT2, gl.TEXTURE_2D, textures.write.fA_8_temp, 0);
+
+    gl.bindFramebuffer(gl.FRAMEBUFFER, framebuffers.streamWax);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT2, gl.TEXTURE_2D, textures.read.fA_8_temp, 0);
+
+    gl.bindFramebuffer(gl.FRAMEBUFFER, framebuffers.temp);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, textures.write.fA_8_temp, 0);
+
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+}
+
+function render() {
+    // Compute macro for rendering
+    runProgram(programs.macro, framebuffers.macro, {
+        u_fA_0123: textures.read.fA_0123,
+        u_fA_4567: textures.read.fA_4567,
+        u_fA_8_temp: textures.read.fA_8_temp,
+        u_fB_0123: textures.read.fB_0123,
+        u_fB_4567: textures.read.fB_4567,
+        u_fB_8_macro: textures.read.fB_8_macro
+    });
+
+    // Render to screen
+    runProgram(programs.render, null, {
+        u_macro: textures.macro,
+        u_psiTemp: textures.psiTemp,
+        u_rhoWax: P.RHO_WAX
+    });
+}
+
+function getStats() {
+    // Read back macro texture for stats
+    const pixels = new Float32Array(W * H * 4);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, framebuffers.macro);
+    gl.readPixels(0, 0, W, H, gl.RGBA, gl.FLOAT, pixels);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+
+    // Read psiTemp for temperature
+    const psiPixels = new Float32Array(W * H * 4);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, framebuffers.macro);
+    // Actually psiTemp is attachment 1, need separate read
+    // For simplicity, read from psiTemp texture directly
+
+    let massA = 0, massB = 0;
+    let maxT = 0;
+    let maxWaxY = 0; // In WebGL, y=0 is bottom, higher y = higher on screen
+
+    for (let i = 0; i < W * H; i++) {
+        const rhoA = pixels[i * 4];
+        const rhoB = pixels[i * 4 + 1];
+        massA += rhoA;
+        massB += rhoB;
+    }
+
+    // Read psiTemp for max temp and height
+    const tempPixels = new Float32Array(W * H * 4);
+    const tempFB = gl.createFramebuffer();
+    gl.bindFramebuffer(gl.FRAMEBUFFER, tempFB);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, textures.psiTemp, 0);
+    gl.readPixels(0, 0, W, H, gl.RGBA, gl.FLOAT, tempPixels);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    gl.deleteFramebuffer(tempFB);
+
+    for (let y = 0; y < H; y++) {
+        for (let x = 0; x < W; x++) {
+            const i = y * W + x;
+            const rhoA = pixels[i * 4];
+            const temp = tempPixels[i * 4 + 2];
+
+            if (rhoA > 0.3) {
+                if (temp > maxT) maxT = temp;
+                if (y > maxWaxY) maxWaxY = y; // Track highest y where wax exists
+            }
+        }
+    }
+
+    // WebGL: y=0 is bottom, y=H-1 is top. maxWaxY/H gives height percentage.
+    const highestPct = ((maxWaxY + 1) / H * 100).toFixed(0);
+
+    return {
+        massRatioA: (massA / initialMassA * 100).toFixed(1),
+        massRatioB: (massB / initialMassB * 100).toFixed(1),
+        maxT: maxT.toFixed(2),
+        height: highestPct
+    };
+}
+
+function loop() {
+    if (!paused) {
+        for (let i = 0; i < ff; i++) tick();
+    }
+    render();
+
+    // Update stats every 10 frames to avoid GPU stalls
+    if (frame % 10 === 0) {
+        const stats = getStats();
+        document.getElementById('stats').innerHTML =
+            `Tick: ${frame} | Wax: ${stats.massRatioA}% | MaxT: ${stats.maxT} | Height: ${stats.height}% | ${W}x${H}`;
+    }
+
+    requestAnimationFrame(loop);
+}
+
+function resize() {
+    readParams();
+    canvas.width = innerWidth;
+    canvas.height = innerHeight;
+    W = Math.floor(canvas.width / P.CELL);
+    H = Math.floor(canvas.height / P.CELL);
+
+    createTextures();
+    initialize();
+}
+
+function reset() {
+    initialize();
+}
+
+// Event handlers
+document.getElementById('ff').onclick = () => {
+    ff = ff === 1 ? 10 : ff === 10 ? 100 : 1;
+    document.getElementById('ff').textContent = ff + 'x';
+};
+
+document.getElementById('pp').onclick = () => {
+    paused = !paused;
+    document.getElementById('pp').textContent = paused ? '>' : '||';
+};
+
+document.getElementById('rr').onclick = reset;
+
+let paramsVisible = true;
+document.getElementById('toggleParams').onclick = () => {
+    paramsVisible = !paramsVisible;
+    document.getElementById('params').style.display = paramsVisible ? 'flex' : 'none';
+};
+
+document.getElementById('params').addEventListener('change', (e) => {
+    readParams();
+    // Cell size changes need full resize (recreate textures)
+    if (e.target.id === 'p_cell') {
+        resize();
+    } else {
+        reset();
+    }
+});
+
+addEventListener('resize', resize);
+addEventListener('keydown', e => {
+    if (e.code === 'Space') { paused = !paused; e.preventDefault(); }
+    if (e.code === 'KeyR') reset();
+});
+
+// Initialize
+initGL();
+resize();
+loop();
+</script>
+</body>
+</html>

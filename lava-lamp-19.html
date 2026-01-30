@@ -1,0 +1,553 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Lava Lamp v19 - Marker Particles</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        html, body { height: 100%; overflow: hidden; background: #0a0a12; }
+        #canvas { display: block; }
+        #ui { position: absolute; top: 4px; left: 6px; color: #fff; font: 10px monospace; background: rgba(0,0,0,0.8); padding: 4px 6px; border-radius: 3px; }
+        #controls { position: absolute; top: 4px; right: 6px; display: flex; gap: 2px; }
+        #controls button { padding: 3px 8px; background: #222; color: #fff; border: 1px solid #555; cursor: pointer; font: 9px monospace; }
+        #params { position: absolute; top: 28px; left: 0; right: 0; color: #ccc; font: 8px monospace; background: rgba(0,0,0,0.9); padding: 4px 8px; display: flex; flex-wrap: wrap; gap: 2px 10px; }
+        #params label { display: flex; align-items: center; gap: 3px; }
+        #params input { width: 50px; background: #222; color: #fff; border: 1px solid #444; padding: 1px 2px; font: 8px monospace; }
+    </style>
+</head>
+<body>
+<canvas id="canvas"></canvas>
+<div id="ui">
+    <div>Lava Lamp v19 - Marker Particles + Metaballs</div>
+    <div id="stats"></div>
+</div>
+<div id="controls">
+    <button id="ff">1x</button>
+    <button id="pp">||</button>
+    <button id="rr">Reset</button>
+    <button id="toggleParams">Params</button>
+</div>
+<div id="params">
+    <label>Particles<input type="number" id="p_numParticles" value="400"></label>
+    <label>Cohesion<input type="number" id="p_cohesion" step="0.0001" value="0.0008"></label>
+    <label>CohesionR<input type="number" id="p_cohesionR" value="30"></label>
+    <label>Repulsion<input type="number" id="p_repulsion" step="0.001" value="0.02"></label>
+    <label>RepulsionR<input type="number" id="p_repulsionR" value="8"></label>
+    <label>Buoyancy<input type="number" id="p_buoyancy" step="0.0001" value="0.0012"></label>
+    <label>Gravity<input type="number" id="p_gravity" step="0.00001" value="0.00015"></label>
+    <label>Drag<input type="number" id="p_drag" step="0.001" value="0.97"></label>
+    <label>HeatRate<input type="number" id="p_heatRate" step="0.001" value="0.004"></label>
+    <label>CoolRate<input type="number" id="p_coolRate" step="0.001" value="0.003"></label>
+    <label>BlobRadius<input type="number" id="p_blobRadius" value="18"></label>
+    <label>Threshold<input type="number" id="p_threshold" step="0.1" value="1.2"></label>
+</div>
+
+<!-- Vertex shader for fullscreen quad -->
+<script id="vs-quad" type="x-shader/x-vertex">#version 300 es
+in vec2 a_position;
+out vec2 v_texCoord;
+void main() {
+    v_texCoord = a_position * 0.5 + 0.5;
+    gl_Position = vec4(a_position, 0.0, 1.0);
+}
+</script>
+
+<!-- Metaball rendering shader -->
+<script id="fs-metaball" type="x-shader/x-fragment">#version 300 es
+precision highp float;
+in vec2 v_texCoord;
+out vec4 fragColor;
+
+uniform vec2 u_resolution;
+uniform sampler2D u_particleData;  // xy = position, zw = temp, vy
+uniform int u_numParticles;
+uniform float u_blobRadius;
+uniform float u_threshold;
+uniform int u_particleTexWidth;
+
+void main() {
+    vec2 pos = v_texCoord * u_resolution;
+
+    float field = 0.0;
+    float tempSum = 0.0;
+    float weightSum = 0.0;
+
+    // Sum metaball contributions from all particles
+    for (int i = 0; i < 1000; i++) {
+        if (i >= u_numParticles) break;
+
+        // Read particle data from texture
+        int px = i % u_particleTexWidth;
+        int py = i / u_particleTexWidth;
+        vec4 pData = texelFetch(u_particleData, ivec2(px, py), 0);
+
+        vec2 pPos = pData.xy;
+        float pTemp = pData.z;
+
+        vec2 diff = pos - pPos;
+        float distSq = dot(diff, diff);
+        float r = u_blobRadius;
+
+        // Metaball function: smooth falloff
+        // Using r²/(dist² + small) gives nice soft blobs
+        float contribution = (r * r) / (distSq + r * 0.5);
+
+        field += contribution;
+        tempSum += pTemp * contribution;
+        weightSum += contribution;
+    }
+
+    // Background color
+    vec3 bg = vec3(0.04, 0.04, 0.07);
+
+    if (field > u_threshold) {
+        // Inside wax - color by temperature
+        float temp = weightSum > 0.0 ? tempSum / weightSum : 0.5;
+
+        // Smooth edge
+        float edge = smoothstep(u_threshold, u_threshold + 0.3, field);
+
+        vec3 waxColor;
+        if (temp < 0.35) {
+            // Cold: purple/blue
+            float f = temp / 0.35;
+            waxColor = vec3(0.25 + 0.35 * f, 0.1 + 0.15 * f, 0.5 - 0.2 * f);
+        } else if (temp < 0.6) {
+            // Medium: red/orange
+            float f = (temp - 0.35) / 0.25;
+            waxColor = vec3(0.6 + 0.3 * f, 0.25 + 0.35 * f, 0.3 - 0.2 * f);
+        } else {
+            // Hot: orange/yellow
+            float f = (temp - 0.6) / 0.4;
+            waxColor = vec3(0.9 + 0.1 * f, 0.6 + 0.4 * f, 0.1 + 0.3 * f);
+        }
+
+        // Add some internal glow variation
+        float glow = 0.8 + 0.2 * (field - u_threshold) / 2.0;
+        waxColor *= glow;
+
+        fragColor = vec4(mix(bg, waxColor, edge), 1.0);
+    } else {
+        fragColor = vec4(bg, 1.0);
+    }
+
+    // Heater glow at bottom
+    float y = v_texCoord.y;
+    if (y < 0.03) {
+        float glowIntensity = 1.0 - y / 0.03;
+        vec3 glowColor = vec3(1.0, 0.3, 0.0);
+        fragColor.rgb = mix(fragColor.rgb, glowColor, glowIntensity * 0.6);
+    }
+}
+</script>
+
+<script>
+// ============================================================
+// Lava Lamp v19 - Marker Particles Approach
+//
+// Key insight: Wax is tracked as discrete particles that CANNOT
+// disappear. Cohesion forces keep them together. Temperature
+// affects buoyancy. Rendered as metaballs for smooth blobs.
+// ============================================================
+
+const canvas = document.getElementById('canvas');
+const gl = canvas.getContext('webgl2');
+
+if (!gl) {
+    alert('WebGL 2 not supported');
+    throw new Error('WebGL 2 not supported');
+}
+
+// Enable required extensions
+gl.getExtension('EXT_color_buffer_float');
+
+let W, H;
+let particles = [];
+let frame = 0, paused = false, ff = 1;
+
+// WebGL resources
+let program, quadVAO;
+let particleTexture;
+let particleTexWidth;
+
+// Parameters
+let P = {};
+
+function readParams() {
+    P = {
+        NUM_PARTICLES: parseInt(document.getElementById('p_numParticles').value),
+        COHESION: parseFloat(document.getElementById('p_cohesion').value),
+        COHESION_RADIUS: parseFloat(document.getElementById('p_cohesionR').value),
+        REPULSION: parseFloat(document.getElementById('p_repulsion').value),
+        REPULSION_RADIUS: parseFloat(document.getElementById('p_repulsionR').value),
+        BUOYANCY: parseFloat(document.getElementById('p_buoyancy').value),
+        GRAVITY: parseFloat(document.getElementById('p_gravity').value),
+        DRAG: parseFloat(document.getElementById('p_drag').value),
+        HEAT_RATE: parseFloat(document.getElementById('p_heatRate').value),
+        COOL_RATE: parseFloat(document.getElementById('p_coolRate').value),
+        BLOB_RADIUS: parseFloat(document.getElementById('p_blobRadius').value),
+        THRESHOLD: parseFloat(document.getElementById('p_threshold').value)
+    };
+}
+
+function compileShader(type, source) {
+    const shader = gl.createShader(type);
+    gl.shaderSource(shader, source);
+    gl.compileShader(shader);
+    if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+        console.error('Shader compile error:', gl.getShaderInfoLog(shader));
+        throw new Error('Shader compilation failed');
+    }
+    return shader;
+}
+
+function createProgram(vsId, fsId) {
+    const vsSource = document.getElementById(vsId).textContent;
+    const fsSource = document.getElementById(fsId).textContent;
+
+    const vs = compileShader(gl.VERTEX_SHADER, vsSource);
+    const fs = compileShader(gl.FRAGMENT_SHADER, fsSource);
+
+    const prog = gl.createProgram();
+    gl.attachShader(prog, vs);
+    gl.attachShader(prog, fs);
+    gl.linkProgram(prog);
+
+    if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) {
+        console.error('Program link error:', gl.getProgramInfoLog(prog));
+        throw new Error('Program linking failed');
+    }
+
+    // Cache uniform locations
+    prog.uniforms = {};
+    const numUniforms = gl.getProgramParameter(prog, gl.ACTIVE_UNIFORMS);
+    for (let i = 0; i < numUniforms; i++) {
+        const info = gl.getActiveUniform(prog, i);
+        prog.uniforms[info.name] = gl.getUniformLocation(prog, info.name);
+    }
+
+    return prog;
+}
+
+function initGL() {
+    // Create fullscreen quad
+    quadVAO = gl.createVertexArray();
+    gl.bindVertexArray(quadVAO);
+
+    const quadVBO = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, quadVBO);
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([
+        -1, -1, 1, -1, -1, 1,
+        -1, 1, 1, -1, 1, 1
+    ]), gl.STATIC_DRAW);
+
+    gl.enableVertexAttribArray(0);
+    gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
+
+    // Create shader program
+    program = createProgram('vs-quad', 'fs-metaball');
+
+    // Create particle data texture
+    particleTexture = gl.createTexture();
+}
+
+function initParticles() {
+    readParams();
+    particles = [];
+
+    // Create particles in a blob at the bottom
+    const centerX = W / 2;
+    const centerY = H * 0.85;
+    const spread = Math.min(W, H) * 0.15;
+
+    for (let i = 0; i < P.NUM_PARTICLES; i++) {
+        // Distribute in a rough circle/blob shape at bottom
+        const angle = Math.random() * Math.PI * 2;
+        const r = Math.random() * spread;
+
+        particles.push({
+            x: centerX + Math.cos(angle) * r * 0.8,
+            y: centerY + Math.sin(angle) * r * 0.3,
+            vx: (Math.random() - 0.5) * 0.1,
+            vy: (Math.random() - 0.5) * 0.1,
+            temp: 0.2 + Math.random() * 0.1  // Start cool
+        });
+    }
+
+    frame = 0;
+}
+
+function updateParticles() {
+    const n = particles.length;
+
+    // Build spatial hash for efficient neighbor lookup
+    const cellSize = P.COHESION_RADIUS;
+    const grid = new Map();
+
+    for (let i = 0; i < n; i++) {
+        const p = particles[i];
+        const cx = Math.floor(p.x / cellSize);
+        const cy = Math.floor(p.y / cellSize);
+        const key = `${cx},${cy}`;
+        if (!grid.has(key)) grid.set(key, []);
+        grid.get(key).push(i);
+    }
+
+    // Compute forces
+    const forces = particles.map(() => ({ fx: 0, fy: 0 }));
+
+    for (let i = 0; i < n; i++) {
+        const p = particles[i];
+        const cx = Math.floor(p.x / cellSize);
+        const cy = Math.floor(p.y / cellSize);
+
+        // Check neighboring cells
+        for (let dx = -1; dx <= 1; dx++) {
+            for (let dy = -1; dy <= 1; dy++) {
+                const key = `${cx + dx},${cy + dy}`;
+                const cell = grid.get(key);
+                if (!cell) continue;
+
+                for (const j of cell) {
+                    if (i >= j) continue;  // Each pair once
+
+                    const q = particles[j];
+                    const diffX = q.x - p.x;
+                    const diffY = q.y - p.y;
+                    const distSq = diffX * diffX + diffY * diffY;
+                    const dist = Math.sqrt(distSq);
+
+                    if (dist < 0.1) continue;  // Avoid division by zero
+
+                    // Repulsion at close range
+                    if (dist < P.REPULSION_RADIUS) {
+                        const repulse = P.REPULSION * (P.REPULSION_RADIUS - dist) / dist;
+                        forces[i].fx -= diffX * repulse;
+                        forces[i].fy -= diffY * repulse;
+                        forces[j].fx += diffX * repulse;
+                        forces[j].fy += diffY * repulse;
+                    }
+                    // Cohesion at medium range
+                    else if (dist < P.COHESION_RADIUS) {
+                        const attract = P.COHESION * (dist - P.REPULSION_RADIUS) / dist;
+                        forces[i].fx += diffX * attract;
+                        forces[i].fy += diffY * attract;
+                        forces[j].fx -= diffX * attract;
+                        forces[j].fy -= diffY * attract;
+                    }
+                }
+            }
+        }
+
+        // Buoyancy: hot rises, cold sinks
+        // temp 0.5 = neutral, >0.5 = rise, <0.5 = sink
+        const buoyancy = (p.temp - 0.45) * P.BUOYANCY * 100;
+        forces[i].fy -= buoyancy;
+
+        // Gravity (always down)
+        forces[i].fy += P.GRAVITY * 10;
+    }
+
+    // Update velocities and positions
+    for (let i = 0; i < n; i++) {
+        const p = particles[i];
+
+        // Apply forces
+        p.vx += forces[i].fx;
+        p.vy += forces[i].fy;
+
+        // Drag
+        p.vx *= P.DRAG;
+        p.vy *= P.DRAG;
+
+        // Clamp velocity
+        const speed = Math.sqrt(p.vx * p.vx + p.vy * p.vy);
+        if (speed > 3) {
+            p.vx = p.vx / speed * 3;
+            p.vy = p.vy / speed * 3;
+        }
+
+        // Update position
+        p.x += p.vx;
+        p.y += p.vy;
+
+        // Boundary collision
+        const margin = 10;
+        if (p.x < margin) { p.x = margin; p.vx *= -0.3; }
+        if (p.x > W - margin) { p.x = W - margin; p.vx *= -0.3; }
+        if (p.y < margin) { p.y = margin; p.vy *= -0.3; }
+        if (p.y > H - margin) { p.y = H - margin; p.vy *= -0.3; }
+
+        // Temperature changes
+        // Heat at bottom
+        if (p.y > H * 0.85) {
+            const intensity = (p.y - H * 0.85) / (H * 0.15);
+            p.temp += P.HEAT_RATE * intensity;
+        }
+        // Cool at top
+        if (p.y < H * 0.25) {
+            const intensity = 1 - p.y / (H * 0.25);
+            p.temp -= P.COOL_RATE * intensity;
+        }
+        // Ambient cooling (slow)
+        p.temp -= 0.0001;
+
+        // Clamp temperature
+        p.temp = Math.max(0.1, Math.min(0.95, p.temp));
+    }
+
+    // Temperature diffusion between nearby particles
+    const newTemps = particles.map(p => p.temp);
+    for (let i = 0; i < n; i++) {
+        const p = particles[i];
+        const cx = Math.floor(p.x / cellSize);
+        const cy = Math.floor(p.y / cellSize);
+
+        let sum = p.temp;
+        let count = 1;
+
+        for (let dx = -1; dx <= 1; dx++) {
+            for (let dy = -1; dy <= 1; dy++) {
+                const key = `${cx + dx},${cy + dy}`;
+                const cell = grid.get(key);
+                if (!cell) continue;
+
+                for (const j of cell) {
+                    if (i === j) continue;
+                    const q = particles[j];
+                    const dist = Math.sqrt((q.x - p.x) ** 2 + (q.y - p.y) ** 2);
+                    if (dist < P.COHESION_RADIUS * 0.5) {
+                        const weight = 1 - dist / (P.COHESION_RADIUS * 0.5);
+                        sum += q.temp * weight;
+                        count += weight;
+                    }
+                }
+            }
+        }
+
+        newTemps[i] = sum / count;
+    }
+
+    for (let i = 0; i < n; i++) {
+        particles[i].temp = particles[i].temp * 0.95 + newTemps[i] * 0.05;
+    }
+}
+
+function uploadParticleData() {
+    // Pack particle data into texture
+    // Each texel: (x, y, temp, vy)
+    particleTexWidth = Math.ceil(Math.sqrt(particles.length));
+    const texHeight = Math.ceil(particles.length / particleTexWidth);
+    const data = new Float32Array(particleTexWidth * texHeight * 4);
+
+    for (let i = 0; i < particles.length; i++) {
+        const p = particles[i];
+        data[i * 4] = p.x;
+        data[i * 4 + 1] = p.y;
+        data[i * 4 + 2] = p.temp;
+        data[i * 4 + 3] = p.vy;
+    }
+
+    gl.bindTexture(gl.TEXTURE_2D, particleTexture);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA32F, particleTexWidth, texHeight, 0, gl.RGBA, gl.FLOAT, data);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+}
+
+function render() {
+    uploadParticleData();
+
+    gl.viewport(0, 0, canvas.width, canvas.height);
+    gl.clearColor(0.04, 0.04, 0.07, 1);
+    gl.clear(gl.COLOR_BUFFER_BIT);
+
+    gl.useProgram(program);
+
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, particleTexture);
+    gl.uniform1i(program.uniforms.u_particleData, 0);
+
+    gl.uniform2f(program.uniforms.u_resolution, canvas.width, canvas.height);
+    gl.uniform1i(program.uniforms.u_numParticles, particles.length);
+    gl.uniform1f(program.uniforms.u_blobRadius, P.BLOB_RADIUS);
+    gl.uniform1f(program.uniforms.u_threshold, P.THRESHOLD);
+    gl.uniform1i(program.uniforms.u_particleTexWidth, particleTexWidth);
+
+    gl.bindVertexArray(quadVAO);
+    gl.drawArrays(gl.TRIANGLES, 0, 6);
+}
+
+function tick() {
+    frame++;
+    updateParticles();
+}
+
+function loop() {
+    if (!paused) {
+        for (let i = 0; i < ff; i++) tick();
+    }
+    render();
+
+    // Stats
+    if (frame % 10 === 0) {
+        const avgTemp = particles.reduce((s, p) => s + p.temp, 0) / particles.length;
+        const minY = Math.min(...particles.map(p => p.y));
+        const maxY = Math.max(...particles.map(p => p.y));
+        document.getElementById('stats').innerHTML =
+            `Frame: ${frame} | Particles: ${particles.length} | ` +
+            `AvgTemp: ${avgTemp.toFixed(2)} | Y: ${(minY/H*100).toFixed(0)}-${(maxY/H*100).toFixed(0)}%`;
+    }
+
+    requestAnimationFrame(loop);
+}
+
+function resize() {
+    canvas.width = innerWidth;
+    canvas.height = innerHeight;
+    W = canvas.width;
+    H = canvas.height;
+    initParticles();
+}
+
+// Event handlers
+document.getElementById('ff').onclick = () => {
+    ff = ff === 1 ? 5 : ff === 5 ? 20 : 1;
+    document.getElementById('ff').textContent = ff + 'x';
+};
+
+document.getElementById('pp').onclick = () => {
+    paused = !paused;
+    document.getElementById('pp').textContent = paused ? '▶' : '||';
+};
+
+document.getElementById('rr').onclick = () => {
+    readParams();
+    initParticles();
+};
+
+let paramsVisible = true;
+document.getElementById('toggleParams').onclick = () => {
+    paramsVisible = !paramsVisible;
+    document.getElementById('params').style.display = paramsVisible ? 'flex' : 'none';
+};
+
+document.getElementById('params').addEventListener('change', () => {
+    readParams();
+});
+
+addEventListener('resize', resize);
+addEventListener('keydown', e => {
+    if (e.code === 'Space') { paused = !paused; e.preventDefault(); }
+    if (e.code === 'KeyR') { readParams(); initParticles(); }
+});
+
+// Initialize
+initGL();
+resize();
+loop();
+</script>
+</body>
+</html>

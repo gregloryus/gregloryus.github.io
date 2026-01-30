@@ -1,55 +1,129 @@
-// Simplant v12: Bird's Eye View (No Gravity)
-// - Removed height/gravity orientation - world is now top-down like a map
-// - Up/Down are now North/South, not High/Low
-// - Removed terrain, falling sand, tetris clearing
-// - Seeds random walk in all 4 directions equally, then germinate where they land
-// - Initial population: 64 seeds, half default genome, half mutated
+// Simplant v15: Experimental Evolution Settings
+// - Toggle experimental features with number keys (1-4)
+// - B: Graduated absorption (1→0.5, 2→1.0, 3→1.5)
+// - C: Child starting energy (seeds start with energy = genome length)
+// - D: Distance bonus (light energy +10% per hop traveled)
+// - Press key to toggle, simulation resets on change
 
-console.log("Simplant v12: Bird's Eye View - script loaded");
+console.log("Simplant v15: Experimental Evolution - script loaded");
 
 // --- Constants ---
 const CONSTANTS = {
   // World
-  SCALE_SIZE: 8,
+  SCALE_SIZE: 4,
 
   // Simulation
   TICK_INTERVAL_MS: 1,
-  RNG_SEED: 729,
+  RNG_SEED: 14,
 
   // Visual debug (cheap per-plant differentiation)
   ENABLE_PLANT_TINT: true,
-  PLANT_TINT_STRENGTH: 0.12, // 0..1, how much to blend plant color into stem green
+  PLANT_TINT_STRENGTH: 0.5, // 0..1, how much to blend plant color into stem green
 
   // Colors
   COLORS: {
-    SEED_IDLE: 0x8b4513, // brown
-    SEED_READY: 0xff0000, // red
-    SEED_CHARGED: 0xffffff, // white
-    SEED: 0x8b4513, // brown
-    STEM: 0x228b22, // green
-    LIGHT: 0xffff00, // yellow
-    BG: 0x1a1a2e, // dark blue-grey (more "earthy" for bird's eye)
+    // Default (will be overwritten by themes)
+    SEED_IDLE: 0x8b4513,
+    SEED_READY: 0xff0000,
+    SEED_CHARGED: 0xffffff,
+    SEED: 0x8b4513,
+    STEM: 0x228b22,
+    LIGHT: 0xffff00,
+    BG: 0x000000,
   },
 
+  THEMES: [
+    {
+      NAME: "Original",
+      COLORS: {
+        SEED_IDLE: 0x8b4513, // brown
+        SEED_READY: 0xff0000, // red
+        SEED_CHARGED: 0xffffff, // white
+        SEED: 0x8b4513, // brown
+        STEM: 0x228b22, // green
+        LIGHT: 0xffff00, // yellow
+        BG: 0x000000, // pitch black
+      },
+    },
+    {
+      NAME: "Bioluminescent Abyss",
+      COLORS: {
+        SEED_IDLE: 0xffaa00, // orange-gold
+        SEED_READY: 0xff00ff, // magenta
+        SEED_CHARGED: 0xffffff, // bright white
+        SEED: 0xffaa00,
+        STEM: 0x00ffff, // cyan/teal
+        LIGHT: 0xff0088, // hot pink
+        BG: 0x050510, // near black
+      },
+    },
+    {
+      NAME: "Satellite Infrared",
+      COLORS: {
+        SEED_IDLE: 0x4b0082, // indigo
+        SEED_READY: 0xffffff, // white
+        SEED_CHARGED: 0xff0000, // red
+        SEED: 0x4b0082,
+        STEM: 0xff4500, // orange-red
+        LIGHT: 0xffff00, // bright yellow
+        BG: 0x2f4f4f, // dark slate gray
+      },
+    },
+    {
+      NAME: "Paper & Ink",
+      COLORS: {
+        SEED_IDLE: 0x2f2f2f, // dark grey
+        SEED_READY: 0x8b0000, // dark red ink
+        SEED_CHARGED: 0x000000, // black
+        SEED: 0x2f2f2f,
+        STEM: 0x556b2f, // olive green
+        LIGHT: 0x87ceeb, // sky blue watercolor
+        BG: 0xf5f5dc, // beige/parchment
+      },
+    },
+    {
+      NAME: "Dark Ink",
+      COLORS: {
+        SEED_IDLE: 0x888888, // light grey
+        SEED_READY: 0xff4444, // bright red ink
+        SEED_CHARGED: 0xffffff, // white
+        SEED: 0x888888,
+        STEM: 0x6b8e23, // olive drab (lighter than Paper&Ink to pop on black)
+        LIGHT: 0xadd8e6, // light blue
+        BG: 0x000000, // pitch black
+      },
+    },
+  ],
+
   // Energy
-  LIGHT_ABSORB_PROB: 0.3, // Base probability
+  LIGHT_ABSORB_PROB: 0.6, // Base probability
   LIGHT_COOLDOWN: 30, // Ticks between absorptions
   LIGHT_ABSORPTION_PAUSE: 1,
 
   // Seeds & Population
-  NUM_STARTER_SEEDS: 64, // As per original brief
+  NUM_STARTER_SEEDS: 1, // As per original brief
   FORCE_SEED_STALK: true,
+  ENABLE_RANDOM_FACING: false, // If false, all seeds face North
   AIRBORNE_STEPS: 40, // Random walk steps (back to brief spec)
-  MUTATION_RATE: 0.25, // 50% of initial seeds mutated, also used for offspring
+  MUTATION_RATE: 0.2, // 50% of initial seeds mutated, also used for offspring
 
   // Death
-  MAX_PLANT_AGE: 1200,
-  STARVATION_TICKS: 800,
+  MAX_PLANT_AGE: 1000,
+  STARVATION_TICKS: 200,
 
   // Germination
-  GERMINATION_CLEAR_RADIUS: 1, // Must have this many cells clear around landing spot
-  // Growth retry behavior
-  GROW_RETRY_COOLDOWN: 20, // ticks to wait before retrying a blocked (by other-plant proximity) growth slot
+  GERMINATION_CLEAR_RADIUS: 3, // Must have this many cells clear around landing spot
+
+  // === EXPERIMENTAL FEATURES (toggle with number keys) ===
+  // B: Graduated Absorption - all cells can absorb, amount scales with openness
+  GRADUATED_ABSORPTION: false, // 3 open → 1.5, 2 open → 1.0, 1 open → 0.5
+
+  // C: Child Starting Energy - seeds start with energy equal to genome length
+  CHILD_STARTING_ENERGY: false,
+
+  // D: Distance Bonus - light gains 10% extra energy per hop traveled
+  DISTANCE_BONUS: false,
+  DISTANCE_BONUS_FACTOR: 0.1, // 10% per hop
 };
 
 // --- Global State ---
@@ -59,18 +133,20 @@ let occupancyGrid;
 let textures = {};
 let frame = 0;
 let paused = true;
-let fastForward = false;
-let fastForwardFactor = 1;
-let fastForwardLevels = [1, 10, 100];
-let fastForwardIndex = 0;
+let fastForward = true;
+let fastForwardFactor = 100;
+let fastForwardLevels = [0.5, 1, 10, 100];
+let fastForwardIndex = 3; // Start at 100x (index 3)
 let lastTickTime = 0;
 let lightParticles = [];
 let travelingSeeds = [];
 let plants = [];
+let currentThemeIndex = 0;
 
 // UI
 let fpsText;
 let particleCountText;
+let experimentText;
 
 // --- PRNG (Seeded) ---
 const params = new URLSearchParams(window.location.search);
@@ -155,11 +231,23 @@ function hsvToRgbInt(h, s, v) {
   return (R << 16) | (G << 8) | B;
 }
 
-function plantColorFromId(id) {
-  // Deterministic pseudo-random hue via golden ratio step
-  const golden = 0.61803398875;
-  const h = (id * golden) % 1;
-  // Bright and saturated so plants differ; we blend lightly into STEM
+function plantColorFromGenome(genome) {
+  // "Genetic Tinting": Clones have identical color.
+  // Small mutations (bit flips) cause small hue shifts.
+  // Large structural changes cause larger shifts.
+
+  let sum = 0;
+  // Weighted sum ensures position matters slightly, but mostly content
+  for (let i = 0; i < genome.length; i++) {
+    sum += genome[i] + (i % 7); // add slight position bias
+  }
+
+  // Map sum to hue (0-1).
+  // Scaling factor 0.01 means a 1-bit change shifts hue by 1% of wheel.
+  // This creates much smoother gradients between related species.
+  const h = (sum * 0.01) % 1;
+
+  // Use high saturation/value for visibility
   return hsvToRgbInt(h, 0.85, 1.0);
 }
 
@@ -342,24 +430,15 @@ function hasOtherPlantNeighborMoore(x, y, plant) {
   return false;
 }
 
-function growthBlockReason(x, y, plant) {
-  // Returns: null | "occupied" | "near_other"
-  const { x: wx, y: wy } = wrapCoords(x, y);
-  const cell = occupancyGrid.get(wx, wy);
-  if (cell) return "occupied";
-  if (hasOtherPlantNeighborMoore(wx, wy, plant)) return "near_other";
-  return null;
-}
-
 // --- Plant System ---
 
 let idCounter = 0;
 
 class Plant {
-  constructor(genome, seedCell) {
+  constructor(genome, seedCell, startingEnergy = 0) {
     this.id = idCounter++;
-    // Per-plant color (used only for cheap stem tinting / readability)
-    this.color = plantColorFromId(this.id);
+    // Genetic Tinting: Color derived from genome content
+    this.color = plantColorFromGenome(genome);
     this.stemTint = CONSTANTS.ENABLE_PLANT_TINT
       ? lerpColor(
           CONSTANTS.COLORS.STEM,
@@ -371,7 +450,7 @@ class Plant {
     this.genome = genome;
     this.rootNode = decodeGenomeToTree(genome);
     this.seed = seedCell;
-    this.energy = 0;
+    this.energy = startingEnergy; // Can start with energy if CHILD_STARTING_ENERGY is enabled
     this.freeSproutUsed = false;
 
     this.cells = [];
@@ -396,7 +475,7 @@ class Plant {
       cell.node.cell = cell;
       for (let slot = 0; slot < 3; slot++) {
         if (cell.node.children[slot] && !cell.node.isChildGrown(slot)) {
-          this.frontier.push({ node: cell.node, slot, blockedUntil: 0 });
+          this.frontier.push({ node: cell.node, slot });
         }
       }
     }
@@ -406,24 +485,13 @@ class Plant {
     if (this.energy < 1 && this.freeSproutUsed) return;
 
     for (let i = this.frontier.length - 1; i >= 0; i--) {
-      const entry = this.frontier[i];
-      const { node, slot } = entry;
+      const { node, slot } = this.frontier[i];
 
       if (this.energy < 1 && this.freeSproutUsed) return;
-      if (!node.cell) {
-        // Cell disappeared (should be rare); drop this frontier entry.
-        this.frontier.splice(i, 1);
-        continue;
-      }
-
-      if (entry.blockedUntil && entry.blockedUntil > frame) {
-        continue;
-      }
 
       const pos = node.cell.getChildPosForSlot(slot);
-      const reason = growthBlockReason(pos.x, pos.y, this);
 
-      if (reason === null) {
+      if (node.cell.canGrowAt(pos)) {
         node.cell.growChildInSlot(slot);
 
         if (this.freeSproutUsed) {
@@ -434,18 +502,10 @@ class Plant {
 
         this.frontier.splice(i, 1);
         return;
+      } else {
+        node.markChildGrown(slot);
+        this.frontier.splice(i, 1);
       }
-
-      if (reason === "near_other") {
-        // Don’t permanently abandon this branch just because a neighbor is too close right now.
-        // Wait a bit and retry later (e.g., if the other plant dies / moves away).
-        entry.blockedUntil = frame + CONSTANTS.GROW_RETRY_COOLDOWN;
-        continue;
-      }
-
-      // Occupied: permanently blocked
-      node.markChildGrown(slot);
-      this.frontier.splice(i, 1);
     }
   }
 
@@ -506,7 +566,12 @@ class SeedCell {
     this.parent = null;
     this.children = [];
     this.cooldown = 0;
-    this.facing = ["N", "E", "S", "W"][randInt(4)]; // Random initial facing
+    // Random initial facing or fixed North
+    if (CONSTANTS.ENABLE_RANDOM_FACING) {
+      this.facing = ["N", "E", "S", "W"][randInt(4)];
+    } else {
+      this.facing = "N";
+    }
 
     this.sprite = new PIXI.Sprite(textures.seed);
     this.sprite.scale.set(CONSTANTS.SCALE_SIZE);
@@ -733,8 +798,8 @@ class OccupancyGrid {
 
 const DEFAULT_GENOME = new Uint8Array([0b010, 0b010, 0b010, 0b000]);
 
-function createPlant(genome, x, y) {
-  const plant = new Plant(genome, null);
+function createPlant(genome, x, y, startingEnergy = 0) {
+  const plant = new Plant(genome, null, startingEnergy);
   const seed = new SeedCell(x, y, plant);
   plant.seed = seed;
   return plant;
@@ -747,22 +812,30 @@ function initializeSeeds() {
   const halfMutated = Math.floor(numSeeds / 2);
 
   for (let i = 0; i < numSeeds; i++) {
-    // Find an empty spot that is not Moore-adjacent to another plant
+    // Find an empty spot
     let x, y;
-    let attempts = 0;
-    do {
-      x = randInt(cols);
-      y = randInt(rows);
-      attempts++;
-    } while (
-      (!isCellEmpty(x, y) ||
-        !checkNeighborsEmpty(x, y, CONSTANTS.GERMINATION_CLEAR_RADIUS)) &&
-      attempts < 1000
-    );
 
-    if (attempts >= 1000) {
-      console.warn("Could not find empty spot for seed", i);
-      continue;
+    // If only 1 seed, place in center (nice for aesthetic start)
+    if (numSeeds === 1 && i === 0) {
+      x = Math.floor(cols / 2);
+      y = Math.floor(rows / 2);
+      // Fallback if center taken (unlikely on init, but safe)
+      if (!isCellEmpty(x, y)) {
+        x = randInt(cols);
+        y = randInt(rows);
+      }
+    } else {
+      let attempts = 0;
+      do {
+        x = randInt(cols);
+        y = randInt(rows);
+        attempts++;
+      } while (!isCellEmpty(x, y) && attempts < 1000);
+
+      if (attempts >= 1000) {
+        console.warn("Could not find empty spot for seed", i);
+        continue;
+      }
     }
 
     // Determine genome: first half default, second half mutated
@@ -781,7 +854,7 @@ function initializeSeeds() {
 }
 
 function init() {
-  console.log("Simplant v12: initializing");
+  console.log("Simplant v15: initializing with experimental toggles");
 
   app = new PIXI.Application({
     width: window.innerWidth,
@@ -816,7 +889,7 @@ function init() {
   // Fast Forward Button
   const btn = document.createElement("button");
   btn.id = "ff-btn";
-  btn.innerText = "1x";
+  btn.innerText = `${fastForwardFactor}x`;
   btn.style.position = "absolute";
   btn.style.top = "10px";
   btn.style.right = "10px";
@@ -877,15 +950,70 @@ function createUI() {
   particleCountText.zIndex = 1000;
   app.stage.addChild(particleCountText);
 
+  experimentText = new PIXI.Text("", style);
+  experimentText.x = 10;
+  experimentText.y = 50;
+  experimentText.zIndex = 1000;
+  app.stage.addChild(experimentText);
+  updateExperimentText();
+
   app.stage.sortableChildren = true;
+}
+
+function updateExperimentText() {
+  if (!experimentText) return;
+  const b = CONSTANTS.GRADUATED_ABSORPTION ? "ON" : "OFF";
+  const c = CONSTANTS.CHILD_STARTING_ENERGY ? "ON" : "OFF";
+  const d = CONSTANTS.DISTANCE_BONUS ? "ON" : "OFF";
+  experimentText.text = `[1] Graduated: ${b} | [2] ChildEnergy: ${c} | [3] DistBonus: ${d}`;
+}
+
+function resetSimulation() {
+  console.log("Resetting simulation...");
+
+  // Clear all plants
+  for (const plant of plants) {
+    for (const cell of plant.cells) {
+      if (cell.sprite) app.stage.removeChild(cell.sprite);
+    }
+  }
+  plants = [];
+
+  // Clear light particles
+  for (const light of lightParticles) {
+    if (light.sprite) app.stage.removeChild(light.sprite);
+  }
+  lightParticles = [];
+
+  // Clear traveling seeds
+  for (const seed of travelingSeeds) {
+    if (seed.sprite) app.stage.removeChild(seed.sprite);
+  }
+  travelingSeeds = [];
+
+  // Reset grid
+  occupancyGrid = new OccupancyGrid(cols, rows);
+
+  // Reset counters
+  frame = 0;
+  idCounter = 0;
+  rngState = CONSTANTS.RNG_SEED >>> 0;
+
+  // Reinitialize
+  initializeSeeds();
+  updateExperimentText();
+
+  console.log("Simulation reset complete.");
 }
 
 // --- Light Particles ---
 
 class LightParticle {
-  constructor(cell) {
+  constructor(cell, baseEnergy = 1) {
     this.cell = cell;
     this.plant = cell.plant;
+    this.baseEnergy = baseEnergy; // For graduated absorption
+    this.steps = 0; // For distance bonus
 
     this.sprite = new PIXI.Sprite(textures.light);
     this.sprite.alpha = 0.5;
@@ -905,10 +1033,17 @@ class LightParticle {
 
     if (this.cell.parent) {
       this.cell = this.cell.parent;
+      this.steps++;
       this.sprite.x = this.cell.pos.x * CONSTANTS.SCALE_SIZE;
       this.sprite.y = this.cell.pos.y * CONSTANTS.SCALE_SIZE;
     } else {
-      this.plant.energy++;
+      // Calculate final energy with distance bonus if enabled
+      let finalEnergy = this.baseEnergy;
+      if (CONSTANTS.DISTANCE_BONUS) {
+        finalEnergy =
+          this.baseEnergy * (1 + this.steps * CONSTANTS.DISTANCE_BONUS_FACTOR);
+      }
+      this.plant.energy += finalEnergy;
       this.destroy();
     }
   }
@@ -961,7 +1096,7 @@ class TravelingSeed {
     this.stepsTaken = 0;
 
     this.sprite = new PIXI.Sprite(textures.seed);
-    this.sprite.alpha = 0.8;
+    this.sprite.alpha = 0.1;
     this.sprite.scale.set(CONSTANTS.SCALE_SIZE);
     this.sprite.x = this.pos.x * CONSTANTS.SCALE_SIZE;
     this.sprite.y = this.pos.y * CONSTANTS.SCALE_SIZE;
@@ -1008,8 +1143,13 @@ class TravelingSeed {
       return;
     }
 
+    // Determine starting energy based on experimental setting
+    const startingEnergy = CONSTANTS.CHILD_STARTING_ENERGY
+      ? this.childGenome.length
+      : 0;
+
     // Success - create new plant
-    const newPlant = createPlant(this.childGenome, x, y);
+    const newPlant = createPlant(this.childGenome, x, y, startingEnergy);
     plants.push(newPlant);
     this.destroy();
   }
@@ -1067,7 +1207,15 @@ function gameLoop(delta) {
       }
       updated = true;
     } else {
-      if (now - lastTickTime >= CONSTANTS.TICK_INTERVAL_MS) {
+      // Logic for 1x and Slow Motion
+      // If factor < 1, we artificially delay ticks to simulate slow-mo.
+      // Base assumption: 1x = 60 ticks/sec.
+      let interval = CONSTANTS.TICK_INTERVAL_MS;
+      if (fastForwardFactor < 1) {
+        interval = 1000 / 60 / fastForwardFactor;
+      }
+
+      if (now - lastTickTime >= interval) {
         advanceTick();
         lastTickTime = now;
         updated = true;
@@ -1103,7 +1251,6 @@ function advanceTick() {
   }
 
   // 2. LIGHT ABSORPTION PHASE
-  // Now uses "3 open cardinal neighbors" rule from the original brief
   for (const plant of plants) {
     for (const cell of plant.cells) {
       if (cell === plant.seed) continue;
@@ -1113,15 +1260,33 @@ function advanceTick() {
         continue;
       }
 
-      // Original brief: "3 open cardinal directions"
       const openCardinals = cell.countOpenCardinals();
-      if (openCardinals >= 3) {
-        if (rand() < CONSTANTS.LIGHT_ABSORB_PROB) {
-          const light = new LightParticle(cell);
-          lightParticles.push(light);
-          cell.cooldown = CONSTANTS.LIGHT_COOLDOWN;
-          plant.ticksWithoutLight = 0;
+
+      // Determine if cell can absorb and how much energy
+      let canAbsorb = false;
+      let baseEnergy = 1;
+
+      if (CONSTANTS.GRADUATED_ABSORPTION) {
+        // Graduated: all cells with 1+ open can absorb, scaled by openness
+        if (openCardinals >= 1) {
+          canAbsorb = true;
+          if (openCardinals >= 3) baseEnergy = 1.5;
+          else if (openCardinals === 2) baseEnergy = 1.0;
+          else baseEnergy = 0.5; // 1 open
         }
+      } else {
+        // Default: only 3+ open cardinals can absorb
+        if (openCardinals >= 3) {
+          canAbsorb = true;
+          baseEnergy = 1;
+        }
+      }
+
+      if (canAbsorb && rand() < CONSTANTS.LIGHT_ABSORB_PROB) {
+        const light = new LightParticle(cell, baseEnergy);
+        lightParticles.push(light);
+        cell.cooldown = CONSTANTS.LIGHT_COOLDOWN;
+        plant.ticksWithoutLight = 0;
       }
     }
   }
@@ -1184,6 +1349,19 @@ function onKeyDown(e) {
     console.log("Fast Forward:", fastForward ? "ON" : "OFF");
   }
 
+  if (e.key === "o" || e.key === "O") {
+    CONSTANTS.ENABLE_RANDOM_FACING = !CONSTANTS.ENABLE_RANDOM_FACING;
+    console.log(
+      "Random Facing:",
+      CONSTANTS.ENABLE_RANDOM_FACING ? "ON" : "OFF"
+    );
+  }
+
+  if (e.key === "c" || e.key === "C") {
+    currentThemeIndex = (currentThemeIndex + 1) % CONSTANTS.THEMES.length;
+    applyTheme(currentThemeIndex);
+  }
+
   if (e.key === "r" || e.key === "R") {
     console.log("=== STATS ===");
     console.log("Frame:", frame);
@@ -1226,10 +1404,100 @@ function onKeyDown(e) {
       }
     }
   }
+
+  // === EXPERIMENTAL TOGGLES ===
+  // 1: Toggle Graduated Absorption (B)
+  if (e.key === "1") {
+    CONSTANTS.GRADUATED_ABSORPTION = !CONSTANTS.GRADUATED_ABSORPTION;
+    console.log(
+      `Graduated Absorption: ${CONSTANTS.GRADUATED_ABSORPTION ? "ON" : "OFF"}`
+    );
+    resetSimulation();
+  }
+
+  // 2: Toggle Child Starting Energy (C)
+  if (e.key === "2") {
+    CONSTANTS.CHILD_STARTING_ENERGY = !CONSTANTS.CHILD_STARTING_ENERGY;
+    console.log(
+      `Child Starting Energy: ${CONSTANTS.CHILD_STARTING_ENERGY ? "ON" : "OFF"}`
+    );
+    resetSimulation();
+  }
+
+  // 3: Toggle Distance Bonus (D)
+  if (e.key === "3") {
+    CONSTANTS.DISTANCE_BONUS = !CONSTANTS.DISTANCE_BONUS;
+    console.log(`Distance Bonus: ${CONSTANTS.DISTANCE_BONUS ? "ON" : "OFF"}`);
+    resetSimulation();
+  }
+
+  // 0: Reset simulation without changing settings
+  if (e.key === "0") {
+    resetSimulation();
+  }
 }
 
 function onResize() {
   app.renderer.resize(window.innerWidth, window.innerHeight);
+}
+
+function applyTheme(index) {
+  const theme = CONSTANTS.THEMES[index];
+  console.log(`Switching to theme: ${theme.NAME}`);
+
+  // 1. Update Global Constants
+  Object.assign(CONSTANTS.COLORS, theme.COLORS);
+
+  // 2. Update Background
+  if (app && app.renderer) {
+    app.renderer.backgroundColor = CONSTANTS.COLORS.BG;
+  }
+
+  // 3. Re-generate textures (light needs color update)
+  createTextures();
+
+  // 4. Update Existing Plants (re-calculate tints)
+  for (const plant of plants) {
+    // Re-calc stem tint base
+    plant.stemTint = CONSTANTS.ENABLE_PLANT_TINT
+      ? lerpColor(
+          CONSTANTS.COLORS.STEM,
+          plant.color,
+          CONSTANTS.PLANT_TINT_STRENGTH
+        )
+      : CONSTANTS.COLORS.STEM;
+
+    // Apply to all stem cells
+    for (const cell of plant.cells) {
+      if (cell.sprite && cell !== plant.seed) {
+        cell.sprite.tint = plant.stemTint;
+      }
+    }
+    // Update visuals (seed color)
+    plant.updateVisuals();
+  }
+
+  // 5. Update Light Particles (texture changed, but sprite refs need update?
+  // actually sprite refs point to the texture object, but we replaced the object in createTextures.
+  // PIXI sprites hold a reference to the texture. We need to update their texture property.)
+  for (const light of lightParticles) {
+    light.sprite.texture = textures.light;
+  }
+
+  // 6. Update Traveling Seeds (tint)
+  for (const seed of travelingSeeds) {
+    // Traveling seeds are white texture with no tint usually (or hardcoded?),
+    // but if we want them to match the theme's SEED color:
+    // In travelingSeed they use textures.seed (white) and we might want to tint them?
+    // Currently TravelingSeed sets alpha 0.1, no tint.
+    // Let's leave them white ghost-like, or tint them to SEED_IDLE?
+    // The original code didn't tint traveling seeds, just alpha.
+    // But SeedCell uses CONSTANTS.COLORS.SEED_IDLE.
+    // Let's tint traveling seeds to SEED_IDLE for consistency with theme
+    if (seed.sprite) {
+      seed.sprite.tint = CONSTANTS.COLORS.SEED_IDLE;
+    }
+  }
 }
 
 // Boot

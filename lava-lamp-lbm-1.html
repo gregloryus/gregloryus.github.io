@@ -1,0 +1,424 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Lava Lamp LBM v1</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        html, body { height: 100%; overflow: hidden; background: #0a0a12; }
+        #canvas { display: block; image-rendering: pixelated; }
+        #ui { position: absolute; top: 10px; left: 10px; color: #fff; font: 11px monospace; background: rgba(0,0,0,0.8); padding: 8px; border-radius: 4px; max-width: 300px; }
+        #controls { position: absolute; top: 10px; right: 10px; }
+        #controls button { padding: 8px 14px; margin: 2px; background: #222; color: #fff; border: 1px solid #555; cursor: pointer; font: 12px monospace; }
+    </style>
+</head>
+<body>
+<canvas id="canvas"></canvas>
+<div id="ui">
+    <div>Lava Lamp LBM v1</div>
+    <div>D2Q9 Lattice Boltzmann + Shan-Chen</div>
+    <div id="stats"></div>
+</div>
+<div id="controls">
+    <button id="ff">1x</button>
+    <button id="pp">||</button>
+    <button id="rr">Reset</button>
+</div>
+<script>
+// Lattice Boltzmann Method with Shan-Chen multi-phase
+//
+// D2Q9 lattice: 9 velocity directions per cell
+// Shan-Chen: pseudopotential interaction creates surface tension
+// Two fluids: "wax" (high density) and "medium" (low density)
+// Temperature affects the equation of state, changing phase behavior
+
+const CELL = 4;  // Larger cells for performance
+
+// D2Q9 lattice velocities (cx, cy) and weights
+// Direction indices: 0=rest, 1=E, 2=N, 3=W, 4=S, 5=NE, 6=NW, 7=SW, 8=SE
+const cx = [0, 1, 0, -1, 0, 1, -1, -1, 1];
+const cy = [0, 0, -1, 0, 1, -1, -1, 1, 1];  // Note: -1 is up (screen coords)
+const w = [4/9, 1/9, 1/9, 1/9, 1/9, 1/36, 1/36, 1/36, 1/36];
+const opposite = [0, 3, 4, 1, 2, 7, 8, 5, 6];  // Opposite direction for bounce-back
+
+// Physics parameters
+const TAU = 0.8;              // Relaxation time (viscosity: higher = less viscous)
+const G_INTERACTION = -5.0;   // Shan-Chen interaction strength (negative = attraction)
+const RHO_WAX = 2.0;          // Wax reference density
+const RHO_MEDIUM = 0.1;       // Medium reference density
+
+// Thermal buoyancy - THIS IS KEY
+// Must be strong enough to overcome surface tension (which is ~G_INTERACTION * psi^2)
+const THERMAL_BUOYANCY = 0.003;  // Force per unit mass per temperature difference
+const BASE_GRAVITY = 0.0002;     // Baseline downward pull (cold wax sinks)
+
+// Temperature parameters
+const HEAT_RATE = 0.002;      // How fast bottom heats
+const COOL_RATE = 0.001;      // How fast top cools
+const TEMP_DIFFUSION = 0.03;  // Temperature diffusion rate
+const NEUTRAL_TEMP = 0.45;    // Temperature at which wax is neutrally buoyant
+
+// Initial setup
+const WAX_HEIGHT_FRAC = 0.15;
+
+let W, H;
+let f, fTemp;      // Distribution functions (current and temp for streaming)
+let rho;           // Macroscopic density
+let ux, uy;        // Macroscopic velocity
+let temp;          // Temperature field
+let psi;           // Shan-Chen pseudopotential
+
+let frame = 0, paused = false, ff = 1;
+let initialMass;
+
+const canvas = document.getElementById('canvas');
+const ctx = canvas.getContext('2d');
+
+function resize() {
+    canvas.width = innerWidth;
+    canvas.height = innerHeight;
+    W = Math.floor(canvas.width / CELL);
+    H = Math.floor(canvas.height / CELL);
+    reset();
+}
+
+function reset() {
+    const size = W * H;
+
+    // 9 distribution functions per cell
+    f = new Float32Array(size * 9);
+    fTemp = new Float32Array(size * 9);
+
+    // Macroscopic quantities
+    rho = new Float32Array(size);
+    ux = new Float32Array(size);
+    uy = new Float32Array(size);
+    temp = new Float32Array(size);
+    psi = new Float32Array(size);
+
+    // Initialize: wax at bottom, medium above
+    const waxTop = H - Math.floor(H * WAX_HEIGHT_FRAC);
+
+    for (let y = 0; y < H; y++) {
+        for (let x = 0; x < W; x++) {
+            const i = y * W + x;
+
+            // Density: wax at bottom, medium above
+            if (y >= waxTop) {
+                rho[i] = RHO_WAX;
+                temp[i] = 0.3;  // Start cool
+            } else {
+                rho[i] = RHO_MEDIUM;
+                temp[i] = 0.5;  // Medium temperature
+            }
+
+            // Initialize equilibrium distributions
+            initEquilibrium(i, rho[i], 0, 0);
+        }
+    }
+
+    initialMass = getTotalMass();
+    frame = 0;
+}
+
+function initEquilibrium(i, rho0, ux0, uy0) {
+    // Set distribution functions to equilibrium for given density and velocity
+    const usq = ux0 * ux0 + uy0 * uy0;
+
+    for (let k = 0; k < 9; k++) {
+        const cu = cx[k] * ux0 + cy[k] * uy0;
+        f[i * 9 + k] = w[k] * rho0 * (1 + 3 * cu + 4.5 * cu * cu - 1.5 * usq);
+    }
+}
+
+function getTotalMass() {
+    let mass = 0;
+    for (let i = 0; i < W * H; i++) {
+        mass += rho[i];
+    }
+    return mass;
+}
+
+// Shan-Chen pseudopotential: psi(rho) = rho0 * (1 - exp(-rho/rho0))
+function computePsi(rho_val) {
+    const rho0 = 1.0;
+    return rho0 * (1 - Math.exp(-rho_val / rho0));
+}
+
+function tick() {
+    frame++;
+    const size = W * H;
+
+    // === Step 1: Compute macroscopic quantities from distributions ===
+    for (let i = 0; i < size; i++) {
+        let r = 0, vx = 0, vy = 0;
+        for (let k = 0; k < 9; k++) {
+            const fk = f[i * 9 + k];
+            r += fk;
+            vx += fk * cx[k];
+            vy += fk * cy[k];
+        }
+        rho[i] = r;
+        ux[i] = r > 0.001 ? vx / r : 0;
+        uy[i] = r > 0.001 ? vy / r : 0;
+        psi[i] = computePsi(r);
+    }
+
+    // === Step 2: Compute Shan-Chen interaction force ===
+    const Fx = new Float32Array(size);
+    const Fy = new Float32Array(size);
+
+    for (let y = 0; y < H; y++) {
+        for (let x = 0; x < W; x++) {
+            const i = y * W + x;
+            const psi_i = psi[i];
+
+            let fx = 0, fy = 0;
+
+            // Sum over neighbor directions (skip rest direction k=0)
+            for (let k = 1; k < 9; k++) {
+                let nx = x + cx[k];
+                let ny = y + cy[k];
+
+                // Periodic in x, bounce at y boundaries
+                nx = (nx + W) % W;
+                if (ny < 0) ny = 0;
+                if (ny >= H) ny = H - 1;
+
+                const ni = ny * W + nx;
+                const psi_n = psi[ni];
+
+                fx += w[k] * psi_n * cx[k];
+                fy += w[k] * psi_n * cy[k];
+            }
+
+            Fx[i] = -G_INTERACTION * psi_i * fx;
+            Fy[i] = -G_INTERACTION * psi_i * fy;
+
+            // THERMAL BUOYANCY - simple and strong
+            // temp > NEUTRAL_TEMP → rise (negative Fy)
+            // temp < NEUTRAL_TEMP → sink (positive Fy)
+            // Force proportional to mass and temperature difference
+            const t = temp[i];
+            const r = rho[i];
+
+            // Only apply buoyancy to wax (high density), not medium
+            if (r > 0.5) {
+                // Thermal lift: hot rises, cold sinks
+                const tempDiff = t - NEUTRAL_TEMP;
+                const thermalForce = -THERMAL_BUOYANCY * r * tempDiff;
+
+                // Base gravity: always pulls down slightly
+                const gravityForce = BASE_GRAVITY * r;
+
+                Fy[i] += thermalForce + gravityForce;
+            }
+        }
+    }
+
+    // === Step 3: Collision (BGK with forcing) ===
+    for (let i = 0; i < size; i++) {
+        const r = rho[i];
+        if (r < 0.001) continue;
+
+        // Velocity including force contribution (Guo forcing scheme)
+        const vx = ux[i] + Fx[i] / r * 0.5;
+        const vy = uy[i] + Fy[i] / r * 0.5;
+
+        const usq = vx * vx + vy * vy;
+
+        for (let k = 0; k < 9; k++) {
+            const cu = cx[k] * vx + cy[k] * vy;
+
+            // Equilibrium distribution
+            const feq = w[k] * r * (1 + 3 * cu + 4.5 * cu * cu - 1.5 * usq);
+
+            // BGK collision with forcing term
+            const Fi = w[k] * (1 - 0.5 / TAU) * (
+                3 * (cx[k] - vx) + 9 * cu * cx[k]
+            ) * Fx[i] + w[k] * (1 - 0.5 / TAU) * (
+                3 * (cy[k] - vy) + 9 * cu * cy[k]
+            ) * Fy[i];
+
+            f[i * 9 + k] += -(f[i * 9 + k] - feq) / TAU + Fi;
+        }
+    }
+
+    // === Step 4: Streaming (move distributions to neighbors) ===
+    for (let i = 0; i < size * 9; i++) {
+        fTemp[i] = 0;
+    }
+
+    for (let y = 0; y < H; y++) {
+        for (let x = 0; x < W; x++) {
+            const i = y * W + x;
+
+            for (let k = 0; k < 9; k++) {
+                let nx = x + cx[k];
+                let ny = y + cy[k];
+
+                // Periodic in x
+                nx = (nx + W) % W;
+
+                // Bounce-back at y boundaries
+                if (ny < 0 || ny >= H) {
+                    // Reflect back into same cell, opposite direction
+                    fTemp[i * 9 + opposite[k]] += f[i * 9 + k];
+                } else {
+                    const ni = ny * W + nx;
+                    fTemp[ni * 9 + k] += f[i * 9 + k];
+                }
+            }
+        }
+    }
+
+    // Swap buffers
+    [f, fTemp] = [fTemp, f];
+
+    // === Step 5: Temperature evolution ===
+    const newTemp = new Float32Array(size);
+
+    for (let y = 0; y < H; y++) {
+        for (let x = 0; x < W; x++) {
+            const i = y * W + x;
+            let t = temp[i];
+
+            // Heat diffusion (average with neighbors)
+            let sum = t, count = 1;
+            for (const [dx, dy] of [[-1,0], [1,0], [0,-1], [0,1]]) {
+                const nx = (x + dx + W) % W;
+                const ny = y + dy;
+                if (ny >= 0 && ny < H) {
+                    // Weight by density (heat transfers through wax)
+                    const ni = ny * W + nx;
+                    const weight = Math.min(rho[i], rho[ni]) / RHO_WAX;
+                    sum += temp[ni] * weight;
+                    count += weight;
+                }
+            }
+            t += (sum / count - t) * TEMP_DIFFUSION;
+
+            // Bottom heating (centralized)
+            const bottomZone = H * 0.85;
+            if (y > bottomZone && rho[i] > 0.5) {
+                const intensity = (y - bottomZone) / (H - bottomZone);
+                const centerDist = Math.abs(x - W/2) / (W/2);
+                const horizIntensity = Math.pow(1 - centerDist, 2);
+                t += HEAT_RATE * intensity * horizIntensity;
+            }
+
+            // Top cooling
+            const topZone = H * 0.2;
+            if (y < topZone && rho[i] > 0.5) {
+                const intensity = 1 - y / topZone;
+                t -= COOL_RATE * intensity;
+            }
+
+            newTemp[i] = Math.max(0, Math.min(1, t));
+        }
+    }
+    temp = newTemp;
+}
+
+function render() {
+    ctx.fillStyle = '#0a0a12';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    // Create image data for faster rendering
+    const imageData = ctx.createImageData(W, H);
+    const data = imageData.data;
+
+    for (let y = 0; y < H; y++) {
+        for (let x = 0; x < W; x++) {
+            const i = y * W + x;
+            const pi = (y * W + x) * 4;
+
+            const d = rho[i];
+            const t = temp[i];
+
+            // Only render if there's significant wax
+            if (d > 0.3) {
+                // Normalize density for coloring
+                const dNorm = Math.min(1, (d - RHO_MEDIUM) / (RHO_WAX - RHO_MEDIUM));
+
+                let r, g, b;
+                if (t < 0.35) {
+                    r = 50 + 120 * (t / 0.35);
+                    g = 20 + 40 * (t / 0.35);
+                    b = 80 - 40 * (t / 0.35);
+                } else if (t < 0.65) {
+                    const f = (t - 0.35) / 0.3;
+                    r = 170 + 60 * f;
+                    g = 60 + 80 * f;
+                    b = 40 - 20 * f;
+                } else {
+                    const f = (t - 0.65) / 0.35;
+                    r = 230 + 25 * f;
+                    g = 140 + 115 * f;
+                    b = 20 + 100 * f;
+                }
+
+                const alpha = 0.3 + dNorm * 0.7;
+                data[pi] = r * alpha;
+                data[pi + 1] = g * alpha;
+                data[pi + 2] = b * alpha;
+                data[pi + 3] = 255;
+            } else {
+                // Background/medium
+                data[pi] = 10;
+                data[pi + 1] = 10;
+                data[pi + 2] = 18;
+                data[pi + 3] = 255;
+            }
+        }
+    }
+
+    // Scale up the image
+    const tempCanvas = document.createElement('canvas');
+    tempCanvas.width = W;
+    tempCanvas.height = H;
+    tempCanvas.getContext('2d').putImageData(imageData, 0, 0);
+
+    ctx.imageSmoothingEnabled = false;
+    ctx.drawImage(tempCanvas, 0, 0, W * CELL, H * CELL);
+
+    // Heater indicator
+    ctx.fillStyle = 'rgba(255,80,0,0.6)';
+    ctx.fillRect(0, canvas.height - 3, canvas.width, 3);
+}
+
+function loop() {
+    if (!paused) {
+        for (let i = 0; i < ff; i++) tick();
+    }
+    render();
+
+    const mass = getTotalMass();
+    const avgTemp = temp.reduce((a, b) => a + b, 0) / (W * H);
+    document.getElementById('stats').innerHTML =
+        `Tick: ${frame}<br>Mass: ${mass.toFixed(0)}/${initialMass.toFixed(0)}<br>Grid: ${W}x${H}`;
+
+    requestAnimationFrame(loop);
+}
+
+document.getElementById('ff').onclick = () => {
+    ff = ff === 1 ? 2 : ff === 2 ? 5 : ff === 5 ? 10 : 1;
+    document.getElementById('ff').textContent = ff + 'x';
+};
+document.getElementById('pp').onclick = () => {
+    paused = !paused;
+    document.getElementById('pp').textContent = paused ? '▶' : '||';
+};
+document.getElementById('rr').onclick = reset;
+addEventListener('resize', resize);
+addEventListener('keydown', e => {
+    if (e.code === 'Space') { paused = !paused; e.preventDefault(); }
+    if (e.code === 'KeyR') reset();
+});
+
+resize();
+loop();
+</script>
+</body>
+</html>

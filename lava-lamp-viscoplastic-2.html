@@ -1,0 +1,501 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Lava Lamp - Viscoplastic CA v2</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        html, body { height: 100%; overflow: hidden; background: #0a0a12; }
+        #canvas { display: block; }
+        #ui { position: absolute; top: 4px; left: 6px; color: #fff; font: 10px monospace; background: rgba(0,0,0,0.8); padding: 4px 6px; border-radius: 3px; }
+        #controls { position: absolute; top: 4px; right: 6px; display: flex; gap: 2px; }
+        #controls button { padding: 3px 8px; background: #222; color: #fff; border: 1px solid #555; cursor: pointer; font: 9px monospace; }
+        #params { position: absolute; top: 28px; left: 0; right: 0; color: #ccc; font: 8px monospace; background: rgba(0,0,0,0.9); padding: 4px 8px; display: flex; flex-wrap: wrap; gap: 2px 10px; align-items: center; }
+        #params label { display: flex; align-items: center; gap: 3px; white-space: nowrap; }
+        #params input[type="number"] { width: 50px; background: #222; color: #fff; border: 1px solid #444; padding: 1px 2px; font: 8px monospace; }
+        #params .section { color: #888; font-weight: bold; margin-left: 8px; }
+        #params .section:first-child { margin-left: 0; }
+    </style>
+</head>
+<body>
+<canvas id="canvas"></canvas>
+<div id="ui">
+    <div>Viscoplastic CA v2 (Lattice-Based)</div>
+    <div id="stats"></div>
+</div>
+<div id="controls">
+    <button id="ff">1x</button>
+    <button id="pp">||</button>
+    <button id="rr">Reset</button>
+    <button id="toggleParams">Params</button>
+</div>
+<div id="params">
+    <span class="section">Yield</span>
+    <label>T_yield<input type="number" id="p_yieldT" step="0.05" value="0.4" title="Temperature threshold for flow (below = solid)"></label>
+    <label>FlowRate<input type="number" id="p_flowRate" step="0.01" value="0.15" title="Max flow rate when hot"></label>
+    <span class="section">Forces</span>
+    <label>Buoy<input type="number" id="p_buoy" step="0.01" value="0.12" title="Buoyancy strength"></label>
+    <label>Grav<input type="number" id="p_grav" step="0.01" value="0.08" title="Gravity strength"></label>
+    <label>BuoyT<input type="number" id="p_buoyT" step="0.05" value="0.5" title="Temperature for buoyancy to kick in"></label>
+    <span class="section">Cohesion</span>
+    <label>Strength<input type="number" id="p_cohesion" step="0.01" value="0.3" title="Surface tension - wax prefers adjacent wax"></label>
+    <span class="section">Temp</span>
+    <label>Heat<input type="number" id="p_heatR" step="0.001" value="0.004"></label>
+    <label>Cool<input type="number" id="p_coolR" step="0.001" value="0.003"></label>
+    <label>Diff<input type="number" id="p_diffuse" step="0.01" value="0.08"></label>
+    <span class="section">Zones</span>
+    <label>HeatY<input type="number" id="p_heatZone" step="0.02" value="0.12"></label>
+    <label>CoolY<input type="number" id="p_coolZone" step="0.02" value="0.15"></label>
+    <span class="section">Grid</span>
+    <label>Cell<input type="number" id="p_cell" step="1" value="4"></label>
+</div>
+
+<script>
+// ============================================================
+// Viscoplastic Cellular Automaton - Lattice Based
+//
+// Each CELL on the lattice has:
+//   - wax: amount of wax (0 to 1)
+//   - temp: temperature (0 to 1)
+//
+// Key viscoplastic behavior:
+//   - Below yield temperature: wax is SOLID, doesn't flow
+//   - Above yield temperature: wax is LIQUID, can flow
+//   - Flow rate increases with temperature
+//
+// This gives emergent solid→liquid transition from LOCAL RULES
+// on a DISCRETE LATTICE with MASS CONSERVATION.
+// ============================================================
+
+const canvas = document.getElementById('canvas');
+const ctx = canvas.getContext('2d');
+
+let P = {};  // Parameters
+let W, H;    // Grid dimensions
+let frame = 0, paused = false, ff = 1;
+
+// Cell data - each cell on the lattice
+let wax;     // [W*H] - wax amount in each cell (0 to 1)
+let temp;    // [W*H] - temperature of each cell
+let wax_new; // [W*H] - buffer for updates
+
+let initialMass = 0;
+
+function readParams() {
+    P = {
+        CELL: parseFloat(document.getElementById('p_cell').value),
+        YIELD_TEMP: parseFloat(document.getElementById('p_yieldT').value),
+        FLOW_RATE: parseFloat(document.getElementById('p_flowRate').value),
+        BUOYANCY: parseFloat(document.getElementById('p_buoy').value),
+        GRAVITY: parseFloat(document.getElementById('p_grav').value),
+        BUOY_THRESHOLD: parseFloat(document.getElementById('p_buoyT').value),
+        COHESION: parseFloat(document.getElementById('p_cohesion').value),
+        HEAT_RATE: parseFloat(document.getElementById('p_heatR').value),
+        COOL_RATE: parseFloat(document.getElementById('p_coolR').value),
+        TEMP_DIFFUSION: parseFloat(document.getElementById('p_diffuse').value),
+        HEAT_ZONE: parseFloat(document.getElementById('p_heatZone').value),
+        COOL_ZONE: parseFloat(document.getElementById('p_coolZone').value)
+    };
+}
+
+function idx(x, y) {
+    return y * W + x;
+}
+
+function sigmoid(x) {
+    if (x > 10) return 1;
+    if (x < -10) return 0;
+    return 1 / (1 + Math.exp(-x));
+}
+
+function initialize() {
+    readParams();
+
+    wax = new Float32Array(W * H);
+    temp = new Float32Array(W * H);
+    wax_new = new Float32Array(W * H);
+
+    // Initialize: wax blob at bottom
+    const waxHeight = Math.floor(H * 0.15);
+
+    for (let y = 0; y < H; y++) {
+        for (let x = 0; x < W; x++) {
+            const i = idx(x, y);
+
+            if (y < waxHeight) {
+                // Wax region - slight noise for variation
+                wax[i] = 0.95 + Math.random() * 0.05;
+                temp[i] = 0.15 + Math.random() * 0.05;  // Start cold
+            } else {
+                // Water region (empty of wax)
+                wax[i] = 0;
+                temp[i] = 0.3;  // Ambient
+            }
+        }
+    }
+
+    // Compute initial mass
+    initialMass = 0;
+    for (let i = 0; i < W * H; i++) {
+        initialMass += wax[i];
+    }
+
+    frame = 0;
+}
+
+function updateWax() {
+    // Copy current state
+    wax_new.set(wax);
+
+    // Process each cell
+    for (let y = 0; y < H; y++) {
+        for (let x = 0; x < W; x++) {
+            const i = idx(x, y);
+            const w = wax[i];
+            const t = temp[i];
+
+            if (w < 0.01) continue;  // No wax to move
+
+            // YIELD STRESS: Only flow if temperature > yield threshold
+            const fluidness = Math.max(0, (t - P.YIELD_TEMP) / (1 - P.YIELD_TEMP));
+            if (fluidness < 0.01) continue;  // Solid - no flow
+
+            // How much can flow this tick (temperature-dependent)
+            const maxFlow = P.FLOW_RATE * fluidness * w;
+
+            // Compute flow preferences to each neighbor
+            // Neighbors: up, down, left, right
+            const neighbors = [
+                { dx: 0, dy: 1, dir: 'up' },
+                { dx: 0, dy: -1, dir: 'down' },
+                { dx: -1, dy: 0, dir: 'left' },
+                { dx: 1, dy: 0, dir: 'right' }
+            ];
+
+            let totalWeight = 0;
+            const weights = [];
+
+            for (const n of neighbors) {
+                const nx = x + n.dx;
+                const ny = y + n.dy;
+
+                // Boundary check
+                if (nx < 0 || nx >= W || ny < 0 || ny >= H) {
+                    weights.push(0);
+                    continue;
+                }
+
+                const ni = idx(nx, ny);
+                const nWax = wax[ni];
+                const nTemp = temp[ni];
+
+                // Can only flow into cells that aren't full
+                if (nWax > 0.98) {
+                    weights.push(0);
+                    continue;
+                }
+
+                let weight = 0;
+
+                // BUOYANCY: hot wax wants to go UP
+                if (n.dy > 0 && t > P.BUOY_THRESHOLD) {
+                    const buoyStrength = (t - P.BUOY_THRESHOLD) / (1 - P.BUOY_THRESHOLD);
+                    weight += P.BUOYANCY * buoyStrength;
+                }
+
+                // GRAVITY: wax wants to go DOWN (stronger when cold)
+                if (n.dy < 0) {
+                    const coldness = 1 - t;
+                    weight += P.GRAVITY * (0.3 + 0.7 * coldness);
+                }
+
+                // PRESSURE: flow from high-wax to low-wax regions
+                const pressureDiff = w - nWax;
+                if (pressureDiff > 0) {
+                    weight += pressureDiff * 0.2;
+                }
+
+                // COHESION: prefer to flow toward cells that have wax neighbors
+                // This creates surface tension effect
+                let neighborWaxCount = 0;
+                for (let dy = -1; dy <= 1; dy++) {
+                    for (let dx = -1; dx <= 1; dx++) {
+                        const nnx = nx + dx;
+                        const nny = ny + dy;
+                        if (nnx >= 0 && nnx < W && nny >= 0 && nny < H) {
+                            if (wax[idx(nnx, nny)] > 0.5) neighborWaxCount++;
+                        }
+                    }
+                }
+                // Cohesion: more likely to flow where there's already wax nearby
+                weight += P.COHESION * (neighborWaxCount / 9);
+
+                // Anti-cohesion for isolated flow: penalize flowing into empty regions
+                if (nWax < 0.1 && neighborWaxCount < 2) {
+                    weight *= 0.3;  // Discourage spreading too thin
+                }
+
+                weight = Math.max(0, weight);
+                weights.push(weight);
+                totalWeight += weight;
+            }
+
+            // Distribute flow according to weights
+            if (totalWeight > 0.001) {
+                let totalFlowed = 0;
+
+                for (let j = 0; j < neighbors.length; j++) {
+                    if (weights[j] < 0.001) continue;
+
+                    const n = neighbors[j];
+                    const nx = x + n.dx;
+                    const ny = y + n.dy;
+                    const ni = idx(nx, ny);
+
+                    // Flow amount proportional to weight
+                    const flowFrac = weights[j] / totalWeight;
+                    let flowAmount = maxFlow * flowFrac;
+
+                    // Don't overflow target cell
+                    const spaceAvailable = 1 - wax_new[ni];
+                    flowAmount = Math.min(flowAmount, spaceAvailable);
+
+                    // Don't drain source below zero
+                    flowAmount = Math.min(flowAmount, wax_new[i]);
+
+                    if (flowAmount > 0.001) {
+                        wax_new[i] -= flowAmount;
+                        wax_new[ni] += flowAmount;
+                        totalFlowed += flowAmount;
+                    }
+                }
+            }
+        }
+    }
+
+    // Swap buffers
+    const tmp = wax;
+    wax = wax_new;
+    wax_new = tmp;
+}
+
+function updateTemperature() {
+    const newTemp = new Float32Array(W * H);
+
+    for (let y = 0; y < H; y++) {
+        const yNorm = y / H;  // 0 at bottom, 1 at top
+
+        for (let x = 0; x < W; x++) {
+            const i = idx(x, y);
+            const w = wax[i];
+            let t = temp[i];
+
+            // Temperature diffusion (stronger through wax)
+            let sum = t;
+            let count = 1;
+
+            const neighbors = [[x-1, y], [x+1, y], [x, y-1], [x, y+1]];
+            for (const [nx, ny] of neighbors) {
+                if (nx >= 0 && nx < W && ny >= 0 && ny < H) {
+                    const ni = idx(nx, ny);
+                    // Diffusion weighted by wax contact
+                    const contact = Math.min(w, wax[ni]) + 0.1;
+                    sum += temp[ni] * contact;
+                    count += contact;
+                }
+            }
+
+            t += (sum / count - t) * P.TEMP_DIFFUSION;
+
+            // Heat zone (bottom)
+            if (yNorm < P.HEAT_ZONE && w > 0.1) {
+                const intensity = 1 - yNorm / P.HEAT_ZONE;
+                // Stronger in center
+                const xNorm = x / W;
+                const centerDist = Math.abs(xNorm - 0.5) * 2;
+                const horizFactor = 1 - centerDist * centerDist;
+                t += P.HEAT_RATE * intensity * horizFactor;
+            }
+
+            // Cool zone (top)
+            if (yNorm > (1 - P.COOL_ZONE) && w > 0.1) {
+                const intensity = (yNorm - (1 - P.COOL_ZONE)) / P.COOL_ZONE;
+                t -= P.COOL_RATE * intensity;
+            }
+
+            // Ambient cooling for wax in water region
+            if (w > 0.1 && yNorm > P.HEAT_ZONE && yNorm < (1 - P.COOL_ZONE)) {
+                // Very slow ambient cooling
+                t -= 0.0005;
+            }
+
+            newTemp[i] = Math.max(0, Math.min(1, t));
+        }
+    }
+
+    temp.set(newTemp);
+}
+
+function tick() {
+    frame++;
+    updateWax();
+    updateTemperature();
+}
+
+function render() {
+    const imageData = ctx.createImageData(W, H);
+    const data = imageData.data;
+
+    for (let y = 0; y < H; y++) {
+        for (let x = 0; x < W; x++) {
+            const i = idx(x, y);
+            // Flip y for canvas (y=0 at top in canvas, y=0 at bottom in our grid)
+            const canvasY = H - 1 - y;
+            const pi = (canvasY * W + x) * 4;
+
+            const w = wax[i];
+            const t = temp[i];
+
+            // Background (dark blue water)
+            let r = 10, g = 12, b = 25;
+
+            // Wax color based on temperature
+            if (w > 0.01) {
+                let waxR, waxG, waxB;
+
+                if (t < 0.35) {
+                    // Cold: deep purple (solid)
+                    const f = t / 0.35;
+                    waxR = 50 + 80 * f;
+                    waxG = 15 + 25 * f;
+                    waxB = 100 + 20 * f;
+                } else if (t < 0.55) {
+                    // Warm: red-magenta (softening)
+                    const f = (t - 0.35) / 0.2;
+                    waxR = 130 + 80 * f;
+                    waxG = 40 + 50 * f;
+                    waxB = 120 - 80 * f;
+                } else {
+                    // Hot: bright orange-yellow (liquid)
+                    const f = (t - 0.55) / 0.45;
+                    waxR = 210 + 45 * f;
+                    waxG = 90 + 165 * f;
+                    waxB = 40 - 20 * f;
+                }
+
+                // Blend based on wax amount (fills the cell)
+                const alpha = Math.min(1, w);
+                r = r * (1 - alpha) + waxR * alpha;
+                g = g * (1 - alpha) + waxG * alpha;
+                b = b * (1 - alpha) + waxB * alpha;
+            }
+
+            // Heater glow at bottom
+            const yNorm = y / H;
+            if (yNorm < 0.02) {
+                const glowIntensity = 1 - yNorm / 0.02;
+                r = r * (1 - glowIntensity * 0.6) + 255 * glowIntensity * 0.6;
+                g = g * (1 - glowIntensity * 0.6) + 50 * glowIntensity * 0.6;
+                b = b * (1 - glowIntensity * 0.6) + 0 * glowIntensity * 0.6;
+            }
+
+            data[pi] = Math.floor(r);
+            data[pi + 1] = Math.floor(g);
+            data[pi + 2] = Math.floor(b);
+            data[pi + 3] = 255;
+        }
+    }
+
+    // Scale up to canvas size
+    const tempCanvas = document.createElement('canvas');
+    tempCanvas.width = W;
+    tempCanvas.height = H;
+    tempCanvas.getContext('2d').putImageData(imageData, 0, 0);
+
+    ctx.imageSmoothingEnabled = false;
+    ctx.drawImage(tempCanvas, 0, 0, canvas.width, canvas.height);
+}
+
+function getStats() {
+    let mass = 0, maxT = 0, maxWaxY = 0;
+
+    for (let y = 0; y < H; y++) {
+        for (let x = 0; x < W; x++) {
+            const i = idx(x, y);
+            mass += wax[i];
+
+            if (wax[i] > 0.3) {
+                if (temp[i] > maxT) maxT = temp[i];
+                if (y > maxWaxY) maxWaxY = y;
+            }
+        }
+    }
+
+    return {
+        massRatio: (mass / initialMass * 100).toFixed(1),
+        maxT: maxT.toFixed(2),
+        height: ((maxWaxY + 1) / H * 100).toFixed(0)
+    };
+}
+
+function loop() {
+    if (!paused) {
+        for (let i = 0; i < ff; i++) tick();
+    }
+    render();
+
+    if (frame % 10 === 0) {
+        const stats = getStats();
+        document.getElementById('stats').innerHTML =
+            `Tick: ${frame} | Mass: ${stats.massRatio}% | MaxT: ${stats.maxT} | Height: ${stats.height}% | ${W}x${H}`;
+    }
+
+    requestAnimationFrame(loop);
+}
+
+function resize() {
+    canvas.width = innerWidth;
+    canvas.height = innerHeight;
+    readParams();
+    W = Math.floor(canvas.width / P.CELL);
+    H = Math.floor(canvas.height / P.CELL);
+    initialize();
+}
+
+// Event handlers
+document.getElementById('ff').onclick = () => {
+    ff = ff === 1 ? 5 : ff === 5 ? 20 : 1;
+    document.getElementById('ff').textContent = ff + 'x';
+};
+
+document.getElementById('pp').onclick = () => {
+    paused = !paused;
+    document.getElementById('pp').textContent = paused ? '>' : '||';
+};
+
+document.getElementById('rr').onclick = initialize;
+
+let paramsVisible = true;
+document.getElementById('toggleParams').onclick = () => {
+    paramsVisible = !paramsVisible;
+    document.getElementById('params').style.display = paramsVisible ? 'flex' : 'none';
+};
+
+document.getElementById('params').addEventListener('change', () => {
+    readParams();
+    initialize();
+});
+
+addEventListener('resize', resize);
+addEventListener('keydown', e => {
+    if (e.code === 'Space') { paused = !paused; e.preventDefault(); }
+    if (e.code === 'KeyR') initialize();
+});
+
+// Start
+resize();
+loop();
+</script>
+</body>
+</html>

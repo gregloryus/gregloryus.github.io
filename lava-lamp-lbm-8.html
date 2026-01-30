@@ -1,0 +1,651 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Lava Lamp LBM v8</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        html, body { height: 100%; overflow: hidden; background: #0a0a12; }
+        #canvas { display: block; image-rendering: pixelated; }
+        #ui { position: absolute; top: 4px; left: 6px; color: #fff; font: 9px monospace; background: rgba(0,0,0,0.8); padding: 4px 6px; border-radius: 3px; }
+        #controls { position: absolute; top: 4px; right: 6px; display: flex; gap: 2px; }
+        #controls button { padding: 3px 8px; background: #222; color: #fff; border: 1px solid #555; cursor: pointer; font: 9px monospace; }
+        #params { position: absolute; top: 28px; left: 0; right: 0; color: #ccc; font: 7px monospace; background: rgba(0,0,0,0.9); padding: 4px 8px; display: flex; flex-wrap: wrap; gap: 2px 12px; align-items: center; }
+        #params label { display: flex; align-items: center; gap: 3px; white-space: nowrap; }
+        #params input[type="number"] { width: 45px; background: #222; color: #fff; border: 1px solid #444; padding: 1px 2px; font: 7px monospace; }
+        #params .section { color: #666; font-weight: bold; margin-left: 6px; }
+        #params .section:first-child { margin-left: 0; }
+        #toggleParams { padding: 3px 8px; background: #222; color: #fff; border: 1px solid #555; cursor: pointer; font: 9px monospace; }
+    </style>
+</head>
+<body>
+<canvas id="canvas"></canvas>
+<div id="ui">
+    <div>Lava Lamp LBM v8 (Two-Component)</div>
+    <div id="stats"></div>
+</div>
+<div id="controls">
+    <button id="ff">1x</button>
+    <button id="pp">||</button>
+    <button id="rr">Reset</button>
+    <button id="toggleParams">Params</button>
+</div>
+<div id="params">
+    <span class="section">Shan-Chen</span>
+    <label>G_AA<input type="number" id="p_gAA" step="0.5" value="-3.0"></label>
+    <label>G_BB<input type="number" id="p_gBB" step="0.5" value="0"></label>
+    <label>G_AB<input type="number" id="p_gAB" step="0.5" value="2.5"></label>
+    <label>TempCoh<input type="number" id="p_tempCoh" step="0.1" value="0.5"></label>
+    <span class="section">Density</span>
+    <label>Wax<input type="number" id="p_rhoWax" step="0.05" value="1.15"></label>
+    <label>Water<input type="number" id="p_rhoWater" step="0.05" value="1.0"></label>
+    <label>WaxH<input type="number" id="p_waxH" step="0.02" value="0.18"></label>
+    <span class="section">Viscosity</span>
+    <label>TauWaxC<input type="number" id="p_tauWaxC" step="0.1" value="1.8"></label>
+    <label>TauWaxH<input type="number" id="p_tauWaxH" step="0.05" value="0.95"></label>
+    <label>TauWater<input type="number" id="p_tauWater" step="0.05" value="1.0"></label>
+    <label>TransT<input type="number" id="p_transT" step="0.05" value="0.45"></label>
+    <label>Sharp<input type="number" id="p_sharp" step="1" value="12"></label>
+    <span class="section">Forces</span>
+    <label>Buoy<input type="number" id="p_buoy" step="0.001" value="0.008"></label>
+    <label>Grav<input type="number" id="p_grav" step="0.0001" value="0.0003"></label>
+    <label>NeutT<input type="number" id="p_neutralT" step="0.05" value="0.4"></label>
+    <span class="section">Temp</span>
+    <label>Heat<input type="number" id="p_heatR" step="0.002" value="0.012"></label>
+    <label>Cool<input type="number" id="p_coolR" step="0.001" value="0.004"></label>
+    <label>Diff<input type="number" id="p_diffuse" step="0.01" value="0.02"></label>
+    <label>WaxT0<input type="number" id="p_initWaxT" step="0.05" value="0.15"></label>
+    <label>WaterT0<input type="number" id="p_initWaterT" step="0.05" value="0.35"></label>
+    <span class="section">Zones</span>
+    <label>HeatY<input type="number" id="p_heatZone" step="0.02" value="0.88"></label>
+    <label>HeatVF<input type="number" id="p_heatVFall" step="0.5" value="2.0"></label>
+    <label>HeatHF<input type="number" id="p_heatFall" step="0.5" value="3.0"></label>
+    <label>CoolY<input type="number" id="p_coolZone" step="0.02" value="0.2"></label>
+    <label>HeatSpots<input type="number" id="p_heatSpots" step="1" value="3"></label>
+    <span class="section">Other</span>
+    <label>Noise<input type="number" id="p_noise" step="0.0005" value="0.002"></label>
+    <label>Stab<input type="number" id="p_stab" step="100" value="500"></label>
+    <label>Cell<input type="number" id="p_cell" step="1" value="4"></label>
+</div>
+<script>
+// Two-Component Shan-Chen Lattice Boltzmann
+// v8: Improvements for realistic lava lamp behavior
+//
+// Key changes from v7:
+// - Sigmoid-based viscosity transition (phase-change feel)
+// - Temperature-dependent cohesion (hot blobs merge, cold bounce)
+// - Velocity clamping instead of skipping (mass conservation)
+// - Rebalanced parameters for slow warmup, gradual dynamics
+// - Safer tau range (>0.9 for hot wax)
+
+// D2Q9 lattice
+const cx = [0, 1, 0, -1, 0, 1, -1, -1, 1];
+const cy = [0, 0, -1, 0, 1, -1, -1, 1, 1];
+const w = [4/9, 1/9, 1/9, 1/9, 1/9, 1/36, 1/36, 1/36, 1/36];
+const opposite = [0, 3, 4, 1, 2, 7, 8, 5, 6];
+
+let P = {};
+
+function readParams() {
+    P = {
+        CELL: parseFloat(document.getElementById('p_cell').value),
+        G_AA: parseFloat(document.getElementById('p_gAA').value),
+        G_BB: parseFloat(document.getElementById('p_gBB').value),
+        G_AB: parseFloat(document.getElementById('p_gAB').value),
+        TEMP_COHESION: parseFloat(document.getElementById('p_tempCoh').value),
+        RHO_WAX: parseFloat(document.getElementById('p_rhoWax').value),
+        RHO_WATER: parseFloat(document.getElementById('p_rhoWater').value),
+        WAX_HEIGHT_FRAC: parseFloat(document.getElementById('p_waxH').value),
+        TAU_WAX_COLD: parseFloat(document.getElementById('p_tauWaxC').value),
+        TAU_WAX_HOT: parseFloat(document.getElementById('p_tauWaxH').value),
+        TAU_WATER: parseFloat(document.getElementById('p_tauWater').value),
+        TRANSITION_TEMP: parseFloat(document.getElementById('p_transT').value),
+        SHARPNESS: parseFloat(document.getElementById('p_sharp').value),
+        THERMAL_BUOYANCY: parseFloat(document.getElementById('p_buoy').value),
+        BASE_GRAVITY: parseFloat(document.getElementById('p_grav').value),
+        NEUTRAL_TEMP: parseFloat(document.getElementById('p_neutralT').value),
+        HEAT_RATE: parseFloat(document.getElementById('p_heatR').value),
+        COOL_RATE: parseFloat(document.getElementById('p_coolR').value),
+        TEMP_DIFFUSION: parseFloat(document.getElementById('p_diffuse').value),
+        INIT_WAX_TEMP: parseFloat(document.getElementById('p_initWaxT').value),
+        INIT_WATER_TEMP: parseFloat(document.getElementById('p_initWaterT').value),
+        HEAT_ZONE_START: parseFloat(document.getElementById('p_heatZone').value),
+        HEAT_VERT_FALLOFF: parseFloat(document.getElementById('p_heatVFall').value),
+        HEAT_HORIZ_FALLOFF: parseFloat(document.getElementById('p_heatFall').value),
+        COOL_ZONE_END: parseFloat(document.getElementById('p_coolZone').value),
+        HEAT_SPOTS: parseInt(document.getElementById('p_heatSpots').value),
+        NOISE_AMPLITUDE: parseFloat(document.getElementById('p_noise').value),
+        STABILIZATION_TICKS: parseInt(document.getElementById('p_stab').value)
+    };
+}
+
+let W, H;
+let f_A, f_A_temp;  // Wax distributions
+let f_B, f_B_temp;  // Water distributions
+let rho_A, rho_B;   // Densities
+let ux, uy;         // Combined velocity
+let psi_A, psi_B;   // Pseudopotentials
+let temp;           // Temperature field
+
+let frame = 0, paused = false, ff = 1;
+let initialMassA, initialMassB;
+
+const canvas = document.getElementById('canvas');
+const ctx = canvas.getContext('2d');
+
+function resize() {
+    readParams();
+    canvas.width = innerWidth;
+    canvas.height = innerHeight;
+    W = Math.floor(canvas.width / P.CELL);
+    H = Math.floor(canvas.height / P.CELL);
+    reset();
+}
+
+function reset() {
+    readParams();
+    W = Math.floor(canvas.width / P.CELL);
+    H = Math.floor(canvas.height / P.CELL);
+
+    const size = W * H;
+
+    f_A = new Float32Array(size * 9);
+    f_A_temp = new Float32Array(size * 9);
+    f_B = new Float32Array(size * 9);
+    f_B_temp = new Float32Array(size * 9);
+
+    rho_A = new Float32Array(size);
+    rho_B = new Float32Array(size);
+    ux = new Float32Array(size);
+    uy = new Float32Array(size);
+    psi_A = new Float32Array(size);
+    psi_B = new Float32Array(size);
+    temp = new Float32Array(size);
+
+    // Initialize: wax at bottom, water above
+    const waxTop = H - Math.floor(H * P.WAX_HEIGHT_FRAC);
+    const interfaceWidth = 4;
+
+    for (let y = 0; y < H; y++) {
+        for (let x = 0; x < W; x++) {
+            const i = y * W + x;
+
+            // Smooth interface
+            const distFromInterface = y - waxTop;
+            const blend = 0.5 * (1 + Math.tanh(distFromInterface / interfaceWidth));
+
+            rho_A[i] = blend * P.RHO_WAX;
+            rho_B[i] = (1 - blend) * P.RHO_WATER;
+            temp[i] = blend * P.INIT_WAX_TEMP + (1 - blend) * P.INIT_WATER_TEMP;
+
+            initEquilibrium(f_A, i, rho_A[i], 0, 0);
+            initEquilibrium(f_B, i, rho_B[i], 0, 0);
+        }
+    }
+
+    const masses = getTotalMass();
+    initialMassA = masses.wax;
+    initialMassB = masses.water;
+    frame = 0;
+}
+
+function initEquilibrium(f, i, rho0, vx, vy) {
+    const usq = vx * vx + vy * vy;
+    for (let k = 0; k < 9; k++) {
+        const cu = cx[k] * vx + cy[k] * vy;
+        f[i * 9 + k] = w[k] * rho0 * (1 + 3 * cu + 4.5 * cu * cu - 1.5 * usq);
+    }
+}
+
+function getTotalMass() {
+    let massA = 0, massB = 0;
+    for (let i = 0; i < W * H; i++) {
+        massA += rho_A[i];
+        massB += rho_B[i];
+    }
+    return { wax: massA, water: massB };
+}
+
+// Shan-Chen pseudopotential
+function computePsi(rho_val) {
+    const rho0 = 1.0;
+    return rho0 * (1 - Math.exp(-rho_val / rho0));
+}
+
+// Sigmoid for smooth phase transition
+function sigmoid(x) {
+    return 1 / (1 + Math.exp(-x));
+}
+
+function tick() {
+    frame++;
+    const size = W * H;
+
+    // ========================================
+    // Step 1: Compute macroscopic quantities
+    // ========================================
+    for (let i = 0; i < size; i++) {
+        let rA = 0, rB = 0;
+        let pxA = 0, pyA = 0;
+        let pxB = 0, pyB = 0;
+
+        for (let k = 0; k < 9; k++) {
+            const fA = f_A[i * 9 + k];
+            const fB = f_B[i * 9 + k];
+            rA += fA;
+            rB += fB;
+            pxA += fA * cx[k];
+            pyA += fA * cy[k];
+            pxB += fB * cx[k];
+            pyB += fB * cy[k];
+        }
+
+        rho_A[i] = rA;
+        rho_B[i] = rB;
+
+        // Combined velocity (mass-weighted)
+        const rTotal = rA + rB;
+        if (rTotal > 0.001) {
+            ux[i] = (pxA + pxB) / rTotal;
+            uy[i] = (pyA + pyB) / rTotal;
+        } else {
+            ux[i] = 0;
+            uy[i] = 0;
+        }
+
+        // Pseudopotentials with slight noise for symmetry breaking
+        psi_A[i] = rA > 0.001 ? computePsi(rA) * (1 + (Math.random() - 0.5) * P.NOISE_AMPLITUDE) : 0;
+        psi_B[i] = rB > 0.001 ? computePsi(rB) * (1 + (Math.random() - 0.5) * P.NOISE_AMPLITUDE) : 0;
+    }
+
+    // ========================================
+    // Step 2: Compute Shan-Chen interaction forces
+    // ========================================
+    const Fx_A = new Float32Array(size);
+    const Fy_A = new Float32Array(size);
+    const Fx_B = new Float32Array(size);
+    const Fy_B = new Float32Array(size);
+
+    for (let y = 0; y < H; y++) {
+        for (let x = 0; x < W; x++) {
+            const i = y * W + x;
+            const t_i = temp[i];
+
+            // Sum neighbor pseudopotential contributions
+            let sumA_x = 0, sumA_y = 0;
+            let sumB_x = 0, sumB_y = 0;
+
+            for (let k = 1; k < 9; k++) {
+                let nx = (x + cx[k] + W) % W;
+                let ny = y + cy[k];
+                if (ny < 0) ny = 0;
+                if (ny >= H) ny = H - 1;
+
+                const ni = ny * W + nx;
+
+                sumA_x += w[k] * psi_A[ni] * cx[k];
+                sumA_y += w[k] * psi_A[ni] * cy[k];
+                sumB_x += w[k] * psi_B[ni] * cx[k];
+                sumB_y += w[k] * psi_B[ni] * cy[k];
+            }
+
+            // Temperature-dependent cohesion:
+            // Hot wax is less cohesive (easier to merge/deform)
+            // Cold wax is more cohesive (resists merging, bounces)
+            const cohesionScale = 1 - P.TEMP_COHESION * t_i;
+            const effectiveG_AA = P.G_AA * cohesionScale;
+
+            // Forces on wax
+            Fx_A[i] = -psi_A[i] * (effectiveG_AA * sumA_x + P.G_AB * sumB_x);
+            Fy_A[i] = -psi_A[i] * (effectiveG_AA * sumA_y + P.G_AB * sumB_y);
+
+            // Forces on water
+            Fx_B[i] = -psi_B[i] * (P.G_AB * sumA_x + P.G_BB * sumB_x);
+            Fy_B[i] = -psi_B[i] * (P.G_AB * sumA_y + P.G_BB * sumB_y);
+
+            // Gravity and thermal buoyancy on wax
+            const rA = rho_A[i];
+            if (rA > 0.1) {
+                // Gravity pulls wax down
+                Fy_A[i] += P.BASE_GRAVITY * rA;
+
+                // Thermal buoyancy: hot wax rises, cold wax sinks
+                const tempDiff = t_i - P.NEUTRAL_TEMP;
+                Fy_A[i] -= P.THERMAL_BUOYANCY * rA * tempDiff;
+            }
+        }
+    }
+
+    // ========================================
+    // Step 3: Collision for wax (sigmoid viscosity transition)
+    // ========================================
+    const stabilizing = frame < P.STABILIZATION_TICKS;
+
+    for (let i = 0; i < size; i++) {
+        const rA = rho_A[i];
+        if (rA < 0.01) continue;
+
+        const t = temp[i];
+
+        // Sigmoid-based viscosity transition for phase-change feel
+        const softness = sigmoid(P.SHARPNESS * (t - P.TRANSITION_TEMP));
+        let tauA = P.TAU_WAX_COLD * (1 - softness) + P.TAU_WAX_HOT * softness;
+
+        // Higher viscosity during stabilization to dampen oscillations
+        if (stabilizing) tauA = Math.max(tauA, 2.0);
+
+        // Velocity with force correction (Guo forcing)
+        let vx = ux[i] + Fx_A[i] / rA * 0.5;
+        let vy = uy[i] + Fy_A[i] / rA * 0.5;
+
+        // Clamp velocity instead of skipping (preserves mass)
+        const maxU = 0.15;
+        const uMag = Math.sqrt(vx * vx + vy * vy);
+        if (uMag > maxU) {
+            const scale = maxU / uMag;
+            vx *= scale;
+            vy *= scale;
+        }
+
+        const usq = vx * vx + vy * vy;
+
+        for (let k = 0; k < 9; k++) {
+            const cu = cx[k] * vx + cy[k] * vy;
+            const feq = w[k] * rA * (1 + 3 * cu + 4.5 * cu * cu - 1.5 * usq);
+
+            // Guo forcing term
+            const Fi = w[k] * (1 - 0.5 / tauA) * (
+                3 * (cx[k] - vx) + 9 * cu * cx[k]
+            ) * Fx_A[i] + w[k] * (1 - 0.5 / tauA) * (
+                3 * (cy[k] - vy) + 9 * cu * cy[k]
+            ) * Fy_A[i];
+
+            f_A[i * 9 + k] += -(f_A[i * 9 + k] - feq) / tauA + Fi;
+        }
+    }
+
+    // ========================================
+    // Step 4: Collision for water
+    // ========================================
+    for (let i = 0; i < size; i++) {
+        const rB = rho_B[i];
+        if (rB < 0.01) continue;
+
+        // Higher viscosity during stabilization
+        const tauB = stabilizing ? 2.0 : P.TAU_WATER;
+
+        let vx = ux[i] + Fx_B[i] / rB * 0.5;
+        let vy = uy[i] + Fy_B[i] / rB * 0.5;
+
+        const maxU = 0.15;
+        const uMag = Math.sqrt(vx * vx + vy * vy);
+        if (uMag > maxU) {
+            const scale = maxU / uMag;
+            vx *= scale;
+            vy *= scale;
+        }
+
+        const usq = vx * vx + vy * vy;
+
+        for (let k = 0; k < 9; k++) {
+            const cu = cx[k] * vx + cy[k] * vy;
+            const feq = w[k] * rB * (1 + 3 * cu + 4.5 * cu * cu - 1.5 * usq);
+
+            const Fi = w[k] * (1 - 0.5 / tauB) * (
+                3 * (cx[k] - vx) + 9 * cu * cx[k]
+            ) * Fx_B[i] + w[k] * (1 - 0.5 / tauB) * (
+                3 * (cy[k] - vy) + 9 * cu * cy[k]
+            ) * Fy_B[i];
+
+            f_B[i * 9 + k] += -(f_B[i * 9 + k] - feq) / tauB + Fi;
+        }
+    }
+
+    // ========================================
+    // Step 5: Streaming for wax
+    // ========================================
+    f_A_temp.fill(0);
+
+    for (let y = 0; y < H; y++) {
+        for (let x = 0; x < W; x++) {
+            const i = y * W + x;
+
+            for (let k = 0; k < 9; k++) {
+                let nx = (x + cx[k] + W) % W;
+                let ny = y + cy[k];
+
+                if (ny < 0 || ny >= H) {
+                    f_A_temp[i * 9 + opposite[k]] += f_A[i * 9 + k];
+                } else {
+                    const ni = ny * W + nx;
+                    f_A_temp[ni * 9 + k] += f_A[i * 9 + k];
+                }
+            }
+        }
+    }
+    [f_A, f_A_temp] = [f_A_temp, f_A];
+
+    // ========================================
+    // Step 6: Streaming for water
+    // ========================================
+    f_B_temp.fill(0);
+
+    for (let y = 0; y < H; y++) {
+        for (let x = 0; x < W; x++) {
+            const i = y * W + x;
+
+            for (let k = 0; k < 9; k++) {
+                let nx = (x + cx[k] + W) % W;
+                let ny = y + cy[k];
+
+                if (ny < 0 || ny >= H) {
+                    f_B_temp[i * 9 + opposite[k]] += f_B[i * 9 + k];
+                } else {
+                    const ni = ny * W + nx;
+                    f_B_temp[ni * 9 + k] += f_B[i * 9 + k];
+                }
+            }
+        }
+    }
+    [f_B, f_B_temp] = [f_B_temp, f_B];
+
+    // ========================================
+    // Step 7: Temperature evolution
+    // ========================================
+
+    // Skip heating during stabilization period (let interface settle)
+    const heating = frame > P.STABILIZATION_TICKS;
+
+    const newTemp = new Float32Array(size);
+
+    for (let y = 0; y < H; y++) {
+        for (let x = 0; x < W; x++) {
+            const i = y * W + x;
+            let t = temp[i];
+
+            // Heat diffusion weighted by wax density (reduced to create hotspots)
+            let sum = t, count = 1;
+            for (const [dx, dy] of [[-1, 0], [1, 0], [0, -1], [0, 1]]) {
+                const nx = (x + dx + W) % W;
+                const ny = y + dy;
+                if (ny >= 0 && ny < H) {
+                    const ni = ny * W + nx;
+                    const wt = Math.min(rho_A[i], rho_A[ni]) / P.RHO_WAX;
+                    sum += temp[ni] * wt;
+                    count += wt;
+                }
+            }
+            t += (sum / count - t) * P.TEMP_DIFFUSION;
+
+            // Bottom heating with discrete heat spots
+            if (heating) {
+                const bottomZone = H * P.HEAT_ZONE_START;
+                if (y > bottomZone && rho_A[i] > 0.05) {
+                    const vertInt = Math.pow((y - bottomZone) / (H - bottomZone), P.HEAT_VERT_FALLOFF);
+
+                    // Discrete heat spots instead of uniform band
+                    let heatIntensity = 0;
+                    const spotWidth = W / (P.HEAT_SPOTS * 2 + 1);
+                    for (let s = 0; s < P.HEAT_SPOTS; s++) {
+                        // Evenly distributed spots
+                        const spotX = W * (s + 1) / (P.HEAT_SPOTS + 1);
+                        const distFromSpot = Math.abs(x - spotX) / spotWidth;
+                        if (distFromSpot < 1) {
+                            // Gaussian-like falloff from each spot
+                            heatIntensity = Math.max(heatIntensity,
+                                Math.pow(1 - distFromSpot, P.HEAT_HORIZ_FALLOFF));
+                        }
+                    }
+
+                    t += P.HEAT_RATE * vertInt * heatIntensity;
+                }
+            }
+
+            // Top cooling
+            const topZone = H * P.COOL_ZONE_END;
+            if (y < topZone && rho_A[i] > 0.05) {
+                const intensity = 1 - y / topZone;
+                t -= P.COOL_RATE * intensity;
+            }
+
+            // Ambient cooling for wax in water region
+            if (rho_A[i] > 0.05 && rho_B[i] > 0.3) {
+                t -= P.COOL_RATE * 0.5;
+            }
+
+            newTemp[i] = Math.max(0, Math.min(1, t));
+        }
+    }
+    temp = newTemp;
+}
+
+function render() {
+    ctx.fillStyle = '#0a0a12';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    const imageData = ctx.createImageData(W, H);
+    const data = imageData.data;
+
+    for (let y = 0; y < H; y++) {
+        for (let x = 0; x < W; x++) {
+            const i = y * W + x;
+            const pi = i * 4;
+
+            const rA = rho_A[i];
+            const rB = rho_B[i];
+            const t = temp[i];
+
+            if (rA > 0.15) {
+                const waxIntensity = Math.min(1, rA / P.RHO_WAX);
+
+                let r, g, b;
+                if (t < 0.35) {
+                    // Cold: deep purple/violet
+                    r = 40 + 100 * (t / 0.35);
+                    g = 15 + 30 * (t / 0.35);
+                    b = 90 - 30 * (t / 0.35);
+                } else if (t < 0.6) {
+                    // Warm: orange-red
+                    const f = (t - 0.35) / 0.25;
+                    r = 140 + 80 * f;
+                    g = 45 + 60 * f;
+                    b = 60 - 40 * f;
+                } else {
+                    // Hot: bright yellow-orange
+                    const f = (t - 0.6) / 0.4;
+                    r = 220 + 35 * f;
+                    g = 105 + 120 * f;
+                    b = 20 + 60 * f;
+                }
+
+                const alpha = 0.4 + waxIntensity * 0.6;
+                data[pi] = r * alpha;
+                data[pi + 1] = g * alpha;
+                data[pi + 2] = b * alpha;
+                data[pi + 3] = 255;
+            } else {
+                // Water/background
+                const waterIntensity = Math.min(1, rB / P.RHO_WATER);
+                data[pi] = 6;
+                data[pi + 1] = 6 + 3 * waterIntensity;
+                data[pi + 2] = 14 + 6 * waterIntensity;
+                data[pi + 3] = 255;
+            }
+        }
+    }
+
+    // Scale up
+    const tempCanvas = document.createElement('canvas');
+    tempCanvas.width = W;
+    tempCanvas.height = H;
+    tempCanvas.getContext('2d').putImageData(imageData, 0, 0);
+
+    ctx.imageSmoothingEnabled = false;
+    ctx.drawImage(tempCanvas, 0, 0, W * P.CELL, H * P.CELL);
+
+    // Heater glow - discrete spots
+    const heating = frame > P.STABILIZATION_TICKS;
+    if (heating) {
+        const spotWidth = canvas.width / (P.HEAT_SPOTS * 2 + 1);
+        for (let s = 0; s < P.HEAT_SPOTS; s++) {
+            const spotX = canvas.width * (s + 1) / (P.HEAT_SPOTS + 1);
+            const gradient = ctx.createRadialGradient(spotX, canvas.height, 0, spotX, canvas.height, spotWidth);
+            gradient.addColorStop(0, 'rgba(255,80,0,0.8)');
+            gradient.addColorStop(0.5, 'rgba(255,40,0,0.4)');
+            gradient.addColorStop(1, 'rgba(255,20,0,0)');
+            ctx.fillStyle = gradient;
+            ctx.fillRect(spotX - spotWidth, canvas.height - spotWidth * 0.5, spotWidth * 2, spotWidth * 0.5);
+        }
+    } else {
+        // Dim indicator during stabilization
+        ctx.fillStyle = 'rgba(60,30,0,0.5)';
+        ctx.fillRect(0, canvas.height - 4, canvas.width, 4);
+    }
+}
+
+function loop() {
+    if (!paused) {
+        for (let i = 0; i < ff; i++) tick();
+    }
+    render();
+
+    const masses = getTotalMass();
+    const massRatioA = (masses.wax / initialMassA * 100).toFixed(1);
+    const massRatioB = (masses.water / initialMassB * 100).toFixed(1);
+    const status = frame < P.STABILIZATION_TICKS ? ` [Stabilizing ${frame}/${P.STABILIZATION_TICKS}]` : '';
+    document.getElementById('stats').innerHTML =
+        `Tick: ${frame} | Wax: ${massRatioA}% | Water: ${massRatioB}% | ${W}x${H}${status}`;
+
+    requestAnimationFrame(loop);
+}
+
+document.getElementById('ff').onclick = () => {
+    ff = ff === 1 ? 10 : ff === 10 ? 100 : 1;
+    document.getElementById('ff').textContent = ff + 'x';
+};
+document.getElementById('pp').onclick = () => {
+    paused = !paused;
+    document.getElementById('pp').textContent = paused ? '>' : '||';
+};
+document.getElementById('rr').onclick = reset;
+
+let paramsVisible = true;
+document.getElementById('toggleParams').onclick = () => {
+    paramsVisible = !paramsVisible;
+    document.getElementById('params').style.display = paramsVisible ? 'flex' : 'none';
+};
+
+document.getElementById('params').addEventListener('change', reset);
+
+addEventListener('resize', resize);
+addEventListener('keydown', e => {
+    if (e.code === 'Space') { paused = !paused; e.preventDefault(); }
+    if (e.code === 'KeyR') reset();
+});
+
+resize();
+loop();
+</script>
+</body>
+</html>

@@ -1,0 +1,522 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Lava Lamp v18</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        html, body { height: 100%; overflow: hidden; background: #0a0a12; }
+        #canvas { display: block; image-rendering: pixelated; }
+        #ui { position: absolute; top: 10px; left: 10px; color: #fff; font: 11px monospace; background: rgba(0,0,0,0.8); padding: 8px; border-radius: 4px; }
+        #controls { position: absolute; top: 10px; right: 10px; }
+        #controls button { padding: 8px 14px; margin: 2px; background: #222; color: #fff; border: 1px solid #555; cursor: pointer; font: 12px monospace; }
+    </style>
+</head>
+<body>
+<canvas id="canvas"></canvas>
+<div id="ui">
+    <div>Lava Lamp v18</div>
+    <div id="stats"></div>
+</div>
+<div id="controls">
+    <button id="ff">1x</button>
+    <button id="pp">||</button>
+    <button id="rr">Reset</button>
+</div>
+<script>
+// v18: Fixed surface tension and stronger cohesion
+// Key fixes:
+// 1. Surface tension now works on vertical columns by detecting elongation
+// 2. Blob rounding spread increased from 5% to 20%
+// 3. Added lateral cohesion force for thin vertical structures
+// 4. Added neck-pinching behavior when column is thin
+
+const CELL = 3;
+
+// Thermal expansion model
+const MEDIUM_DENSITY = 0.5;
+const MELT_THRESHOLD = 0.3;
+const EXPAND_RATE = 0.1;
+const FREEZE_THRESHOLD = 0.25;
+const CONTRACT_RATE = 0.15;
+const DENSITY_BUOYANCY = 0.8;
+const HEAT_BUOYANCY = 0.3;
+const GRAVITY = 0.5;
+
+// Heat transfer
+const HEAT_IN = 0.005;
+const HEAT_DIFF = 0.02;
+const COOL = 0.01;
+
+// Movement and cohesion
+const SURFACE_TENSION = 0.5;
+const TENSION_RADIUS = 3;
+const FLOW_RATE = 0.9;
+const LATERAL_COHESION = 0.3;  // NEW: Force pulling thin structures together
+const BLOB_ROUNDING = 0.2;     // Increased from 0.05
+
+// Heat zones
+const CENTER_HEAT_MULT = 10;
+const CENTER_HEAT_WIDTH = 0.1;
+const INTENSITY_POWER = 2;
+
+// Initial wax setup
+const WAX_HEIGHT_FRAC = 0.1;
+const WAX_GAP_WIDTH = 0;
+
+let W, H, grid, frame = 0, paused = false, ff = 1;
+let initialMass;
+
+const canvas = document.getElementById('canvas');
+const ctx = canvas.getContext('2d');
+
+function resize() {
+    canvas.width = innerWidth;
+    canvas.height = innerHeight;
+    W = Math.floor(canvas.width / CELL);
+    H = Math.floor(canvas.height / CELL);
+    reset();
+}
+
+function reset() {
+    grid = new Float32Array(W * H * 2);
+    const wH = Math.floor(H * WAX_HEIGHT_FRAC);
+    const centerX = Math.floor(W / 2);
+    const gapLeft = centerX - Math.floor(WAX_GAP_WIDTH / 2);
+    const gapRight = centerX + Math.ceil(WAX_GAP_WIDTH / 2);
+    for (let y = H - wH; y < H; y++) {
+        for (let x = 0; x < W; x++) {
+            if (x >= gapLeft && x < gapRight) continue;
+            grid[(y * W + x) * 2] = 1;
+            grid[(y * W + x) * 2 + 1] = 0.1;
+        }
+    }
+    initialMass = getMass();
+    frame = 0;
+}
+
+function getMass() {
+    let m = 0;
+    for (let i = 0; i < W * H; i++) m += grid[i * 2];
+    return m;
+}
+
+function wrapX(x) { return ((x % W) + W) % W; }
+function D(x, y) { return (y >= 0 && y < H) ? grid[(y * W + wrapX(x)) * 2] : 0; }
+function T(x, y) { return (y >= 0 && y < H) ? grid[(y * W + wrapX(x)) * 2 + 1] : 0; }
+
+function tick() {
+    frame++;
+    const next = new Float32Array(W * H * 2);
+    for (let i = 0; i < next.length; i++) next[i] = grid[i];
+
+    // Heat sources and sinks
+    const bottomThird = Math.floor(H * 2 / 3);
+    const topThird = Math.floor(H / 3);
+    const centerHeatLeft = Math.floor(W * (0.5 - CENTER_HEAT_WIDTH / 2));
+    const centerHeatRight = Math.floor(W * (0.5 + CENTER_HEAT_WIDTH / 2));
+
+    for (let y = 0; y < H; y++) {
+        for (let x = 0; x < W; x++) {
+            const i = (y * W + x) * 2;
+            if (next[i] < 0.01) continue;
+
+            if (y >= bottomThird) {
+                const rowsFromBottom = H - 1 - y;
+                const maxRowsInZone = H - bottomThird;
+                const linearIntensity = (maxRowsInZone - rowsFromBottom) / maxRowsInZone;
+                const verticalIntensity = Math.pow(linearIntensity, INTENSITY_POWER);
+
+                let horizMult = 1;
+                if (x >= centerHeatLeft && x < centerHeatRight) {
+                    horizMult = CENTER_HEAT_MULT;
+                } else {
+                    const distFromCenter = Math.abs(x - W/2);
+                    const maxDist = W/2;
+                    const linearHoriz = 1 - distFromCenter / maxDist;
+                    horizMult = 1 + (CENTER_HEAT_MULT - 1) * Math.pow(linearHoriz, INTENSITY_POWER);
+                }
+
+                next[i + 1] = Math.min(1, next[i + 1] + HEAT_IN * verticalIntensity * horizMult);
+            }
+
+            if (y < topThird) {
+                const linearIntensity = (topThird - y) / topThird;
+                const coolIntensity = Math.pow(linearIntensity, INTENSITY_POWER);
+                next[i + 1] = Math.max(0, next[i + 1] - COOL * coolIntensity);
+            }
+        }
+    }
+
+    // Heat diffusion
+    for (let y = 0; y < H; y++) {
+        for (let x = 0; x < W; x++) {
+            const i = (y * W + x) * 2;
+            const d = next[i];
+            if (d < 0.01) continue;
+            let sum = next[i + 1] * d, wt = d;
+            for (const [dx, dy] of [[-1,0],[1,0],[0,-1],[0,1]]) {
+                const nd = D(x+dx, y+dy);
+                if (nd > 0.01) { sum += T(x+dx, y+dy) * nd; wt += nd; }
+            }
+            next[i + 1] += ((sum / wt) - next[i + 1]) * HEAT_DIFF;
+        }
+    }
+
+    // === THERMAL EXPANSION (discrete 0.5/0.5 split) ===
+    for (let y = 0; y < H; y++) {
+        for (let x = 0; x < W; x++) {
+            const i = (y * W + x) * 2;
+            const d = next[i];
+            const t = next[i + 1];
+
+            if (t < MELT_THRESHOLD || d < 0.9) continue;
+            if (Math.random() > (t - MELT_THRESHOLD) * EXPAND_RATE * 10) continue;
+
+            let bestNi = -1, bestSpace = 0;
+            for (const [ox, oy] of [[0,-1],[-1,0],[1,0],[0,1]]) {
+                const ny = y + oy;
+                if (ny < 0 || ny >= H) continue;
+                const nx = wrapX(x + ox);
+                const ni = (ny * W + nx) * 2;
+                const nd = next[ni];
+                const space = 1 - nd;
+                if (space >= 0.5 && space > bestSpace) {
+                    bestSpace = space;
+                    bestNi = ni;
+                }
+            }
+
+            if (bestNi >= 0) {
+                next[i] -= 0.5;
+                next[bestNi] += 0.5;
+                const oldTargetD = next[bestNi] - 0.5;
+                const oldTargetT = next[bestNi + 1];
+                next[bestNi + 1] = (oldTargetT * oldTargetD + t * 0.5) / next[bestNi];
+            }
+        }
+    }
+
+    // === THERMAL CONTRACTION (discrete merge) ===
+    for (let y = 0; y < H; y++) {
+        for (let x = 0; x < W; x++) {
+            const i = (y * W + x) * 2;
+            const d = next[i];
+            const t = next[i + 1];
+
+            if (t > FREEZE_THRESHOLD || d < 0.4 || d > 0.6) continue;
+            if (Math.random() > (FREEZE_THRESHOLD - t) * CONTRACT_RATE * 10) continue;
+
+            for (const [ox, oy] of [[0,1],[1,0],[-1,0],[0,-1]]) {
+                const ny = y + oy;
+                if (ny < 0 || ny >= H) continue;
+                const nx = wrapX(x + ox);
+                const ni = (ny * W + nx) * 2;
+                const nd = next[ni];
+                const nt = next[ni + 1];
+
+                if (nd >= 0.4 && nd <= 0.6 && nt < FREEZE_THRESHOLD) {
+                    const totalMass = d + nd;
+                    if (totalMass <= 1.0) {
+                        next[i] = totalMass;
+                        next[ni] = 0;
+                        next[i + 1] = (t * d + nt * nd) / totalMass;
+                        next[ni + 1] = 0;
+                        break;
+                    }
+                }
+            }
+        }
+    }
+
+    // Calculate all transfers
+    const transfers = [];
+
+    for (let y = 0; y < H; y++) {
+        for (let x = 0; x < W; x++) {
+            const d = next[(y * W + x) * 2];
+            if (d < 0.02) continue;
+            const t = next[(y * W + x) * 2 + 1];
+
+            // === GRAVITY + BUOYANCY ===
+            const densityForce = (MEDIUM_DENSITY - d) * DENSITY_BUOYANCY;
+            const heatForce = t * HEAT_BUOYANCY;
+            const netForce = densityForce + heatForce - GRAVITY;
+            const dy = netForce > 0 ? -1 : 1;
+            const ty = y + dy;
+
+            if (ty >= 0 && ty < H) {
+                const targetD = next[(ty * W + x) * 2];
+                const space = 1 - targetD;
+                if (space > 0.01) {
+                    const amount = Math.min(Math.abs(netForce) * FLOW_RATE, d * 0.4, space);
+                    if (amount > 0.005) {
+                        transfers.push({fx: x, fy: y, tx: x, ty: ty, amount, temp: t});
+                    }
+                }
+            }
+
+            // === IMPROVED SURFACE TENSION ===
+            // Instead of just center-of-mass, also detect elongated shapes
+            // and apply lateral cohesion to round them out
+
+            const xL = wrapX(x - 1), xR = wrapX(x + 1);
+            const up = D(x, y - 1);
+            const dn = D(x, y + 1);
+            const lt = D(x - 1, y);
+            const rt = D(x + 1, y);
+
+            const verticalNeighbors = up + dn;
+            const horizontalNeighbors = lt + rt;
+
+            // Detect vertical elongation: lots of mass above/below, little left/right
+            // This means we're in a thin vertical column - should spread horizontally
+            if (verticalNeighbors > 1.0 && horizontalNeighbors < 0.5 && d > 0.3) {
+                // Find which side has more mass further away (to grow toward the blob)
+                let leftMass = 0, rightMass = 0;
+                for (let r = 1; r <= TENSION_RADIUS; r++) {
+                    leftMass += D(x - r, y) + D(x - r, y - 1) + D(x - r, y + 1);
+                    rightMass += D(x + r, y) + D(x + r, y - 1) + D(x + r, y + 1);
+                }
+
+                // Spread toward the side with more mass (cohesion)
+                // Or spread both directions if balanced (rounding)
+                const spreadDir = leftMass > rightMass + 0.3 ? -1 :
+                                  rightMass > leftMass + 0.3 ? 1 : 0;
+
+                if (spreadDir !== 0) {
+                    const targetX = wrapX(x + spreadDir);
+                    const targetD = next[(y * W + targetX) * 2];
+                    const space = 1 - targetD;
+                    const amount = Math.min(LATERAL_COHESION * d, space, d * 0.3);
+                    if (amount > 0.005) {
+                        transfers.push({fx: x, fy: y, tx: targetX, ty: y, amount, temp: t});
+                    }
+                } else {
+                    // Balanced - spread both directions for rounding
+                    const spaceL = 1 - lt;
+                    const spaceR = 1 - rt;
+                    const amount = LATERAL_COHESION * d * 0.5;
+                    if (spaceL > 0.01) {
+                        const amt = Math.min(amount, spaceL, d * 0.15);
+                        if (amt > 0.005) {
+                            transfers.push({fx: x, fy: y, tx: xL, ty: y, amount: amt, temp: t});
+                        }
+                    }
+                    if (spaceR > 0.01) {
+                        const amt = Math.min(amount, spaceR, d * 0.15);
+                        if (amt > 0.005) {
+                            transfers.push({fx: x, fy: y, tx: xR, ty: y, amount: amt, temp: t});
+                        }
+                    }
+                }
+            }
+
+            // Original center-of-mass surface tension for exposed cells
+            let comX = 0, comY = 0, totalWeight = 0;
+            let immediateNeighborD = up + dn + lt + rt;
+
+            for (let oy = -TENSION_RADIUS; oy <= TENSION_RADIUS; oy++) {
+                for (let ox = -TENSION_RADIUS; ox <= TENSION_RADIUS; ox++) {
+                    if (ox === 0 && oy === 0) continue;
+                    const ny = y + oy;
+                    if (ny < 0 || ny >= H) continue;
+                    const nx = wrapX(x + ox);
+
+                    const nd = next[(ny * W + nx) * 2];
+                    if (nd < 0.01) continue;
+
+                    const dist = Math.sqrt(ox * ox + oy * oy);
+                    const weight = nd / dist;
+
+                    comX += ox * weight;
+                    comY += oy * weight;
+                    totalWeight += weight;
+                }
+            }
+
+            if (immediateNeighborD < 2.5 && totalWeight > 0.1 && d > 0.2) {
+                comX /= totalWeight;
+                comY /= totalWeight;
+
+                const moveX = Math.abs(comX) > 0.2 ? Math.sign(comX) : 0;
+                const moveY = Math.abs(comY) > 0.2 ? Math.sign(comY) : 0;
+
+                if (moveX !== 0 || moveY !== 0) {
+                    const sty = y + moveY;
+                    if (sty >= 0 && sty < H) {
+                        const stx = wrapX(x + moveX);
+                        const targetD = next[(sty * W + stx) * 2];
+                        const space = 1 - targetD;
+                        const exposure = (4 - immediateNeighborD) / 4;
+                        const pullStrength = Math.sqrt(comX * comX + comY * comY);
+                        const amount = Math.min(SURFACE_TENSION * exposure * d * pullStrength, space, d * 0.3);
+                        if (amount > 0.005) {
+                            transfers.push({fx: x, fy: y, tx: stx, ty: sty, amount, temp: t});
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Apply all transfers
+    for (const tr of transfers) {
+        const fi = (tr.fy * W + wrapX(tr.fx)) * 2;
+        const ti = (tr.ty * W + wrapX(tr.tx)) * 2;
+
+        const fromD = next[fi];
+        const toD = next[ti];
+
+        const actualAmount = Math.min(tr.amount, fromD - 0.01, 1 - toD);
+        if (actualAmount < 0.005) continue;
+
+        next[fi] -= actualAmount;
+        next[ti] += actualAmount;
+
+        const newToD = next[ti];
+        if (newToD > 0.01) {
+            const oldToD = toD;
+            const oldToT = next[ti + 1];
+            next[ti + 1] = (oldToT * oldToD + tr.temp * actualAmount) / newToD;
+        }
+    }
+
+    // === STRONGER BLOB ROUNDING ===
+    for (let y = 1; y < H - 1; y++) {
+        for (let x = 0; x < W; x++) {
+            const i = (y * W + x) * 2;
+            const d = next[i];
+            if (d < 0.3) continue;
+
+            const xL = wrapX(x - 1), xR = wrapX(x + 1);
+            const up = next[((y-1) * W + x) * 2];
+            const dn = next[((y+1) * W + x) * 2];
+            const lt = next[(y * W + xL) * 2];
+            const rt = next[(y * W + xR) * 2];
+
+            // Horizontal protrusion: spread left/right (STRONGER)
+            if (up > 0.4 && dn > 0.4 && lt < 0.3 && rt < 0.3) {
+                const spaceL = 1 - lt, spaceR = 1 - rt;
+                const wantSpread = d * BLOB_ROUNDING;
+                const actualL = Math.min(wantSpread * 0.5, spaceL, d * 0.25);
+                const actualR = Math.min(wantSpread * 0.5, spaceR, d * 0.25);
+                if (actualL > 0.005 || actualR > 0.005) {
+                    next[i] -= (actualL + actualR);
+                    next[(y * W + xL) * 2] += actualL;
+                    next[(y * W + xR) * 2] += actualR;
+                }
+            }
+
+            // Vertical protrusion: spread up/down
+            if (lt > 0.4 && rt > 0.4 && up < 0.3 && dn < 0.3) {
+                const spaceU = 1 - up, spaceD = 1 - dn;
+                const wantSpread = d * BLOB_ROUNDING;
+                const actualU = Math.min(wantSpread * 0.5, spaceU, d * 0.25);
+                const actualD = Math.min(wantSpread * 0.5, spaceD, d * 0.25);
+                if (actualU > 0.005 || actualD > 0.005) {
+                    next[i] -= (actualU + actualD);
+                    next[((y-1) * W + x) * 2] += actualU;
+                    next[((y+1) * W + x) * 2] += actualD;
+                }
+            }
+
+            // Tip of protrusion: pull back toward the one neighbor
+            const total = (up > 0.3 ? 1 : 0) + (dn > 0.3 ? 1 : 0) + (lt > 0.3 ? 1 : 0) + (rt > 0.3 ? 1 : 0);
+            if (total === 1 && d > 0.3) {
+                let targetIdx = -1, targetD = 0;
+                if (up > 0.3) { targetIdx = ((y-1) * W + x) * 2; targetD = up; }
+                else if (dn > 0.3) { targetIdx = ((y+1) * W + x) * 2; targetD = dn; }
+                else if (lt > 0.3) { targetIdx = (y * W + xL) * 2; targetD = lt; }
+                else if (rt > 0.3) { targetIdx = (y * W + xR) * 2; targetD = rt; }
+
+                if (targetIdx >= 0) {
+                    const space = 1 - targetD;
+                    const pull = Math.min(d * 0.2, space, d - 0.01);
+                    if (pull > 0.005) {
+                        next[i] -= pull;
+                        next[targetIdx] += pull;
+                    }
+                }
+            }
+        }
+    }
+
+    // Clamp values
+    for (let i = 0; i < W * H; i++) {
+        next[i * 2 + 1] = Math.max(0, Math.min(1, next[i * 2 + 1]));
+        next[i * 2] = Math.max(0, Math.min(1, next[i * 2]));
+    }
+
+    grid = next;
+}
+
+function render() {
+    ctx.fillStyle = '#0a0a12';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    for (let y = 0; y < H; y++) {
+        for (let x = 0; x < W; x++) {
+            const d = grid[(y * W + x) * 2];
+            if (d < 0.05) continue;
+            const t = grid[(y * W + x) * 2 + 1];
+
+            let r, g, b;
+            if (t < 0.35) {
+                r = 50 + 120 * (t / 0.35);
+                g = 20 + 40 * (t / 0.35);
+                b = 80 - 40 * (t / 0.35);
+            } else if (t < 0.65) {
+                const f = (t - 0.35) / 0.3;
+                r = 170 + 60 * f;
+                g = 60 + 80 * f;
+                b = 40 - 20 * f;
+            } else {
+                const f = (t - 0.65) / 0.35;
+                r = 230 + 25 * f;
+                g = 140 + 115 * f;
+                b = 20 + 100 * f;
+            }
+
+            ctx.fillStyle = `rgba(${r|0},${g|0},${b|0},${0.5 + d * 0.5})`;
+            ctx.fillRect(x * CELL, y * CELL, CELL, CELL);
+        }
+    }
+
+    // Heater indicator
+    ctx.fillStyle = 'rgba(255,80,0,0.6)';
+    ctx.fillRect(0, (H-1) * CELL, W * CELL, 2);
+}
+
+function loop() {
+    if (!paused) for (let i = 0; i < ff; i++) tick();
+    render();
+
+    const mass = getMass();
+    document.getElementById('stats').innerHTML =
+        `Tick: ${frame} | Mass: ${mass.toFixed(0)}/${initialMass.toFixed(0)} | FPS: 60`;
+
+    requestAnimationFrame(loop);
+}
+
+document.getElementById('ff').onclick = () => {
+    ff = ff === 1 ? 5 : ff === 5 ? 25 : ff === 25 ? 100 : 1;
+    document.getElementById('ff').textContent = ff + 'x';
+};
+document.getElementById('pp').onclick = () => {
+    paused = !paused;
+    document.getElementById('pp').textContent = paused ? '▶' : '||';
+};
+document.getElementById('rr').onclick = reset;
+addEventListener('resize', resize);
+addEventListener('keydown', e => {
+    if (e.code === 'Space') { paused = !paused; e.preventDefault(); }
+    if (e.code === 'KeyR') reset();
+});
+
+resize();
+loop();
+</script>
+</body>
+</html>

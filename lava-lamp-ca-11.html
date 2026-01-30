@@ -1,0 +1,1084 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Lava Lamp CA v10 - WebGPU</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        html,
+        body {
+            height: 100%;
+            overflow: hidden;
+            background: #0a0a12;
+        }
+
+        #canvas {
+            display: block;
+            image-rendering: pixelated;
+            width: 100%;
+            height: 100%;
+        }
+
+        #ui {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            color: #fff;
+            font: 10px monospace;
+            background: rgba(0, 0, 0, 0.85);
+            padding: 8px;
+            border-radius: 4px;
+            max-height: 90vh;
+            overflow-y: auto;
+            min-width: 200px;
+        }
+
+        #ui .param-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin: 4px 0;
+        }
+
+        #ui label {
+            display: inline-block;
+            width: 110px;
+        }
+
+        #ui input[type="number"] {
+            width: 70px;
+            background: #222;
+            color: #fff;
+            border: 1px solid #444;
+            font-size: 11px;
+            padding: 2px 4px;
+        }
+
+        #ui .range-hint {
+            color: #666;
+            font-size: 9px;
+            margin-left: 6px;
+        }
+
+        #ui .section {
+            color: #888;
+            margin-top: 8px;
+            border-top: 1px solid #333;
+            padding-top: 4px;
+        }
+
+        #controls {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+        }
+
+        #controls button {
+            padding: 8px 14px;
+            margin: 2px;
+            background: #222;
+            color: #fff;
+            border: 1px solid #555;
+            cursor: pointer;
+            font: 12px monospace;
+        }
+
+        #stats {
+            position: absolute;
+            bottom: 10px;
+            left: 10px;
+            color: #fff;
+            font: 11px monospace;
+            background: rgba(0, 0, 0, 0.8);
+            padding: 8px;
+            border-radius: 4px;
+        }
+    </style>
+</head>
+
+<body>
+    <canvas id="canvas"></canvas>
+    <div id="ui">
+        <div><b>Lava Lamp CA v10 (WebGPU)</b></div>
+        <div id="params"></div>
+    </div>
+    <div id="controls">
+        <button id="toggleParams">Hide</button>
+        <button id="ff">1x</button>
+        <button id="pp">||</button>
+        <button id="heat">Heat ON</button>
+        <button id="reset">Reset</button>
+    </div>
+    <div id="stats">Initializing WebGPU...</div>
+
+    <script type="module">
+        // ============================================
+        // LAVA LAMP CA v10 - WebGPU Port
+        // ============================================
+
+        const PARAMS = {
+            heatRate: 0.05,
+            heatSpread: 0.2,
+            coolRate: 0.005,
+            radiantHeatRate: 0.002,
+            heatSourceWidth: 0.8,
+            buoyancyScale: 2.0, // Extreme Buoyancy
+            velocityDamping: 0.98, // Low Friction
+            velocityThreshold: 0.001, // Move easily
+            moveChanceScale: 1.0, // Always move
+            alignment: 0.1,
+            cohesion: 0.5,
+            cohesionRadius: 3,
+            surfaceTension: 0.05,
+            brownianStrength: 0.2,
+            horizontalBias: 0.7,
+            initialWaxHeight: 0.12,
+            cellSize: 4, // Visible blocks
+        };
+
+        const PARAM_CONFIG = {
+            heatRate: { section: 'Heat', min: 0.001, max: 0.05, step: 0.001 },
+            heatSpread: { min: 0.01, max: 0.3, step: 0.01 },
+            coolRate: { min: 0.001, max: 0.02, step: 0.001 },
+            radiantHeatRate: { min: 0.000, max: 0.01, step: 0.0001 },
+            heatSourceWidth: { min: 0.1, max: 1.0, step: 0.1 },
+            buoyancyScale: { section: 'Movement', min: 0.01, max: 0.5, step: 0.01 },
+            velocityDamping: { min: 0.5, max: 0.99, step: 0.01 },
+            velocityThreshold: { min: 0.05, max: 0.5, step: 0.01 },
+            moveChanceScale: { min: 0.05, max: 1.0, step: 0.05 },
+            alignment: { section: 'Boids Forces', min: 0, max: 0.9, step: 0.05 },
+            cohesion: { min: 0, max: 1.0, step: 0.05 },
+            cohesionRadius: { min: 1, max: 6, step: 1, round: true },
+            surfaceTension: { min: 0, max: 0.2, step: 0.01 },
+            brownianStrength: { section: 'Brownian', min: 0, max: 0.2, step: 0.01 },
+            horizontalBias: { min: 0, max: 1, step: 0.1 },
+            initialWaxHeight: { section: 'Setup', min: 0.05, max: 0.3, step: 0.01 },
+            cellSize: { min: 1, max: 10, step: 1, round: true }
+        };
+
+        // WGSL Shaders
+        const SHADER_CODE = `
+struct Params {
+    width: u32,
+    height: u32,
+    frame: u32,
+    heatOn: u32,
+    
+    heatRate: f32,
+    heatSpread: f32,
+    coolRate: f32,
+    radiantHeatRate: f32,
+    heatSourceWidth: f32,
+    
+    buoyancyScale: f32,
+    velocityDamping: f32,
+    velocityThreshold: f32,
+    moveChanceScale: f32,
+    
+    alignment: f32,
+    cohesion: f32,
+    cohesionRadius: f32,
+    surfaceTension: f32,
+    
+    brownianStrength: f32,
+    horizontalBias: f32,
+    seed: f32,
+}
+
+// Data layout: units (u32), temp (f32), velX (f32), velY (f32)
+// Using array of Structs of Arrays approach for better memory alignment?
+// Or simpler: 4 separate buffers or 1 buffer with struct.
+// Let's use 1 buffer with struct per cell.
+
+struct Cell {
+    units: u32,
+    temp: f32,
+    velX: f32,
+    velY: f32,
+}
+
+@group(0) @binding(0) var<uniform> params: Params;
+@group(0) @binding(1) var<storage, read_write> cellsIn: array<Cell>;
+@group(0) @binding(2) var<storage, read_write> cellsOut: array<Cell>;
+
+// Helper: Pseudo-random generator
+fn rand(co: vec2f) -> f32 {
+    return fract(sin(dot(co, vec2f(12.9898, 78.233))) * 43758.5453);
+}
+
+fn rand_seed(idx: u32, seed: f32) -> f32 {
+    return fract(sin(f32(idx) * 0.123 + seed) * 43758.5453);
+}
+
+fn get_capacity(t: f32) -> u32 {
+    if (t >= 0.66) { return 6u; }
+    if (t >= 0.33) { return 7u; }
+    return 8u;
+}
+
+fn idx(x: i32, y: i32) -> u32 {
+    let w = i32(params.width);
+    let h = i32(params.height);
+    let cx = clamp(x, 0, w - 1);
+    let cy = clamp(y, 0, h - 1);
+    return u32(cy * w + cx);
+}
+
+// ==========================================================
+// COMPUTE SHADER 1: PHYSICS (Temp, Forces)
+// ==========================================================
+@compute @workgroup_size(16, 16)
+fn updatePhysics(@builtin(global_invocation_id) global_id: vec3u) {
+    let x = i32(global_id.x);
+    let y = i32(global_id.y);
+    let w = i32(params.width);
+    let h = i32(params.height);
+    
+    if (x >= w || y >= h) { return; }
+    
+    let i = idx(x, y);
+    var cell = cellsIn[i];
+    
+    // Copy units to output (modified later by swap passes)
+    cellsOut[i] = cell; 
+    
+    if (cell.units == 0u) {
+        cellsOut[i].temp = 0.0;
+        cellsOut[i].velX = 0.0;
+        cellsOut[i].velY = 0.0;
+        return;
+    }
+
+    // --- Temperature Update ---
+    var t = cell.temp;
+    
+    // Heat Source
+    if (params.heatOn == 1u && y >= h - 3) {
+        let centerDist = abs(f32(x) / f32(w) - 0.5);
+        if (centerDist < params.heatSourceWidth * 0.5) {
+            let intensity = 1.0 - centerDist / (params.heatSourceWidth * 0.5);
+            t += params.heatRate * intensity;
+        }
+    }
+    
+    // Heat Sink
+    if (y <= 3) {
+        t -= params.coolRate * 2.0;
+    }
+    
+    // Radiant Heat
+    if (params.radiantHeatRate > 0.0) {
+        let relativeY = f32(y) / f32(h);
+        let radiantFactor = (relativeY - 0.5) * 2.0;
+        t += radiantFactor * params.radiantHeatRate;
+    }
+    
+    // Heat Equalization
+    var tempSum = 0.0;
+    var waxNeighbors = 0.0;
+    
+    for (var dy = -1; dy <= 1; dy++) {
+        for (var dx = -1; dx <= 1; dx++) {
+            if (dx == 0 && dy == 0) { continue; }
+            let ni = idx(x + dx, y + dy);
+            if (cellsIn[ni].units > 0u) {
+                tempSum += cellsIn[ni].temp;
+                waxNeighbors += 1.0;
+            }
+        }
+    }
+    
+    if (waxNeighbors > 0.0) {
+        let avgTemp = tempSum / waxNeighbors;
+        t += (avgTemp - t) * params.heatSpread;
+    }
+    
+    t = clamp(t, 0.0, 1.0);
+    cellsOut[i].temp = t;
+
+    // --- Buoyancy & Cohesion ---
+    let capacity = get_capacity(t);
+    let buoyancy = f32(cell.units) * (7.0 - f32(capacity)) * params.buoyancyScale;
+    
+    var vy = cell.velY - buoyancy; // Negative up
+    var vx = cell.velX;
+    
+    var vySum = 0.0;
+    var vxSum = 0.0;
+    var centerOffsetY = 0.0;
+    var centerOffsetX = 0.0;
+    var cohNeighbors = 0.0;
+    let r = i32(params.cohesionRadius);
+    
+    for (var dy = -r; dy <= r; dy++) {
+        for (var dx = -r; dx <= r; dx++) {
+            if (dx == 0 && dy == 0) { continue; }
+            let nx = x + dx;
+            let ny = y + dy;
+            if (nx < 0 || nx >= w || ny < 0 || ny >= h) { continue; }
+            
+            let ni = idx(nx, ny);
+            if (cellsIn[ni].units > 0u) {
+                let dist = sqrt(f32(dx*dx + dy*dy));
+                let weight = 1.0 / dist;
+                
+                vySum += cellsIn[ni].velY * weight;
+                vxSum += cellsIn[ni].velX * weight;
+                centerOffsetY += f32(dy) * weight;
+                centerOffsetX += f32(dx) * weight;
+                cohNeighbors += 1.0;
+            }
+        }
+    }
+    
+    // Default alignment and cohesion behavior
+    if (cohNeighbors > 0.0) {
+        if (params.alignment > 0.0) {
+            let avgVy = vySum / cohNeighbors;
+            let avgVx = vxSum / cohNeighbors;
+            vy = vy * (1.0 - params.alignment) + avgVy * params.alignment;
+            vx = vx * (1.0 - params.alignment) + avgVx * params.alignment;
+        }
+        
+        vy += centerOffsetY * params.cohesion;
+        vx += centerOffsetX * params.cohesion;
+    } else if (params.cohesion > 0.0) {
+        // STRONG COHESION FALLBACK:
+        // If isolated (no wax neighbors in radius), and cohesion is active,
+        // search wider to find any friends, or just dampen velocity to stick around?
+        // Actually, isolated wax should perhaps try to move towards center of screen or bottom?
+        // For now, let's just leave it.
+    }
+    
+    // Damping
+    vy *= params.velocityDamping;
+    vx *= params.velocityDamping;
+    
+    // Brownian
+    let seed = params.seed + f32(i) * 0.1;
+    let r1 = rand_seed(u32(i), seed);
+    let r2 = rand_seed(u32(i) + 1u, seed);
+    
+    let noiseY = (r1 - 0.5) * 2.0 * params.brownianStrength * (1.0 - params.horizontalBias);
+    let noiseX = (r2 - 0.5) * 2.0 * params.brownianStrength * (1.0 + params.horizontalBias);
+    
+    vy += noiseY;
+    vx += noiseX;
+    
+    cellsOut[i].velY = vy;
+    cellsOut[i].velX = vx;
+}
+
+// ==========================================================
+// COMPUTE SHADER 2: MOVEMENT (Swapping)
+// ==========================================================
+struct MoveParams {
+    passType: u32, // 0=EvenRows, 1=OddRows, 2=EvenCols, 3=OddCols
+}
+@group(0) @binding(3) var<uniform> moveParams: MoveParams;
+
+@compute @workgroup_size(16, 16)
+fn updateMovement(@builtin(global_invocation_id) global_id: vec3u) {
+    let x = i32(global_id.x);
+    let y = i32(global_id.y);
+    let w = i32(params.width);
+    let h = i32(params.height);
+    
+    if (x >= w || y >= h) { return; }
+    
+    // Dimension splitting approach for race-free swaps
+    
+    var tx = x;
+    var ty = y;
+    
+    // Determine target based on pass type
+    // Pass 0: Vertical Even (y%2==0 swaps with y+1)
+    if (moveParams.passType == 0u) {
+        if ((y % 2) == 0) { ty = y + 1; }
+    }
+    // Pass 1: Vertical Odd (y%2==1 swaps with y+1)
+    else if (moveParams.passType == 1u) {
+        if ((y % 2) == 1) { ty = y + 1; }
+    }
+    // Pass 2: Horizontal Even (x%2==0 swaps with x+1)
+    else if (moveParams.passType == 2u) {
+        if ((x % 2) == 0) { tx = x + 1; }
+    }
+    // Pass 3: Horizontal Odd (x%2==1 swaps with x+1)
+    else if (moveParams.passType == 3u) {
+        if ((x % 2) == 1) { tx = x + 1; }
+    }
+    
+    if (tx >= w || ty >= h) { return; }
+    
+    // Use indices for current buffer (cellsOut acts as source and dest here because we ping-ponged previously or use strictly disjoint sets)
+    // Wait, we need to read from 'In' and write to 'Out' to be safe?
+    // Or if disjoint, we can read/write same buffer.
+    // For simplicity, let's assume we operate on cellsIn and write to cellsOut?
+    // Actually, to chain passes, we need to operate in-place or ping-pong 4 times.
+    // Let's operate in-place on cellsOut (which has updated physics).
+    // The passes are disjoint sets of pairs. (y, y+1) pairs are independent of (y+2, y+3).
+    // So we can read/write cellsOut directly safely if we only touch our pair.
+    
+    // NOTE: In this shader logic, we only run the thread for the "primary" cell of the pair (e.g. y%2==0).
+    // It handles the swap logic for itself and its neighbor.
+    
+    let i1 = idx(x, y);
+    let i2 = idx(tx, ty);
+    
+    var c1 = cellsOut[i1];
+    var c2 = cellsOut[i2];
+    
+    // Check if swap should happen
+    // We base decision on c1 trying to move to c2, OR c2 trying to move to c1.
+    
+    var swap = false;
+    
+        // Logic: calculate desire for c1->c2 and c2->c1
+        
+        // Calculate Thresholds (simplified surface tension approx)
+        // BUG FIX: neighbor check in shader is expensive for surface tension?
+        // Let's implement basic surface tension by punishing separation from group.
+        // Or just trust the parameter.
+        
+        // Original CPU logic: effectiveThreshold = threshold + waxNeighbors * surfaceTension
+        // We ignored waxNeighbors in GPU port for speed. Let's add it back?
+        // It requires a loop. With r=1, it's 8 reads. 
+        // Let's try just a fixed higher threshold for now or check direct neighbors?
+        
+        // Let's implement a quick check for 4-neighbors to estimate surface.
+        // Actually, we can check just the move direction neighbor? 
+        // No, surface tension is about total neighbors.
+        
+        // Optimization: Pre-calculate neighbor count in Physics pass and store in cell?
+        // 'velX' or 'velY' could store it? No, they store velocity.
+        // We have 'units' (u32) and 'temp' (f32).
+        // Maybe pack neighbor count into high bits of units? units is 0-8.
+        // Let's assume surface tension is uniform for now, OR do the loop.
+        // A 3x3 loop is fast on GPU.
+        
+        var waxNeighbors = 0.0;
+        for (var dy = -1; dy <= 1; dy++) {
+            for (var dx = -1; dx <= 1; dx++) {
+                if (dx == 0 && dy == 0) { continue; }
+                let nx = x + dx;
+                let ny = y + dy;
+                // Check bounds? idx handles clamping, but here we want 0 for out of bounds?
+                // Actually idx clamps. So edge cells see themselves? No, idx returns valid index.
+                // Clamping is fine.
+                let ni = idx(nx, ny);
+                if (cellsOut[ni].units > 0u) {
+                    waxNeighbors += 1.0;
+                }
+            }
+        }
+        
+        let thresh = params.velocityThreshold + waxNeighbors * params.surfaceTension;
+        
+        // C1 moving to C2?
+        if (c1.units > 0u) {
+        let vy = c1.velY;
+        let vx = c1.velX;
+        var desire = 0.0;
+        
+        if (moveParams.passType < 2u) { // Vertical
+            let dir = f32(ty - y); // +1 usually
+            if ((dir > 0.0 && vy > thresh) || (dir < 0.0 && vy < -thresh)) {
+                 // Wait, vy > 0 is DOWN in this sim logic?
+                 // Original: vy < 0 is UP.
+                 // y is 0 at top usually in canvas/texture? 
+                 // In previous code: y=0 is top. y=H is bottom.
+                 // buoyancy subtracts from vy. So neg vy is UP (towards 0).
+                 // If ty > y (Down), we want vy > 0.
+                 if ((ty > y && vy > thresh) || (ty < y && vy < -thresh)) {
+                     desire = abs(vy) - thresh;
+                 }
+            }
+        } else { // Horizontal
+            let dir = f32(tx - x);
+            if ((dir > 0.0 && vx > thresh) || (dir < 0.0 && vx < -thresh)) {
+                desire = abs(vx) - thresh;
+            }
+        }
+        
+        if (desire > 0.0) {
+            let chance = min(1.0, desire * params.moveChanceScale);
+            if (rand_seed(u32(i1) + params.frame, params.seed) < chance) {
+                swap = true;
+            }
+        }
+    }
+    
+    // C2 moving to C1? (Only if we didn't already decide to swap)
+    if (!swap && c2.units > 0u) {
+        let vy = c2.velY;
+        let vx = c2.velX;
+        var desire = 0.0;
+        
+        if (moveParams.passType < 2u) { // Vertical
+             // Moving from ty to y.
+             // If ty > y (Down neighbor moving Up), need vy < -thresh
+             if ((y < ty && vy < -thresh) || (y > ty && vy > thresh)) {
+                 desire = abs(vy) - thresh;
+             }
+        } else {
+             // Moving from tx to x.
+             if ((x < tx && vx < -thresh) || (x > tx && vx > thresh)) {
+                 desire = abs(vx) - thresh;
+             }
+        }
+        
+        if (desire > 0.0) {
+             let chance = min(1.0, desire * params.moveChanceScale);
+             if (rand_seed(u32(i2) + params.frame, params.seed) < chance) {
+                 swap = true;
+             }
+        }
+    }
+    
+    if (swap) {
+        // Perform Swap
+        let tempC = c1;
+        
+        // Dampen velocity on swap
+        c1 = c2;
+        c1.velX *= 0.95; c1.velY *= 0.95;
+        
+        c2 = tempC;
+        c2.velX *= 0.95; c2.velY *= 0.95;
+        
+        cellsOut[i1] = c1;
+        cellsOut[i2] = c2;
+    }
+}
+
+// ==========================================================
+// RENDER SHADER
+// ==========================================================
+struct VertexOutput {
+    @builtin(position) position: vec4f,
+    @location(0) uv: vec2f,
+}
+
+@vertex
+fn vs_main(@builtin(vertex_index) vertexIndex: u32) -> VertexOutput {
+    var pos = array<vec2f, 6>(
+        vec2f(-1.0, -1.0), vec2f(1.0, -1.0), vec2f(-1.0, 1.0),
+        vec2f(-1.0, 1.0), vec2f(1.0, -1.0), vec2f(1.0, 1.0)
+    );
+    var output: VertexOutput;
+    output.position = vec4f(pos[vertexIndex], 0.0, 1.0);
+    output.uv = pos[vertexIndex] * 0.5 + 0.5;
+    output.uv.y = 1.0 - output.uv.y; // Flip Y for texture coords if needed
+    return output;
+}
+
+@fragment
+fn fs_main(@location(0) uv: vec2f) -> @location(0) vec4f {
+    let w = i32(params.width);
+    let h = i32(params.height);
+    let x = i32(uv.x * f32(w));
+    let y = i32(uv.y * f32(h)); // Start from top
+    
+    let i = idx(x, y);
+    let cell = cellsOut[i];
+    
+    if (cell.units == 0u) {
+        return vec4f(0.04, 0.04, 0.07, 1.0); // Dark background
+    }
+    
+    let t = cell.temp;
+    var color: vec3f;
+    
+    if (t < 0.33) {
+        let f = t / 0.33;
+        color = vec3f(0.24 + 0.39*f, 0.08 + 0.2*f, 0.47 - 0.16*f);
+    } else if (t < 0.66) {
+        let f = (t - 0.33) / 0.33;
+        color = vec3f(0.63 + 0.27*f, 0.27 + 0.27*f, 0.31 - 0.24*f);
+    } else {
+        let f = (t - 0.66) / 0.34;
+        color = vec3f(0.9 + 0.1*f, 0.55 + 0.39*f, 0.08 + 0.24*f);
+    }
+    
+    let brightness = 0.5 + (f32(cell.units) / 8.0) * 0.5;
+    return vec4f(color * brightness, 1.0);
+}
+`;
+
+        // Main Application
+        let device, context;
+        let pipelinePhysics, pipelineMove;
+        let renderPipeline;
+        let bindGroupA, bindGroupB; // For ping-pong
+        let paramsBuffer, moveParamsBuffer;
+        let bufferA, bufferB;
+        let bindGroupLayout0; // Global layout reference for tick()
+
+        let W, H;
+        let frame = 0;
+        let heatOn = 1;
+        let paused = false;
+        let ff = 1;
+
+        async function init() {
+            if (!navigator.gpu) {
+                document.getElementById('stats').innerHTML = "WebGPU not supported on this browser.";
+                return;
+            }
+
+            const adapter = await navigator.gpu.requestAdapter();
+            device = await adapter.requestDevice();
+            const canvas = document.getElementById('canvas');
+            context = canvas.getContext('webgpu');
+            const presentationFormat = navigator.gpu.getPreferredCanvasFormat();
+            context.configure({
+                device,
+                format: presentationFormat,
+                alphaMode: 'premultiplied',
+            });
+
+            // Resize handling
+            resize();
+            window.addEventListener('resize', resize);
+
+            // UI Setup
+            setupUI();
+
+            // Start Loop
+            loop();
+        }
+
+        function resize() {
+            const canvas = document.getElementById('canvas');
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+
+            W = Math.floor(canvas.width / PARAMS.cellSize);
+            H = Math.floor(canvas.height / PARAMS.cellSize);
+
+            initSimulation();
+        }
+
+        function initSimulation() {
+            const size = W * H;
+            const cellStride = 16; // 4 * 4 bytes (u32, f32, f32, f32)
+            const bufferSize = size * cellStride;
+
+            // Initial Data
+            const initialData = new ArrayBuffer(bufferSize);
+            const dataView = new DataView(initialData);
+            const waxTop = H - Math.floor(H * PARAMS.initialWaxHeight);
+
+            for (let y = 0; y < H; y++) {
+                for (let x = 0; x < W; x++) {
+                    const i = y * W + x;
+                    const offset = i * 16;
+
+                    let units = 0;
+                    let temp = 0;
+
+                    if (y >= waxTop) {
+                        const surfaceNoise = Math.sin(x * 0.15) * 3 + Math.random() * 2;
+                        if (y >= waxTop + surfaceNoise) {
+                            units = 8;
+                            temp = 0.1 + Math.random() * 0.05;
+                        }
+                    }
+
+                    dataView.setUint32(offset, units, true);     // units
+                    dataView.setFloat32(offset + 4, temp, true); // temp
+                    dataView.setFloat32(offset + 8, 0, true);    // velX
+                    dataView.setFloat32(offset + 12, 0, true);   // velY
+                }
+            }
+
+            // Create Buffers
+            bufferA = device.createBuffer({
+                size: bufferSize,
+                usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST | GPUBufferUsage.COPY_SRC,
+                mappedAtCreation: true
+            });
+            new Uint8Array(bufferA.getMappedRange()).set(new Uint8Array(initialData));
+            bufferA.unmap();
+
+            bufferB = device.createBuffer({
+                size: bufferSize,
+                usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST | GPUBufferUsage.COPY_SRC
+            });
+            // Copy Init to B
+            const commandEncoder = device.createCommandEncoder();
+            commandEncoder.copyBufferToBuffer(bufferA, 0, bufferB, 0, bufferSize);
+            device.queue.submit([commandEncoder.finish()]);
+
+            // Uniforms
+            paramsBuffer = device.createBuffer({
+                size: 128, // Plenty of space for params
+                usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST
+            });
+
+            moveParamsBuffer = device.createBuffer({
+                size: 1024, // 256 * 4 dynamic offsets
+                usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST
+            });
+
+            // Pre-fill moveParamsBuffer with indices 0, 1, 2, 3 at 256-byte stride
+            {
+                const moveData = new ArrayBuffer(1024);
+                const moveView = new DataView(moveData);
+                moveView.setUint32(0, 0, true);
+                moveView.setUint32(256, 1, true);
+                moveView.setUint32(512, 2, true);
+                moveView.setUint32(768, 3, true);
+                device.queue.writeBuffer(moveParamsBuffer, 0, moveData);
+            }
+
+            // Create Explicit Bind Group Layout for Group 0 (Params + Cell Buffers)
+            // This layout will be shared by Physics, Move, and Render pipelines.
+            bindGroupLayout0 = device.createBindGroupLayout({
+                entries: [
+                    { binding: 0, visibility: GPUShaderStage.COMPUTE | GPUShaderStage.FRAGMENT, buffer: { type: 'uniform' } }, // Params
+                    { binding: 1, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'storage' } }, // Buffer In (Physics Read)
+                    { binding: 2, visibility: GPUShaderStage.COMPUTE | GPUShaderStage.FRAGMENT, buffer: { type: 'storage' } }, // Buffer Out (Physics Write, Render Read, Move In/Out)
+                    { binding: 3, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'uniform', hasDynamicOffset: true, minBindingSize: 16 } }  // Move Params (Dynamic)
+                ]
+            });
+
+            // Pipelines
+            const module = device.createShaderModule({ code: SHADER_CODE });
+
+            const pipelineLayout = device.createPipelineLayout({ bindGroupLayouts: [bindGroupLayout0] });
+
+            pipelinePhysics = device.createComputePipeline({
+                layout: pipelineLayout,
+                compute: { module, entryPoint: 'updatePhysics' }
+            });
+
+            pipelineMove = device.createComputePipeline({
+                layout: pipelineLayout,
+                compute: { module, entryPoint: 'updateMovement' }
+            });
+
+            renderPipeline = device.createRenderPipeline({
+                layout: pipelineLayout,
+                vertex: { module, entryPoint: 'vs_main' },
+                fragment: {
+                    module,
+                    entryPoint: 'fs_main',
+                    targets: [{ format: navigator.gpu.getPreferredCanvasFormat() }]
+                },
+                primitive: { topology: 'triangle-list' }
+            });
+
+            // Bind Groups
+            // A->B (Physics Step)
+            bindGroupA = device.createBindGroup({
+                layout: bindGroupLayout0,
+                entries: [
+                    { binding: 0, resource: { buffer: paramsBuffer } },
+                    { binding: 1, resource: { buffer: bufferA } },
+                    { binding: 2, resource: { buffer: bufferB } },
+                    { binding: 3, resource: { buffer: moveParamsBuffer, size: 16 } } // Explicitly limit range to 16 bytes
+                ]
+            });
+
+            // B->A (Physics Step)
+            bindGroupB = device.createBindGroup({
+                layout: bindGroupLayout0,
+                entries: [
+                    { binding: 0, resource: { buffer: paramsBuffer } },
+                    { binding: 1, resource: { buffer: bufferB } },
+                    { binding: 2, resource: { buffer: bufferA } },
+                    { binding: 3, resource: { buffer: moveParamsBuffer, size: 16 } } // Explicitly limit range to 16 bytes
+                ]
+            });
+        }
+
+        function updateParams() {
+            const data = new ArrayBuffer(128);
+            const view = new DataView(data);
+
+            view.setUint32(0, W, true);
+            view.setUint32(4, H, true);
+            view.setUint32(8, frame, true);
+            view.setUint32(12, heatOn, true);
+
+            view.setFloat32(16, PARAMS.heatRate, true);
+            view.setFloat32(20, PARAMS.heatSpread, true);
+            view.setFloat32(24, PARAMS.coolRate, true);
+            view.setFloat32(28, PARAMS.radiantHeatRate, true);
+            view.setFloat32(32, PARAMS.heatSourceWidth, true);
+
+            view.setFloat32(36, PARAMS.buoyancyScale, true);
+            view.setFloat32(40, PARAMS.velocityDamping, true);
+            view.setFloat32(44, PARAMS.velocityThreshold, true);
+            view.setFloat32(48, PARAMS.moveChanceScale, true);
+
+            view.setFloat32(52, PARAMS.alignment, true);
+            view.setFloat32(56, PARAMS.cohesion, true);
+            view.setFloat32(60, PARAMS.cohesionRadius, true);
+            view.setFloat32(64, PARAMS.surfaceTension, true);
+
+            view.setFloat32(68, PARAMS.brownianStrength, true);
+            view.setFloat32(72, PARAMS.horizontalBias, true);
+            view.setFloat32(76, Math.random() * 1000, true); // Seed
+
+            device.queue.writeBuffer(paramsBuffer, 0, data);
+        }
+
+        function tick(commandEncoder) {
+            frame++;
+            updateParams();
+
+            // Step 1: Physics (Read A, Write B)
+            // Actually, let's just use ping pong. Frame 0: Read A Write B. Frame 1: Read B Write A.
+            // For simplicity with Movement In-Place, let's do:
+            // 1. Physics: Read Current -> Write Next
+            // 2. Movement: Read Next -> Write Next (In-Place Swaps) x 4 Passes
+            // 3. Render Next
+            // 4. Swap handles
+
+            let sourceGroup = (frame % 2 === 0) ? bindGroupB : bindGroupA; // Previous frame output
+            let targetGroup = (frame % 2 === 0) ? bindGroupA : bindGroupB; // Current frame output
+
+            // Physics Pass
+            const pass1 = commandEncoder.beginComputePass();
+            pass1.setPipeline(pipelinePhysics);
+            pass1.setBindGroup(0, targetGroup, [0]); // Dynamic offset 0 for binding 3
+
+            pass1.dispatchWorkgroups(Math.ceil(W / 16), Math.ceil(H / 16));
+            pass1.end();
+
+            // Movement Passes (In-Place on Output Buffer)
+            // Note: To do in-place, we need In=Out=Dest.
+            // I need a BindGroup where In and Out are the SAME buffer.
+            // Let's create temp bindgroups or just one that maps 1=A, 2=A.
+
+            let moveGroup;
+            const destBuffer = (frame % 2 === 0) ? bufferA : bufferB;
+
+            // We can't easily create BindGroups inside loop (expensive).
+            // Let's rely on the fact that we can just use the targetGroup (In=Source, Out=Dest)
+            // and just have the shader read from Out? No, simulation step reads from In.
+            // We need a specific bindgroup for "In-Place on Buffer X".
+
+            // Lazy create move bindgroups
+            if (!window.bgMoveA) {
+                window.bgMoveA = device.createBindGroup({
+                    layout: bindGroupLayout0,
+                    entries: [
+                        { binding: 0, resource: { buffer: paramsBuffer } },
+                        { binding: 1, resource: { buffer: bufferB } }, // Unused dummy (B)
+                        { binding: 2, resource: { buffer: bufferA } }, // Target (A)
+                        { binding: 3, resource: { buffer: moveParamsBuffer, size: 16 } } // Explicit limit
+                    ]
+                });
+                window.bgMoveB = device.createBindGroup({
+                    layout: bindGroupLayout0,
+                    entries: [
+                        { binding: 0, resource: { buffer: paramsBuffer } },
+                        { binding: 1, resource: { buffer: bufferA } }, // Unused dummy (A)
+                        { binding: 2, resource: { buffer: bufferB } }, // Target (B)
+                        { binding: 3, resource: { buffer: moveParamsBuffer, size: 16 } } // Explicit limit
+                    ]
+                });
+            }
+
+            // FIX: If Physics wrote to B (Frame Even), we must Move on B.
+            // Frame Even: targetGroup is bindGroupA (Out=B). So we need bgMoveB (Target=B).
+            moveGroup = (frame % 2 === 0) ? window.bgMoveB : window.bgMoveA;
+
+            // 4 Passes for Dimension Splitting Swaps
+            // Must use separate passes to ensure memory synchronization between steps.
+            for (let p = 0; p < 4; p++) {
+                const pass = commandEncoder.beginComputePass();
+                pass.setPipeline(pipelineMove);
+                pass.setBindGroup(0, moveGroup, [p * 256]);
+                pass.dispatchWorkgroups(Math.ceil(W / 16), Math.ceil(H / 16));
+                pass.end();
+            }
+        }
+
+        function loop() {
+            if (!device) return;
+
+            const commandEncoder = device.createCommandEncoder();
+
+            if (!paused) {
+                for (let i = 0; i < ff; i++) {
+                    tick(commandEncoder);
+                }
+            }
+
+            // Render
+            const textureView = context.getCurrentTexture().createView();
+            const renderPass = commandEncoder.beginRenderPass({
+                colorAttachments: [{
+                    view: textureView,
+                    clearValue: { r: 0, g: 0, b: 0, a: 1 },
+                    loadOp: 'clear',
+                    storeOp: 'store',
+                }],
+            });
+
+            renderPass.setPipeline(renderPipeline);
+            // Use the bindgroup that has the CURRENT output as "Out" (binding 2).
+            // Frame Even: Physics wrote B. bindGroupA has Out=B. Use bindGroupA.
+            // Frame Odd: Physics wrote A. bindGroupB has Out=A. Use bindGroupB.
+
+            let renderGroup = (frame % 2 === 0) ? bindGroupA : bindGroupB;
+            renderPass.setBindGroup(0, renderGroup, [0]); // Dynamic offset 0
+
+            renderPass.draw(6);
+            renderPass.end();
+
+            device.queue.submit([commandEncoder.finish()]);
+
+            // Stats
+            const currentBuffer = (frame % 2 === 0) ? bufferA : bufferB;
+            // Note: reading buffer back to CPU for stats is slow, maybe skip or do occasionally?
+            // Let's skip conservation stats for perf in WebGPU version for now.
+            document.getElementById('stats').innerHTML = `Tick: ${frame} | Grid: ${W}x${H} | GPU`;
+
+            requestAnimationFrame(loop);
+        }
+
+        // UI Helpers
+        function setupUI() {
+            const paramsContainer = document.getElementById('params');
+            paramsContainer.innerHTML = '';
+
+            for (const key in PARAM_CONFIG) {
+                const config = PARAM_CONFIG[key];
+                if (config.section) {
+                    const section = document.createElement('div');
+                    section.className = 'section';
+                    section.textContent = config.section;
+                    paramsContainer.appendChild(section);
+                }
+
+                const div = document.createElement('div');
+                div.className = 'param-row';
+                const label = document.createElement('label');
+                label.textContent = key;
+
+                const inputsDiv = document.createElement('div');
+                inputsDiv.style.display = 'flex';
+                inputsDiv.style.alignItems = 'center';
+
+                const number = document.createElement('input');
+                number.type = 'number';
+                number.step = config.step;
+                number.value = PARAMS[key];
+
+                const rangeHint = document.createElement('span');
+                rangeHint.className = 'range-hint';
+                rangeHint.textContent = `(${config.min}-${config.max})`;
+
+                number.onchange = () => {
+                    let val = parseFloat(number.value);
+                    if (config.round) val = Math.round(val);
+                    PARAMS[key] = val;
+                    if (key === 'cellSize') resize();
+                    else if (key === 'initialWaxHeight') resize(); // reset
+                };
+
+                div.appendChild(label);
+                inputsDiv.appendChild(number);
+                inputsDiv.appendChild(rangeHint);
+                div.appendChild(inputsDiv);
+                paramsContainer.appendChild(div);
+            }
+        }
+
+        // Controls
+        document.getElementById('toggleParams').onclick = () => {
+            const p = document.getElementById('params');
+            p.style.display = p.style.display === 'none' ? '' : 'none';
+        };
+        document.getElementById('ff').onclick = () => {
+            ff = ff === 1 ? 10 : ff === 10 ? 100 : 1;
+            document.getElementById('ff').textContent = ff + 'x';
+        };
+        document.getElementById('pp').onclick = () => {
+            paused = !paused;
+            document.getElementById('pp').textContent = paused ? '▶' : '||';
+        };
+        document.getElementById('heat').onclick = () => {
+            heatOn = 1 - heatOn;
+            document.getElementById('heat').textContent = heatOn ? 'Heat ON' : 'Heat OFF';
+        };
+        document.getElementById('reset').onclick = () => initSimulation();
+
+        // Debug
+        const debugBtn = document.createElement('button');
+        debugBtn.textContent = "Debug Log";
+        debugBtn.onclick = async () => {
+            console.log("--- DEBUG LOG ---");
+            console.log("Frame:", frame);
+            console.log("Params:", PARAMS);
+
+            // Read center cell from CURRENT buffer (Output of last tick)
+            // If frame is Even (e.g. 0 -> 1 at start of tick), loop uses bindGroupA (Out=B).
+            // So current state is in B.
+            // Wait, frame increments at start of tick. 
+            // Loop calls tick(), then render.
+            // In Render: (frame % 2 === 0) ? bindGroupA : bindGroupB;
+            // Frame 1 (Odd): Render uses bindGroupB (Out=A).
+            // So Odd Frame -> Buffer A. Even Frame -> Buffer B.
+
+            const currentBuffer = (frame % 2 === 0) ? bufferB : bufferA;
+            // Wait, logic check:
+            // Tick 1: frame=1. Odd. Physics writes A. Render uses bindGroupB (Out=A). Correct.
+            // So Odd -> A. Even -> B.
+
+            const stagingBuffer = device.createBuffer({
+                size: 256, // Read a few cells
+                usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST
+            });
+
+            const commandEncoder = device.createCommandEncoder();
+            // Read center 4x4 block
+            const cx = Math.floor(W / 2);
+            const cy = Math.floor(H / 2);
+            const offset = (cy * W + cx) * 16;
+
+            // We can't use offset that isn't 4-byte aligned (it is 16 aligned).
+            // We want to read contiguous memory? 
+            // Rows are contiguous. 
+            // Let's just read 16 cells starting at center. (1 row slice)
+
+            commandEncoder.copyBufferToBuffer(currentBuffer, offset, stagingBuffer, 0, 256);
+            device.queue.submit([commandEncoder.finish()]);
+
+            await stagingBuffer.mapAsync(GPUMapMode.READ);
+            const copyArrayBuffer = stagingBuffer.getMappedRange();
+            const view = new DataView(copyArrayBuffer);
+
+            console.log(`Center Cell (${cx}, ${cy}) Data:`);
+            for (let i = 0; i < 4; i++) {
+                const units = view.getUint32(i * 16, true);
+                const temp = view.getFloat32(i * 16 + 4, true);
+                const velX = view.getFloat32(i * 16 + 8, true);
+                const velY = view.getFloat32(i * 16 + 12, true);
+                console.log(`[${i}] Units: ${units}, Temp: ${temp.toFixed(4)}, Vel: (${velX.toFixed(5)}, ${velY.toFixed(5)})`);
+            }
+            stagingBuffer.unmap();
+        };
+        document.getElementById('controls').appendChild(debugBtn);
+
+        console.log("WebGPU System Initialized");
+
+        init();
+
+    </script>
+</body>
+
+</html>

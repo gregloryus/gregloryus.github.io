@@ -1,0 +1,947 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Lava Lamp CA v15 - Velocity Field</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        html,
+        body {
+            height: 100%;
+            overflow: hidden;
+            background: #0a0a12;
+        }
+
+        #canvas {
+            display: block;
+            image-rendering: pixelated;
+            width: 100%;
+            height: 100%;
+        }
+
+        #ui {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            color: #fff;
+            font: 10px monospace;
+            background: rgba(0, 0, 0, 0.85);
+            padding: 8px;
+            border-radius: 4px;
+            max-height: 90vh;
+            overflow-y: auto;
+            min-width: 200px;
+        }
+
+        #ui .param-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin: 4px 0;
+        }
+
+        #ui label {
+            display: inline-block;
+            width: 110px;
+        }
+
+        #ui input[type="number"] {
+            width: 70px;
+            background: #222;
+            color: #fff;
+            border: 1px solid #444;
+            font-size: 11px;
+            padding: 2px 4px;
+        }
+
+        #ui .range-hint {
+            color: #666;
+            font-size: 9px;
+            margin-left: 6px;
+        }
+
+        #ui .section {
+            color: #888;
+            margin-top: 8px;
+            border-top: 1px solid #333;
+            padding-top: 4px;
+        }
+
+        #controls {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+        }
+
+        #controls button {
+            padding: 8px 14px;
+            margin: 2px;
+            background: #222;
+            color: #fff;
+            border: 1px solid #555;
+            cursor: pointer;
+            font: 12px monospace;
+        }
+
+        #stats {
+            position: absolute;
+            bottom: 10px;
+            left: 10px;
+            color: #fff;
+            font: 11px monospace;
+            background: rgba(0, 0, 0, 0.8);
+            padding: 8px;
+            border-radius: 4px;
+        }
+    </style>
+</head>
+
+<body>
+    <canvas id="canvas"></canvas>
+    <div id="ui">
+        <div><b>Lava Lamp CA v15 (Stable Fluids)</b></div>
+        <div id="params"></div>
+    </div>
+    <div id="controls">
+        <button id="toggleParams">Hide</button>
+        <button id="ff">1x</button>
+        <button id="pp">||</button>
+        <button id="heat">Heat ON</button>
+        <button id="reset">Reset</button>
+    </div>
+    <div id="stats">Initializing WebGPU...</div>
+
+    <script type="module">
+        const VF_SCALE = 8; // Fluid grid is 1/8th of CA grid
+
+        const PARAMS = {
+            heatRate: 0.08,
+            heatSpread: 0.05,
+            coolRate: 0.005,
+            radiantHeatRate: 0.002,
+            heatSourceWidth: 0.8,
+            buoyancyScale: 0.5,
+            velocityDamping: 0.95,
+            velocityThreshold: 0.001,
+            moveChanceScale: 1.0,
+            alignment: 0.2,
+            cohesion: 2.0,
+            cohesionRadius: 6,
+            surfaceTension: 0.05,
+            surfaceEnergy: 2.0,
+            brownianStrength: 0.1,
+            horizontalBias: 0.8,
+            initialWaxHeight: 0.12,
+            cellSize: 5,
+            // Fluid Params
+            fluidInfluence: 0.6,
+            fluidScale: 1.0,
+            fluidBuoyancy: 0.5,
+        };
+
+        const PARAM_CONFIG = {
+            heatRate: { section: 'Heat', min: 0.001, max: 0.05, step: 0.001 },
+            heatSpread: { min: 0.01, max: 0.3, step: 0.01 },
+            coolRate: { min: 0.001, max: 0.02, step: 0.001 },
+            radiantHeatRate: { min: 0.000, max: 0.01, step: 0.0001 },
+            heatSourceWidth: { min: 0.1, max: 1.0, step: 0.1 },
+            buoyancyScale: { section: 'CA Movement', min: 0.01, max: 0.5, step: 0.01 },
+            velocityDamping: { min: 0.5, max: 0.99, step: 0.01 },
+            velocityThreshold: { min: 0.05, max: 0.5, step: 0.01 },
+            moveChanceScale: { min: 0.05, max: 1.0, step: 0.05 },
+            alignment: { section: 'Boids Forces', min: 0, max: 0.9, step: 0.05 },
+            cohesion: { min: 0, max: 1.0, step: 0.05 },
+            cohesionRadius: { min: 1, max: 12, step: 1, round: true },
+            surfaceTension: { section: 'Surface', min: 0, max: 0.2, step: 0.01 },
+            surfaceEnergy: { min: 0, max: 10.0, step: 0.1 },
+            brownianStrength: { section: 'Brownian', min: 0, max: 0.2, step: 0.01 },
+            horizontalBias: { min: 0, max: 1, step: 0.1 },
+            fluidInfluence: { section: 'Fluid Field', min: 0, max: 1.0, step: 0.05 },
+            fluidScale: { min: 0, max: 5.0, step: 0.1 },
+            fluidBuoyancy: { min: 0, max: 2.0, step: 0.1 },
+            initialWaxHeight: { section: 'Setup', min: 0.05, max: 0.3, step: 0.01 },
+            cellSize: { min: 1, max: 10, step: 1, round: true }
+        };
+
+        const SHADER_CODE = `
+struct Params {
+    width: u32,
+    height: u32,
+    frame: u32,
+    heatOn: u32,
+    
+    heatRate: f32,
+    heatSpread: f32,
+    coolRate: f32,
+    radiantHeatRate: f32,
+    heatSourceWidth: f32,
+    
+    buoyancyScale: f32,
+    velocityDamping: f32,
+    velocityThreshold: f32,
+    moveChanceScale: f32,
+    
+    alignment: f32,
+    cohesion: f32,
+    cohesionRadius: f32,
+    surfaceTension: f32,
+    
+    brownianStrength: f32,
+    horizontalBias: f32,
+    seed: f32,
+    surfaceEnergy: f32,
+    
+    fluidInfluence: f32,
+    fluidScale: f32,
+    fluidBuoyancy: f32,
+}
+
+struct Cell {
+    units: u32,
+    temp: f32,
+    velX: f32,
+    velY: f32,
+}
+
+@group(0) @binding(0) var<uniform> params: Params;
+@group(0) @binding(1) var<storage, read_write> cellsIn: array<Cell>;
+@group(0) @binding(2) var<storage, read_write> cellsOut: array<Cell>;
+@group(0) @binding(3) var<uniform> moveParams: vec4u; // Using vec4u for alignment
+
+// Group 1: Fluid Resources (Variable bindings per pass)
+@group(1) @binding(0) var texRead: texture_2d<f32>;
+@group(1) @binding(1) var texWrite: texture_storage_2d<rgba16float, write>;
+@group(1) @binding(2) var auxRead: texture_2d<f32>; // Pressure or Div or Velocity
+@group(1) @binding(3) var auxWrite: texture_storage_2d<rgba16float, write>;
+@group(1) @binding(4) var linSampler: sampler;
+
+// Helpers
+fn rand_seed(idx: u32, seed: f32) -> f32 {
+    return fract(sin(f32(idx) * 0.123 + seed) * 43758.5453);
+}
+fn get_capacity(t: f32) -> u32 {
+    if (t >= 0.5) { return 6u; }
+    if (t >= 0.25) { return 7u; }
+    return 8u;
+}
+fn idx(x: i32, y: i32) -> u32 {
+    let w = i32(params.width);
+    let h = i32(params.height);
+    let cx = clamp(x, 0, w - 1);
+    let cy = clamp(y, 0, h - 1);
+    return u32(cy * w + cx);
+}
+fn occ(i: u32) -> f32 { return select(0.0, 1.0, cellsIn[i].units > 0u); }
+fn occ4(x: i32, y: i32) -> vec4f {
+    let oL = occ(idx(x-1, y));
+    let oR = occ(idx(x+1, y));
+    let oU = occ(idx(x, y-1));
+    let oD = occ(idx(x, y+1));
+    return vec4f(oL, oR, oU, oD);
+}
+fn grad_occ(x: i32, y: i32) -> vec2f {
+    let o = occ4(x, y);
+    return vec2f(o.y - o.x, o.w - o.z);
+}
+fn normal_occ(x: i32, y: i32) -> vec2f {
+    let g = grad_occ(x, y);
+    let len = max(1e-5, length(g));
+    return g / len;
+}
+fn curvature(x: i32, y: i32) -> f32 {
+    let nC = normal_occ(x, y);
+    let nL = normal_occ(x-1, y);
+    let nR = normal_occ(x+1, y);
+    let nU = normal_occ(x, y-1);
+    let nD = normal_occ(x, y+1);
+    return (nR.x - nL.x)*0.5 + (nD.y - nU.y)*0.5;
+}
+
+// ==========================================================
+// FLUID SHADERS
+// ==========================================================
+const VF_SCALE: i32 = 8;
+
+@compute @workgroup_size(16, 16)
+fn fluidAddForce(@builtin(global_invocation_id) id: vec3u) {
+    let x = i32(id.x);
+    let y = i32(id.y);
+    let fw = i32(params.width) / VF_SCALE;
+    let fh = i32(params.height) / VF_SCALE;
+    if (x >= fw || y >= fh) { return; }
+
+    // Read previous velocity
+    var vel = textureLoad(texRead, vec2i(x,y), 0).xy;
+
+    // Accumulate wax forces
+    var waxOcc = 0.0;
+    var waxTemp = 0.0;
+    
+    let sx = x * VF_SCALE;
+    let sy = y * VF_SCALE;
+    
+    for(var dy=0; dy<VF_SCALE; dy++) {
+        for(var dx=0; dx<VF_SCALE; dx++) {
+            let ii = idx(sx+dx, sy+dy);
+            if(cellsIn[ii].units > 0u) {
+                waxOcc += 1.0;
+                waxTemp += cellsIn[ii].temp;
+            }
+        }
+    }
+    
+    if (waxOcc > 0.0) {
+        waxTemp /= waxOcc;
+        let density = waxOcc / f32(VF_SCALE * VF_SCALE);
+        // Buoyancy: Hot rises (negative y force)
+        // waxTemp 0..1. 
+        let forceY = -params.fluidBuoyancy * density * (waxTemp); 
+        vel.y += forceY;
+    }
+    
+    textureStore(texWrite, vec2i(x,y), vec4f(vel, 0.0, 0.0));
+}
+
+@compute @workgroup_size(16, 16)
+fn fluidAdvect(@builtin(global_invocation_id) id: vec3u) {
+    let x = i32(id.x);
+    let y = i32(id.y);
+    let fw = i32(params.width) / VF_SCALE;
+    let fh = i32(params.height) / VF_SCALE;
+    if (x >= fw || y >= fh) { return; }
+
+    let dt = 1.0; // timestep
+    let uv = (vec2f(f32(x), f32(y)) + 0.5) / vec2f(f32(fw), f32(fh));
+    
+    // Sample current velocity at pos
+    let vel = textureSampleLevel(texRead, linSampler, uv, 0.0).xy;
+    
+    // Backtrace
+    let backPos = uv - vel * dt * vec2f(1.0/f32(fw), 1.0/f32(fh));
+    
+    // Sample velocity at backPos
+    let newVel = textureSampleLevel(texRead, linSampler, backPos, 0.0).xy;
+    
+    // Decay
+    let decay = 0.995;
+    textureStore(texWrite, vec2i(x,y), vec4f(newVel * decay, 0.0, 0.0));
+}
+
+@compute @workgroup_size(16, 16)
+fn fluidDiv(@builtin(global_invocation_id) id: vec3u) {
+    let x = i32(id.x);
+    let y = i32(id.y);
+    let fw = i32(params.width) / VF_SCALE;
+    let fh = i32(params.height) / VF_SCALE;
+    if (x >= fw || y >= fh) { return; }
+
+    let vL = textureLoad(texRead, vec2i(max(0, x-1), y), 0).xy;
+    let vR = textureLoad(texRead, vec2i(min(fw-1, x+1), y), 0).xy;
+    let vU = textureLoad(texRead, vec2i(x, max(0, y-1)), 0).xy;
+    let vD = textureLoad(texRead, vec2i(x, min(fh-1, y+1)), 0).xy;
+
+    let div = 0.5 * (vR.x - vL.x + vD.y - vU.y);
+    textureStore(auxWrite, vec2i(x,y), vec4f(div, 0.0, 0.0, 0.0));
+}
+
+@compute @workgroup_size(16, 16)
+fn fluidJacobi(@builtin(global_invocation_id) id: vec3u) {
+    let x = i32(id.x);
+    let y = i32(id.y);
+    let fw = i32(params.width) / VF_SCALE;
+    let fh = i32(params.height) / VF_SCALE;
+    if (x >= fw || y >= fh) { return; }
+
+    // auxRead is Pressure Input (p)
+    // texRead is Divergence (b) - bound to slot 0 just for convenience? No, separate slot.
+    // Wait, layouts are fixed. 
+    // We bind Pressure to 'texRead' and Divergence to 'auxRead' for this shader?
+    
+    let pL = textureLoad(texRead, vec2i(max(0, x-1), y), 0).r;
+    let pR = textureLoad(texRead, vec2i(min(fw-1, x+1), y), 0).r;
+    let pU = textureLoad(texRead, vec2i(x, max(0, y-1)), 0).r;
+    let pD = textureLoad(texRead, vec2i(x, min(fh-1, y+1)), 0).r;
+    
+    let b = textureLoad(auxRead, vec2i(x,y), 0).r; // Div
+    
+    let pNew = (pL + pR + pU + pD - b) * 0.25;
+    textureStore(auxWrite, vec2i(x,y), vec4f(pNew, 0.0, 0.0, 0.0)); // Write to Pressure Out
+}
+
+@compute @workgroup_size(16, 16)
+fn fluidSubtract(@builtin(global_invocation_id) id: vec3u) {
+    let x = i32(id.x);
+    let y = i32(id.y);
+    let fw = i32(params.width) / VF_SCALE;
+    let fh = i32(params.height) / VF_SCALE;
+    if (x >= fw || y >= fh) { return; }
+    
+    // texRead: Velocity Field (Advected)
+    // auxRead: Pressure Field
+    
+    let vel = textureLoad(texRead, vec2i(x,y), 0).xy;
+    
+    let pL = textureLoad(auxRead, vec2i(max(0, x-1), y), 0).r;
+    let pR = textureLoad(auxRead, vec2i(min(fw-1, x+1), y), 0).r;
+    let pU = textureLoad(auxRead, vec2i(x, max(0, y-1)), 0).r;
+    let pD = textureLoad(auxRead, vec2i(x, min(fh-1, y+1)), 0).r;
+    
+    let gradP = 0.5 * vec2f(pR - pL, pD - pU);
+    let newVel = vel - gradP;
+    
+    textureStore(texWrite, vec2i(x,y), vec4f(newVel, 0.0, 0.0));
+}
+
+// ==========================================================
+// CA PHYSICS
+// ==========================================================
+@compute @workgroup_size(16, 16)
+fn updatePhysics(@builtin(global_invocation_id) global_id: vec3u) {
+    let x = i32(global_id.x);
+    let y = i32(global_id.y);
+    let w = i32(params.width);
+    let h = i32(params.height);
+    if (x >= w || y >= h) { return; }
+    
+    let i = idx(x, y);
+    var cell = cellsIn[i];
+    cellsOut[i] = cell; 
+    
+    if (cell.units == 0u) {
+        cellsOut[i].temp = 0.0;
+        cellsOut[i].velX = 0.0;
+        cellsOut[i].velY = 0.0;
+        return;
+    }
+
+    // --- Temp & Buoyancy (Simplified for brevity, copy full logic from v14) ---
+    // (Pasting v14 logic)
+    var t = cell.temp;
+    if (params.heatOn == 1u && y >= h - 3) {
+        let centerDist = abs(f32(x) / f32(w) - 0.5);
+        if (centerDist < params.heatSourceWidth * 0.5) {
+            let intensity = 1.0 - centerDist / (params.heatSourceWidth * 0.5);
+            t += params.heatRate * intensity;
+        }
+    }
+    if (y <= 3) { t -= params.coolRate * 2.0; }
+    if (params.radiantHeatRate > 0.0) {
+        let relativeY = f32(y) / f32(h);
+        t += (relativeY - 0.5) * 2.0 * params.radiantHeatRate;
+    }
+    
+    // Heat Spread
+    var tempSum = 0.0;
+    var waxNeighbors = 0.0;
+    for (var dy = -1; dy <= 1; dy++) {
+        for (var dx = -1; dx <= 1; dx++) {
+            if (dx == 0 && dy == 0) { continue; }
+            let ni = idx(x + dx, y + dy);
+            if (cellsIn[ni].units > 0u) {
+                tempSum += cellsIn[ni].temp;
+                waxNeighbors += 1.0;
+            }
+        }
+    }
+    if (waxNeighbors > 0.0) {
+        let avgTemp = tempSum / waxNeighbors;
+        t += (avgTemp - t) * params.heatSpread;
+    }
+    t = clamp(t, 0.0, 1.0);
+    cellsOut[i].temp = t;
+
+    let capacity = get_capacity(t);
+    let buoyancy = f32(cell.units) * (7.0 - f32(capacity)) * params.buoyancyScale;
+    
+    var vy = cell.velY - buoyancy;
+    var vx = cell.velX;
+
+    // --- COUPLE WITH FLUID FIELD ---
+    let uv = vec2f(f32(x) / f32(w), f32(y) / f32(h));
+    // Sample Fluid Velocity (texRead is bound to final Fluid Vel)
+    let fluidVel = textureSampleLevel(texRead, linSampler, uv, 0.0).xy;
+    
+    // Mix Fluid Velocity
+    let fInf = params.fluidInfluence;
+    let fScl = params.fluidScale;
+    vx = mix(vx, fluidVel.x * fScl, fInf);
+    vy = mix(vy, fluidVel.y * fScl, fInf);
+
+    // Surface Tension
+    let o = occ4(x, y);
+    let neighborSum = o.x + o.y + o.z + o.w;
+    if (neighborSum < 4.0) {
+        let n = normal_occ(x, y);
+        let k = curvature(x, y);
+        let sigma = params.surfaceTension;
+        vx += -sigma * k * n.x;
+        vy += -sigma * k * n.y;
+    }
+    
+    // Cohesion / Alignment (Boids)
+    // ... (v14 logic) ...
+    var vySum = 0.0; var vxSum = 0.0;
+    var cohN = 0.0; var cOffY = 0.0; var cOffX = 0.0;
+    let r = i32(params.cohesionRadius);
+    for (var dy = -r; dy <= r; dy++) {
+        for (var dx = -r; dx <= r; dx++) {
+            if (dx==0&&dy==0) {continue;}
+            if (f32(dx*dx + dy*dy) > params.cohesionRadius*params.cohesionRadius) {continue;}
+            let nx = x + dx; let ny = y + dy;
+            if (nx<0||nx>=w||ny<0||ny>=h) {continue;}
+            let ni = idx(nx, ny);
+            if (cellsIn[ni].units > 0u) {
+                let dist = sqrt(f32(dx*dx+dy*dy));
+                let wgt = 1.0/dist;
+                vySum += cellsIn[ni].velY * wgt;
+                vxSum += cellsIn[ni].velX * wgt;
+                cOffY += f32(dy)*wgt; cOffX += f32(dx)*wgt;
+                cohN += 1.0;
+            }
+        }
+    }
+    if (cohN > 0.0) {
+        if (params.alignment > 0.0) {
+            let avgVy = vySum / cohN; let avgVx = vxSum / cohN;
+            vy = vy*(1.0-params.alignment) + avgVy*params.alignment;
+            vx = vx*(1.0-params.alignment) + avgVx*params.alignment;
+        }
+        let invN = 1.0/cohN;
+        vy += (cOffY*invN)*params.cohesion;
+        vx += (cOffX*invN)*params.cohesion;
+    }
+
+    vy *= params.velocityDamping;
+    vx *= params.velocityDamping;
+    
+    // Brownian
+    let seed = params.seed + f32(i) * 0.1;
+    let r1 = rand_seed(u32(i), seed);
+    let r2 = rand_seed(u32(i) + 1u, seed);
+    var nY = (r1 - 0.5) * 2.0 * params.brownianStrength * (1.0 - params.horizontalBias);
+    var nX = (r2 - 0.5) * 2.0 * params.brownianStrength * (1.0 + params.horizontalBias);
+    vy += nY; vx += nX;
+    
+    cellsOut[i].velY = vy;
+    cellsOut[i].velX = vx;
+}
+
+// ==========================================================
+// MOVEMENT (Swap) - Same as v14
+// ==========================================================
+fn isWax(units: u32) -> i32 { return select(0, 1, units > 0u); }
+fn wax_at(x: i32, y: i32, s1: u32, v1: i32, s2: u32, v2: i32) -> i32 {
+    let ii = idx(x, y);
+    if (ii == s1) { return v1; }
+    if (ii == s2) { return v2; }
+    return isWax(cellsOut[ii].units);
+}
+fn local_energy(x: i32, y: i32, i1: u32, v1: i32, i2: u32, v2: i32) -> i32 {
+    var cV = 0; if (idx(x,y)==i1) {cV=v1;} else {cV=v2;}
+    return abs(cV-wax_at(x-1,y,i1,v1,i2,v2)) + abs(cV-wax_at(x+1,y,i1,v1,i2,v2)) +
+           abs(cV-wax_at(x,y-1,i1,v1,i2,v2)) + abs(cV-wax_at(x,y+1,i1,v1,i2,v2));
+}
+
+@compute @workgroup_size(16, 16)
+fn updateMovement(@builtin(global_invocation_id) global_id: vec3u) {
+    let x = i32(global_id.x);
+    let y = i32(global_id.y);
+    let w = i32(params.width);
+    let h = i32(params.height);
+    if (x >= w || y >= h) { return; }
+    
+    var tx = x; var ty = y;
+    let pt = moveParams.x; // passType
+
+    if (pt == 0u) { if ((y % 2) == 0) { ty = y + 1; } }
+    else if (pt == 1u) { if ((y % 2) == 1) { ty = y + 1; } }
+    else if (pt == 2u) { if ((x % 2) == 0) { tx = x + 1; } }
+    else if (pt == 3u) { if ((x % 2) == 1) { tx = x + 1; } }
+    else if (pt == 4u) { if ((x % 2) == 0) { tx = x + 1; ty = y + 1; } }
+    else if (pt == 5u) { if ((x % 2) == 1) { tx = x + 1; ty = y + 1; } }
+    else if (pt == 6u) { if ((x % 2) == 0) { tx = x - 1; ty = y + 1; } }
+    else if (pt == 7u) { if ((x % 2) == 1) { tx = x - 1; ty = y + 1; } }
+    
+    if (tx < 0 || tx >= w || ty < 0 || ty >= h || (tx == x && ty == y)) { return; }
+    
+    let i1 = idx(x, y); let i2 = idx(tx, ty);
+    var c1 = cellsOut[i1]; var c2 = cellsOut[i2];
+    var swap = false; var desire = 0.0;
+    let dx = f32(tx - x); let dy = f32(ty - y);
+    let thresh = params.velocityThreshold;
+    
+    if (c1.units > 0u) {
+        let vProj = c1.velX * dx + c1.velY * dy;
+        if (vProj > thresh) { desire += vProj; }
+    }
+    if (c2.units > 0u) {
+        let vProj = c2.velX * (-dx) + c2.velY * (-dy);
+        if (vProj > thresh) { desire += vProj; }
+    }
+    
+    if (desire > 0.0) {
+        var chance = min(1.0, desire * params.moveChanceScale);
+        if (params.surfaceEnergy > 0.0) {
+            let w1 = isWax(c1.units); let w2 = isWax(c2.units);
+            if (w1 != w2) {
+                let dE = f32(local_energy(x,y,i1,w2,i2,w1) + local_energy(tx,ty,i1,w2,i2,w1) - 
+                             local_energy(x,y,i1,w1,i2,w2) - local_energy(tx,ty,i1,w1,i2,w2));
+                chance *= exp(-params.surfaceEnergy * dE);
+            }
+        }
+        if (rand_seed(u32(i1) + params.frame + u32(pt)*10u, params.seed) < chance) { swap = true; }
+    }
+    
+    if (swap) {
+        let tempC = c1; c1 = c2; c1.velX *= 0.95; c1.velY *= 0.95;
+        c2 = tempC; c2.velX *= 0.95; c2.velY *= 0.95;
+        cellsOut[i1] = c1; cellsOut[i2] = c2;
+    }
+}
+
+// Render (same as v14)
+struct VertexOutput { @builtin(position) pos: vec4f, @location(0) uv: vec2f }
+@vertex fn vs_main(@builtin(vertex_index) vi: u32) -> VertexOutput {
+    var pos = array<vec2f, 6>(vec2f(-1.,-1.), vec2f(1.,-1.), vec2f(-1.,1.), vec2f(-1.,1.), vec2f(1.,-1.), vec2f(1.,1.));
+    var out: VertexOutput; out.pos = vec4f(pos[vi], 0., 1.); out.uv = pos[vi]*0.5 + 0.5; out.uv.y = 1.-out.uv.y; return out;
+}
+@fragment fn fs_main(@location(0) uv: vec2f) -> @location(0) vec4f {
+    let w = i32(params.width); let h = i32(params.height);
+    let x = i32(uv.x * f32(w)); let y = i32(uv.y * f32(h));
+    let cell = cellsOut[idx(x, y)];
+    if (cell.units == 0u) { return vec4f(0.04, 0.04, 0.07, 1.0); }
+    let t = cell.temp; var col: vec3f;
+    if (t < 0.33) { col = vec3f(0.24, 0.08, 0.47) + (vec3f(0.63, 0.27, 0.31)-vec3f(0.24, 0.08, 0.47))*(t/0.33); }
+    else if (t < 0.66) { col = vec3f(0.63, 0.27, 0.31) + (vec3f(0.9, 0.55, 0.08)-vec3f(0.63, 0.27, 0.31))*((t-0.33)/0.33); }
+    else { col = vec3f(0.9, 0.55, 0.08) + (vec3f(1.0, 1.0, 0.5)-vec3f(0.9, 0.55, 0.08))*((t-0.66)/0.34); }
+    return vec4f(col * (0.5 + 0.5*f32(cell.units)/8.0), 1.0);
+}
+`;
+
+        let device, context;
+        let pForce, pAdvect, pDiv, pJacobi, pSub, pPhys, pMove, pRender;
+        let bgLayout0, bgLayout1;
+        let bufParams, bufMove;
+        let bufCellsA, bufCellsB;
+        let texVelA, texVelB, texPressA, texPressB, texDiv;
+        let sampler;
+
+        // BindGroups
+        let bgMainA, bgMainB; // Group 0
+        let bgFluidForce, bgFluidAdvect, bgFluidDiv, bgFluidJacobiA, bgFluidJacobiB, bgFluidSub; // Group 1
+
+        let W, H, FW, FH;
+        let frame = 0, heatOn = 1, paused = false, ff = 1;
+
+        async function init() {
+            if (!navigator.gpu) { document.body.innerHTML = "WebGPU not supported"; return; }
+            const adapter = await navigator.gpu.requestAdapter();
+            device = await adapter.requestDevice();
+            context = document.getElementById('canvas').getContext('webgpu');
+            context.configure({ device, format: navigator.gpu.getPreferredCanvasFormat() });
+
+            resize();
+            window.addEventListener('resize', resize);
+            setupUI();
+            loop();
+        }
+
+        function resize() {
+            const cvs = document.getElementById('canvas');
+            cvs.width = window.innerWidth; cvs.height = window.innerHeight;
+            W = Math.floor(cvs.width / PARAMS.cellSize);
+            H = Math.floor(cvs.height / PARAMS.cellSize);
+            FW = Math.ceil(W / VF_SCALE);
+            FH = Math.ceil(H / VF_SCALE);
+            initSim();
+        }
+
+        function initSim() {
+            frame = 0;
+            // Buffers
+            const sz = W * H * 16;
+            const initData = new ArrayBuffer(sz);
+            const dv = new DataView(initData);
+            const waxTop = H - Math.floor(H * PARAMS.initialWaxHeight);
+            for (let y = 0; y < H; y++) {
+                for (let x = 0; x < W; x++) {
+                    let i = y * W + x; let off = i * 16;
+                    if (y >= waxTop + (Math.sin(x * 0.15) * 3 + Math.random() * 2)) {
+                        dv.setUint32(off, 8, true);
+                        dv.setFloat32(off + 4, 0.1 + Math.random() * 0.05, true);
+                    }
+                }
+            }
+            bufCellsA = createBuf(sz, initData);
+            bufCellsB = createBuf(sz, initData); // Copy
+
+            bufParams = device.createBuffer({ size: 128, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
+
+            // Fix: Move Params Buffer must support dynamic offsets for 8 passes
+            // Size: 256 bytes (min stride) * 8 passes = 2048 bytes
+            bufMove = device.createBuffer({ size: 2048, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
+            {
+                const d = new ArrayBuffer(2048);
+                const v = new DataView(d);
+                for (let i = 0; i < 8; i++) {
+                    // For each 256-byte chunk, the first 4 bytes (u32) is the pass type
+                    v.setUint32(i * 256, i, true);
+                }
+                device.queue.writeBuffer(bufMove, 0, d);
+            }
+
+            // Fluid Textures
+            texVelA = createTex(FW, FH, 'rgba16float');
+            texVelB = createTex(FW, FH, 'rgba16float');
+            texPressA = createTex(FW, FH, 'rgba16float');
+            texPressB = createTex(FW, FH, 'rgba16float');
+            texDiv = createTex(FW, FH, 'rgba16float');
+            sampler = device.createSampler({ magFilter: 'linear', minFilter: 'linear' });
+
+            // Layouts
+            bgLayout0 = device.createBindGroupLayout({
+                entries: [
+                    { binding: 0, visibility: GPUShaderStage.COMPUTE | GPUShaderStage.FRAGMENT, buffer: { type: 'uniform' } },
+                    { binding: 1, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'storage' } },
+                    { binding: 2, visibility: GPUShaderStage.COMPUTE | GPUShaderStage.FRAGMENT, buffer: { type: 'storage' } },
+                    { binding: 3, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'uniform', hasDynamicOffset: true, minBindingSize: 16 } }
+                ]
+            });
+
+            bgLayout1 = device.createBindGroupLayout({
+                entries: [
+                    { binding: 0, visibility: GPUShaderStage.COMPUTE, texture: { sampleType: 'float' } },
+                    { binding: 1, visibility: GPUShaderStage.COMPUTE, storageTexture: { access: 'write-only', format: 'rgba16float' } },
+                    { binding: 2, visibility: GPUShaderStage.COMPUTE, texture: { sampleType: 'float' } }, // Aux Read
+                    { binding: 3, visibility: GPUShaderStage.COMPUTE, storageTexture: { access: 'write-only', format: 'rgba16float' } }, // Aux Write
+                    { binding: 4, visibility: GPUShaderStage.COMPUTE, sampler: { type: 'filtering' } }
+                ]
+            });
+
+            // Pipelines
+            const mod = device.createShaderModule({ code: SHADER_CODE });
+            const plLayout = device.createPipelineLayout({ bindGroupLayouts: [bgLayout0, bgLayout1] });
+
+            const mkPipe = (ep) => device.createComputePipeline({ layout: plLayout, compute: { module: mod, entryPoint: ep } });
+            pForce = mkPipe('fluidAddForce');
+            pAdvect = mkPipe('fluidAdvect');
+            pDiv = mkPipe('fluidDiv');
+            pJacobi = mkPipe('fluidJacobi');
+            pSub = mkPipe('fluidSubtract');
+            pPhys = mkPipe('updatePhysics');
+            pMove = mkPipe('updateMovement');
+
+            pRender = device.createRenderPipeline({
+                layout: plLayout,
+                vertex: { module: mod, entryPoint: 'vs_main' },
+                fragment: { module: mod, entryPoint: 'fs_main', targets: [{ format: navigator.gpu.getPreferredCanvasFormat() }] },
+                primitive: { topology: 'triangle-list' }
+            });
+
+            // Bind Groups (Group 0)
+            const mkBG0 = (bIn, bOut) => device.createBindGroup({
+                layout: bgLayout0, entries: [
+                    { binding: 0, resource: { buffer: bufParams } },
+                    { binding: 1, resource: { buffer: bIn } },
+                    { binding: 2, resource: { buffer: bOut } },
+                    // Important: Limit the bound size to 16 bytes (size of vec4u)
+                    // This allows dynamic offset to slide the window within the larger buffer
+                    { binding: 3, resource: { buffer: bufMove, size: 16 } }
+                ]
+            });
+            bgMainA = mkBG0(bufCellsA, bufCellsB);
+            bgMainB = mkBG0(bufCellsB, bufCellsA);
+
+            // Bind Groups (Group 1 - Fluid)
+            // Helpers
+            const view = (t) => t.createView();
+            const mkBG1 = (tr, tw, ar, aw) => device.createBindGroup({
+                layout: bgLayout1, entries: [
+                    { binding: 0, resource: view(tr) },
+                    { binding: 1, resource: view(tw) },
+                    { binding: 2, resource: view(ar || tr) }, // fallback
+                    { binding: 3, resource: view(aw || texDiv) }, // fallback
+                    { binding: 4, resource: sampler }
+                ]
+            });
+
+            // Force: Read VelA, Write VelB. (Use dummy aux)
+            bgFluidForce = mkBG1(texVelA, texVelB, texVelA, texDiv);
+            // Advect: Read VelB, Write VelA.
+            bgFluidAdvect = mkBG1(texVelB, texVelA, texVelB, texDiv);
+            // Div: Read VelA, Write Div.
+            bgFluidDiv = mkBG1(texVelA, texVelB, texVelA, texDiv); // Write to slot 3 (Div)
+            // Jacobi: Read PressA (Tex), Read Div (Aux), Write PressB (AuxWrite)
+            // TexRead=PressA, AuxRead=Div, AuxWrite=PressB
+            bgFluidJacobiA = mkBG1(texPressA, texVelA, texDiv, texPressB); // Write PressB
+            bgFluidJacobiB = mkBG1(texPressB, texVelA, texDiv, texPressA); // Write PressA
+            // Subtract: Read VelA (Tex), Read Press (Aux), Write VelB (TexWrite)
+            // TexRead=VelA, AuxRead=PressA, TexWrite=VelB
+            bgFluidSub = mkBG1(texVelA, texVelB, texPressA, texDiv);
+            // Note: After Subtract, VelB has final. We should Copy VelB to VelA for next frame?
+            // Or just swap. If Sim starts reading VelA, we must end with VelA.
+            // Force: A->B. Advect: B->A. Div: A. Jacobi: P_A<->P_B. Sub: A, P_A -> B.
+            // Result is in B. Next frame Force reads A. So we need B->A copy or swap handles.
+            // Simpler: Force reads Vel, writes Vel. Advect reads Vel, writes Vel.
+            // Let's assume Sim always starts with VelA holding valid state.
+            // 1. Force: Read A, Write B.
+            // 2. Advect: Read B, Write A.
+            // 3. Div: Read A, Write Div.
+            // 4. Jacobi: ... -> PressA.
+            // 5. Sub: Read A, Read PressA, Write B.
+            // 6. Copy B -> A.
+        }
+
+        function createBuf(sz, data) {
+            const b = device.createBuffer({ size: sz, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST | GPUBufferUsage.COPY_SRC, mappedAtCreation: !!data });
+            if (data) { new Uint8Array(b.getMappedRange()).set(new Uint8Array(data)); b.unmap(); }
+            return b;
+        }
+        function createTex(w, h, fmt) {
+            return device.createTexture({ size: [w, h], format: fmt, usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.STORAGE_BINDING | GPUTextureUsage.COPY_DST | GPUTextureUsage.COPY_SRC });
+        }
+
+        function updateParams() {
+            const d = new ArrayBuffer(128); const v = new DataView(d);
+            v.setUint32(0, W, true); v.setUint32(4, H, true); v.setUint32(8, frame, true); v.setUint32(12, heatOn, true);
+            v.setFloat32(16, PARAMS.heatRate, true); v.setFloat32(20, PARAMS.heatSpread, true);
+            v.setFloat32(24, PARAMS.coolRate, true); v.setFloat32(28, PARAMS.radiantHeatRate, true);
+            v.setFloat32(32, PARAMS.heatSourceWidth, true); v.setFloat32(36, PARAMS.buoyancyScale, true);
+            v.setFloat32(40, PARAMS.velocityDamping, true); v.setFloat32(44, PARAMS.velocityThreshold, true);
+            v.setFloat32(48, PARAMS.moveChanceScale, true); v.setFloat32(52, PARAMS.alignment, true);
+            v.setFloat32(56, PARAMS.cohesion, true); v.setFloat32(60, PARAMS.cohesionRadius, true);
+            v.setFloat32(64, PARAMS.surfaceTension, true); v.setFloat32(68, PARAMS.brownianStrength, true);
+            v.setFloat32(72, PARAMS.horizontalBias, true); v.setFloat32(76, Math.random() * 1000, true);
+            v.setFloat32(80, PARAMS.surfaceEnergy, true); v.setFloat32(84, PARAMS.fluidInfluence, true);
+            v.setFloat32(88, PARAMS.fluidScale, true); v.setFloat32(92, PARAMS.fluidBuoyancy, true);
+            device.queue.writeBuffer(bufParams, 0, d);
+        }
+
+        function tick(enc) {
+            frame++; updateParams();
+            let bg0_Phys = (frame % 2 == 0) ? bgMainA : bgMainB; // Phys reads A/B, writes B/A
+
+            // FLUID STEPS
+            // 1. Force: Wax -> VelB
+            // Need bg0 bound to read wax. bg1 bound to write VelB.
+            // bgFluidForce: Reads VelA, Writes VelB.
+            {
+                const p = enc.beginComputePass();
+                p.setPipeline(pForce); p.setBindGroup(0, bg0_Phys, [0]); p.setBindGroup(1, bgFluidForce);
+                p.dispatchWorkgroups(Math.ceil(FW / 16), Math.ceil(FH / 16)); p.end();
+            }
+            // 2. Advect: VelB -> VelA
+            {
+                const p = enc.beginComputePass();
+                p.setPipeline(pAdvect); p.setBindGroup(0, bg0_Phys, [0]); p.setBindGroup(1, bgFluidAdvect);
+                p.dispatchWorkgroups(Math.ceil(FW / 16), Math.ceil(FH / 16)); p.end();
+            }
+            // 3. Div: VelA -> Div
+            {
+                const p = enc.beginComputePass();
+                p.setPipeline(pDiv); p.setBindGroup(0, bg0_Phys, [0]); p.setBindGroup(1, bgFluidDiv);
+                p.dispatchWorkgroups(Math.ceil(FW / 16), Math.ceil(FH / 16)); p.end();
+            }
+            // 4. Jacobi: P_A <-> P_B
+            // Run 12 iters
+            for (let i = 0; i < 12; i++) {
+                const p = enc.beginComputePass();
+                p.setPipeline(pJacobi); p.setBindGroup(0, bg0_Phys, [0]);
+                p.setBindGroup(1, (i % 2 == 0) ? bgFluidJacobiA : bgFluidJacobiB);
+                p.dispatchWorkgroups(Math.ceil(FW / 16), Math.ceil(FH / 16)); p.end();
+            }
+            // Assume result in P_A (even iters)
+
+            // 5. Subtract: VelA, P_A -> VelB
+            // bgFluidSub: Read VelA, Read P_A, Write VelB
+            {
+                const p = enc.beginComputePass();
+                p.setPipeline(pSub); p.setBindGroup(0, bg0_Phys, [0]); p.setBindGroup(1, bgFluidSub);
+                p.dispatchWorkgroups(Math.ceil(FW / 16), Math.ceil(FH / 16)); p.end();
+            }
+
+            // Copy VelB -> VelA for next frame (and for Physics read)
+            enc.copyTextureToTexture({ texture: texVelB }, { texture: texVelA }, [FW, FH]);
+
+            // CA PHYSICS
+            // Needs Fluid VelA (bound in bgFluidForce as texRead, or any that has VelA in slot 0)
+            // pPhys uses group 0 and group 1.
+            // It reads fluid from group 1 binding 0 (texRead).
+            // bgFluidDiv has texRead = VelA. Perfect.
+            {
+                const p = enc.beginComputePass();
+                p.setPipeline(pPhys);
+                p.setBindGroup(0, bg0_Phys, [0]); // Write to dest, offset 0
+                p.setBindGroup(1, bgFluidDiv); // Read VelA
+                p.dispatchWorkgroups(Math.ceil(W / 16), Math.ceil(H / 16));
+                p.end();
+            }
+
+            // CA MOVEMENT (8 passes)
+            for (let i = 0; i < 8; i++) {
+                const p = enc.beginComputePass();
+                p.setPipeline(pMove);
+                // Note: The dynamic offset [i * 256] applies to binding 3 (moveParams)
+                // Binding 0, 1, 2 are NOT dynamic.
+                // We must provide an array of offsets for ALL dynamic bindings in the BindGroup layout order.
+                // bg0_Phys has 1 dynamic binding at index 3.
+                // setBindGroup(index, bindGroup, dynamicOffsets)
+                p.setBindGroup(0, bg0_Phys, [i * 256]);
+                p.setBindGroup(1, bgFluidDiv); // Dummy
+                p.dispatchWorkgroups(Math.ceil(W / 16), Math.ceil(H / 16));
+                p.end();
+            }
+        }
+
+        function loop() {
+            if (!device) return;
+            const enc = device.createCommandEncoder();
+            if (!paused) { for (let i = 0; i < ff; i++) tick(enc); }
+
+            const view = context.getCurrentTexture().createView();
+            const rp = enc.beginRenderPass({ colorAttachments: [{ view, clearValue: { r: 0, g: 0, b: 0, a: 1 }, loadOp: 'clear', storeOp: 'store' }] });
+            rp.setPipeline(pRender);
+            // Render uses Group 0 (cellsOut). Frame Even -> Write B -> Render B.
+            // bgMainA has Out=B.
+            let bg = (frame % 2 == 0) ? bgMainA : bgMainB;
+            rp.setBindGroup(0, bg, [0]);
+            // Render doesn't use Group 1.
+            rp.setBindGroup(1, bgFluidDiv);
+            rp.draw(6); rp.end();
+
+            device.queue.submit([enc.finish()]);
+            document.getElementById('stats').innerHTML = `Tick: ${frame} | Grid: ${W}x${H}`;
+            requestAnimationFrame(loop);
+        }
+
+        // UI (Copied from v14)
+        function setupUI() {
+            const c = document.getElementById('params'); c.innerHTML = '';
+            for (const k in PARAM_CONFIG) {
+                const cfg = PARAM_CONFIG[k];
+                if (cfg.section) { const s = document.createElement('div'); s.className = 'section'; s.textContent = cfg.section; c.appendChild(s); }
+                const d = document.createElement('div'); d.className = 'param-row';
+                const l = document.createElement('label'); l.textContent = k;
+                const i = document.createElement('input'); i.type = 'number'; i.step = cfg.step; i.value = PARAMS[k];
+                i.onchange = () => { PARAMS[k] = parseFloat(i.value); if (k === 'cellSize' || k === 'initialWaxHeight') resize(); };
+                d.append(l, i); c.appendChild(d);
+            }
+        }
+        document.getElementById('toggleParams').onclick = () => { const p = document.getElementById('params'); p.style.display = p.style.display === 'none' ? '' : 'none' };
+        document.getElementById('ff').onclick = (e) => { ff = ff === 1 ? 10 : ff === 10 ? 100 : 1; e.target.textContent = ff + 'x' };
+        document.getElementById('pp').onclick = (e) => { paused = !paused; e.target.textContent = paused ? '▶' : '||' };
+        document.getElementById('heat').onclick = (e) => { heatOn = 1 - heatOn; e.target.textContent = heatOn ? 'Heat ON' : 'Heat OFF' };
+        document.getElementById('reset').onclick = initSim;
+
+        init();
+    </script>
+</body>
+
+</html>

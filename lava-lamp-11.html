@@ -1,0 +1,385 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Lava Lamp v11</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        html, body { width: 100%; height: 100%; overflow: hidden; background: #0a0a12; }
+        #canvas { display: block; image-rendering: pixelated; }
+        #ui {
+            position: absolute; top: 10px; left: 10px;
+            color: #fff; font-family: monospace; font-size: 11px;
+            background: rgba(0,0,0,0.8); padding: 10px; border-radius: 4px;
+        }
+        #controls { position: absolute; top: 10px; right: 10px; }
+        #controls button {
+            padding: 8px 14px; margin: 2px; background: #222; color: #fff;
+            border: 1px solid #555; cursor: pointer; font-family: monospace;
+        }
+        #controls button:hover { background: #444; }
+    </style>
+</head>
+<body>
+    <canvas id="canvas"></canvas>
+    <div id="ui">
+        <div>Lava Lamp v11</div>
+        <div id="fps">FPS: 0</div>
+        <div id="ticks">Ticks: 0</div>
+        <div id="stats">--</div>
+    </div>
+    <div id="controls">
+        <button id="ff-btn">1x</button>
+        <button id="pause-btn">||</button>
+        <button id="reset-btn">Reset</button>
+    </div>
+
+<script>
+// ============================================================
+// LAVA LAMP v11 - Final attempt
+// ============================================================
+// Key principles:
+// 1. Density model (0-1) for smooth flow
+// 2. GRAVITY always pulls wax down
+// 3. HEAT creates buoyancy that can overcome gravity
+// 4. SURFACE TENSION pulls toward local center of mass
+// 5. NO STATIC STATES - all wax always affected by forces
+// ============================================================
+
+const CELL = 3;
+const GRAVITY = 0.03;           // Constant downward pull on all wax
+const BUOYANCY_PER_TEMP = 0.08; // Upward force per unit temperature
+const HEAT_INPUT = 0.06;
+const HEAT_DIFFUSE = 0.15;
+const COOL_RATE = 0.01;
+const SURFACE_TENSION = 0.04;   // Pull toward neighbors
+const MIN_FLOW = 0.005;
+
+let canvas, ctx, cols, rows, grid;
+let frame = 0, paused = false;
+let ffLevels = [1, 5, 25, 100], ffIdx = 0;
+let heaterL, heaterR, coolerH;
+
+function init() {
+    canvas = document.getElementById('canvas');
+    ctx = canvas.getContext('2d');
+    resize();
+    window.addEventListener('resize', resize);
+
+    document.getElementById('ff-btn').onclick = () => {
+        ffIdx = (ffIdx + 1) % ffLevels.length;
+        document.getElementById('ff-btn').textContent = ffLevels[ffIdx] + 'x';
+    };
+    document.getElementById('pause-btn').onclick = () => {
+        paused = !paused;
+        document.getElementById('pause-btn').textContent = paused ? '▶' : '||';
+    };
+    document.getElementById('reset-btn').onclick = reset;
+    document.addEventListener('keydown', e => {
+        if (e.code === 'Space') { paused = !paused; e.preventDefault(); }
+        if (e.code === 'KeyR') reset();
+    });
+
+    reset();
+    requestAnimationFrame(loop);
+}
+
+function resize() {
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+    cols = Math.floor(canvas.width / CELL);
+    rows = Math.floor(canvas.height / CELL);
+    heaterL = Math.floor(cols * 0.3);
+    heaterR = Math.floor(cols * 0.7);
+    coolerH = Math.floor(rows * 0.1);
+    reset();
+}
+
+function reset() {
+    grid = new Float32Array(cols * rows * 2); // [density, temp] pairs
+
+    const waxH = Math.floor(rows * 0.1);
+    const waxW = Math.floor(cols * 0.8);
+    const waxL = Math.floor((cols - waxW) / 2);
+    const waxT = rows - waxH;
+
+    for (let y = waxT; y < rows; y++) {
+        for (let x = waxL; x < waxL + waxW; x++) {
+            const i = (y * cols + x) * 2;
+            grid[i] = 1;     // density
+            grid[i+1] = 0.1; // temp
+        }
+    }
+    frame = 0;
+}
+
+function getD(x, y) { return (x >= 0 && x < cols && y >= 0 && y < rows) ? grid[(y * cols + x) * 2] : 0; }
+function getT(x, y) { return (x >= 0 && x < cols && y >= 0 && y < rows) ? grid[(y * cols + x) * 2 + 1] : 0; }
+function setD(x, y, v) { if (x >= 0 && x < cols && y >= 0 && y < rows) grid[(y * cols + x) * 2] = Math.max(0, Math.min(1, v)); }
+function setT(x, y, v) { if (x >= 0 && x < cols && y >= 0 && y < rows) grid[(y * cols + x) * 2 + 1] = Math.max(0, Math.min(1, v)); }
+
+function tick() {
+    frame++;
+
+    // === HEAT SOURCE/SINK ===
+    for (let y = 0; y < rows; y++) {
+        for (let x = 0; x < cols; x++) {
+            const d = getD(x, y);
+            if (d < 0.01) continue;
+
+            let t = getT(x, y);
+
+            // Heater at bottom center
+            if (y >= rows - 3 && x >= heaterL && x < heaterR) {
+                t = Math.min(1, t + HEAT_INPUT * (1 - (rows - 1 - y) / 3));
+            }
+            // Cooler at top
+            if (y < coolerH) {
+                t = Math.max(0, t - COOL_RATE * (1 - y / coolerH));
+            }
+            setT(x, y, t);
+        }
+    }
+
+    // === HEAT DIFFUSION ===
+    const newT = new Float32Array(cols * rows);
+    for (let y = 0; y < rows; y++) {
+        for (let x = 0; x < cols; x++) {
+            const d = getD(x, y);
+            const t = getT(x, y);
+            if (d < 0.01) { newT[y * cols + x] = t; continue; }
+
+            let sum = t * d, weight = d;
+            for (const [dx, dy] of [[-1,0],[1,0],[0,-1],[0,1]]) {
+                const nd = getD(x+dx, y+dy);
+                if (nd > 0.01) {
+                    sum += getT(x+dx, y+dy) * nd;
+                    weight += nd;
+                }
+            }
+            newT[y * cols + x] = t + ((sum / weight) - t) * HEAT_DIFFUSE;
+        }
+    }
+    for (let y = 0; y < rows; y++) {
+        for (let x = 0; x < cols; x++) {
+            setT(x, y, newT[y * cols + x]);
+        }
+    }
+
+    // === VERTICAL FLOW (Gravity + Buoyancy) ===
+    // Process bottom-to-top for rising, top-to-bottom for sinking
+    const dChange = new Float32Array(cols * rows);
+    const tTransfer = new Float32Array(cols * rows);
+
+    for (let y = 0; y < rows; y++) {
+        for (let x = 0; x < cols; x++) {
+            const d = getD(x, y);
+            if (d < 0.01) continue;
+
+            const t = getT(x, y);
+
+            // Net vertical force: gravity (down) vs buoyancy (up when hot)
+            // Gravity always pulls down
+            // Buoyancy pushes up proportional to temperature
+            const gravityForce = GRAVITY * d;
+            const buoyancyForce = t * BUOYANCY_PER_TEMP * d;
+            const netForce = buoyancyForce - gravityForce; // positive = up, negative = down
+
+            const flowAmount = Math.abs(netForce);
+            if (flowAmount < MIN_FLOW) continue;
+
+            // Direction
+            const ty = netForce > 0 ? y - 1 : y + 1;
+            if (ty < 0 || ty >= rows) continue;
+
+            const targetD = getD(x, ty);
+            const space = 1 - targetD;
+            if (space < 0.01) continue;
+
+            const actualFlow = Math.min(flowAmount, d * 0.4, space);
+            if (actualFlow < MIN_FLOW) continue;
+
+            const idx = y * cols + x;
+            const tidx = ty * cols + x;
+
+            dChange[idx] -= actualFlow;
+            dChange[tidx] += actualFlow;
+            tTransfer[tidx] += t * actualFlow; // Temperature flows with density
+        }
+    }
+
+    // Apply vertical changes
+    for (let i = 0; i < cols * rows; i++) {
+        const oldD = grid[i * 2];
+        const newD = Math.max(0, Math.min(1, oldD + dChange[i]));
+        grid[i * 2] = newD;
+
+        // Update temperature (weighted by incoming density)
+        if (dChange[i] > 0.001 && newD > 0.01) {
+            const oldT = grid[i * 2 + 1];
+            grid[i * 2 + 1] = (oldT * (newD - dChange[i]) + tTransfer[i]) / newD;
+        }
+    }
+
+    // === SURFACE TENSION (pull toward local center of mass) ===
+    // This rounds out blobs by pulling isolated cells toward denser regions
+    dChange.fill(0);
+    tTransfer.fill(0);
+
+    for (let y = 0; y < rows; y++) {
+        for (let x = 0; x < cols; x++) {
+            const d = getD(x, y);
+            if (d < 0.1) continue;
+
+            const t = getT(x, y);
+
+            // Calculate center of mass of nearby wax
+            let comX = 0, comY = 0, totalMass = 0;
+            for (let dy = -2; dy <= 2; dy++) {
+                for (let dx = -2; dx <= 2; dx++) {
+                    const nd = getD(x + dx, y + dy);
+                    if (nd > 0.01) {
+                        comX += dx * nd;
+                        comY += dy * nd;
+                        totalMass += nd;
+                    }
+                }
+            }
+
+            if (totalMass < 0.1) continue;
+            comX /= totalMass;
+            comY /= totalMass;
+
+            // Pull toward center of mass (surface tension)
+            const pullX = Math.sign(comX) * Math.min(Math.abs(comX), 1);
+            const pullY = Math.sign(comY) * Math.min(Math.abs(comY), 1);
+
+            // Horizontal tension (spreading/contracting)
+            if (Math.abs(pullX) > 0.3) {
+                const tx = x + Math.sign(pullX);
+                if (tx >= 0 && tx < cols) {
+                    const targetD = getD(tx, y);
+                    const space = 1 - targetD;
+                    const flow = Math.min(SURFACE_TENSION * d * Math.abs(pullX), space, d * 0.2);
+                    if (flow > MIN_FLOW) {
+                        const idx = y * cols + x;
+                        const tidx = y * cols + tx;
+                        dChange[idx] -= flow;
+                        dChange[tidx] += flow;
+                        tTransfer[tidx] += t * flow;
+                    }
+                }
+            }
+        }
+    }
+
+    // Apply surface tension changes
+    for (let i = 0; i < cols * rows; i++) {
+        const oldD = grid[i * 2];
+        const newD = Math.max(0, Math.min(1, oldD + dChange[i]));
+        grid[i * 2] = newD;
+
+        if (dChange[i] > 0.001 && newD > 0.01) {
+            const oldT = grid[i * 2 + 1];
+            grid[i * 2 + 1] = (oldT * (newD - dChange[i]) + tTransfer[i]) / newD;
+        }
+    }
+
+    // === CONSOLIDATION (sparse density consolidates) ===
+    // Very low density cells get absorbed by neighbors
+    for (let y = 0; y < rows; y++) {
+        for (let x = 0; x < cols; x++) {
+            const d = getD(x, y);
+            if (d < 0.15 && d > 0.01) {
+                // Find densest neighbor
+                let maxN = 0, maxX = x, maxY = y;
+                for (const [dx, dy] of [[-1,0],[1,0],[0,-1],[0,1]]) {
+                    const nd = getD(x+dx, y+dy);
+                    if (nd > maxN && nd < 0.95) {
+                        maxN = nd; maxX = x+dx; maxY = y+dy;
+                    }
+                }
+                if (maxN > d) {
+                    // Transfer to denser neighbor
+                    const transfer = d * 0.3;
+                    setD(x, y, d - transfer);
+                    setD(maxX, maxY, getD(maxX, maxY) + transfer);
+                    // Temp follows
+                    const t = getT(x, y);
+                    const nt = getT(maxX, maxY);
+                    const newND = getD(maxX, maxY);
+                    if (newND > 0.01) {
+                        setT(maxX, maxY, (nt * (newND - transfer) + t * transfer) / newND);
+                    }
+                }
+            }
+        }
+    }
+}
+
+function render() {
+    ctx.fillStyle = '#0a0a12';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    for (let y = 0; y < rows; y++) {
+        for (let x = 0; x < cols; x++) {
+            const d = getD(x, y);
+            if (d < 0.03) continue;
+
+            const t = getT(x, y);
+
+            // Temperature -> color
+            let r, g, b;
+            if (t < 0.3) {
+                r = 50 + 100 * (t / 0.3);
+                g = 20 + 30 * (t / 0.3);
+                b = 70 - 30 * (t / 0.3);
+            } else if (t < 0.6) {
+                const f = (t - 0.3) / 0.3;
+                r = 150 + 70 * f;
+                g = 50 + 50 * f;
+                b = 40 - 20 * f;
+            } else {
+                const f = (t - 0.6) / 0.4;
+                r = 220 + 35 * f;
+                g = 100 + 155 * f;
+                b = 20 + 80 * f;
+            }
+
+            ctx.fillStyle = `rgba(${r|0},${g|0},${b|0},${0.4 + d * 0.6})`;
+            ctx.fillRect(x * CELL, y * CELL, CELL, CELL);
+        }
+    }
+
+    // Heater glow
+    ctx.fillStyle = 'rgba(255,100,0,0.5)';
+    ctx.fillRect(heaterL * CELL, (rows-1) * CELL, (heaterR - heaterL) * CELL, 2);
+}
+
+function loop(ts) {
+    const fps = document.getElementById('fps');
+    fps.textContent = `FPS: ${(1000 / (ts - (loop.last || ts))).toFixed(0)}`;
+    loop.last = ts;
+
+    if (!paused) {
+        for (let i = 0; i < ffLevels[ffIdx]; i++) tick();
+    }
+
+    render();
+
+    let total = 0, hot = 0;
+    for (let i = 0; i < cols * rows; i++) {
+        total += grid[i * 2];
+        if (grid[i * 2] > 0.1 && grid[i * 2 + 1] > 0.5) hot += grid[i * 2];
+    }
+    document.getElementById('ticks').textContent = `Ticks: ${frame}`;
+    document.getElementById('stats').textContent = `Mass: ${total.toFixed(0)} Hot: ${hot.toFixed(0)}`;
+
+    requestAnimationFrame(loop);
+}
+
+init();
+</script>
+</body>
+</html>

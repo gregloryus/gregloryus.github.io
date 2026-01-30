@@ -1,0 +1,567 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Lava Lamp CA v2</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        html, body { height: 100%; overflow: hidden; background: #0a0a12; }
+        #canvas { display: block; image-rendering: pixelated; }
+        #ui { position: absolute; top: 10px; left: 10px; color: #fff; font: 11px monospace; background: rgba(0,0,0,0.8); padding: 8px; border-radius: 4px; }
+        #controls { position: absolute; top: 10px; right: 10px; }
+        #controls button { padding: 8px 14px; margin: 2px; background: #222; color: #fff; border: 1px solid #555; cursor: pointer; font: 12px monospace; }
+    </style>
+</head>
+<body>
+<canvas id="canvas"></canvas>
+<div id="ui">
+    <div>Lava Lamp CA v2</div>
+    <div>Discrete Units + Variable Capacity</div>
+    <div id="stats"></div>
+</div>
+<div id="controls">
+    <button id="ff">1x</button>
+    <button id="pp">||</button>
+    <button id="heat">Heat ON</button>
+</div>
+<script>
+// ============================================
+// LAVA LAMP CELLULAR AUTOMATA SIMULATION
+// ============================================
+// Discrete unit system: cells hold 0-8 units of wax
+// Capacity varies with temperature: cold=8, neutral=7, hot=6
+// Three forces: Concentration, Equalization, Buoyancy
+
+const CELL = 4;  // Pixel size per cell
+
+// Tunable parameters
+const PARAMS = {
+    heatRate: 0.02,            // How fast heat source heats wax
+    heatSpread: 0.12,          // How fast heat equalizes between wax cells
+    coolRate: 0.005,           // How fast top cools wax
+    ambientCool: 0.0,          // Disabled - was causing equilibrium plateau
+
+    buoyancyScale: 0.08,       // Middle ground - enough force to move
+    velocityDamping: 0.88,     // Moderate friction
+    velocityThreshold: 0.15,   // Base threshold (lower)
+    moveChanceScale: 0.15,     // How velocity translates to move probability (lower = slower)
+    cohesionStrength: 0.6,     // How much velocity averages with neighbors (0-1)
+    surfaceTension: 0.08,      // Extra threshold per wax neighbor (resists stretching)
+
+    brownianStrength: 0.03,    // Random velocity noise per tick
+    horizontalBias: 0.4,       // How much brownian motion favors horizontal (0-1)
+
+    equalizationRate: 0.4,     // Faster unit redistribution for rounder blobs
+
+    heatSourceWidth: 0.5,      // Fraction of bottom that heats
+    initialWaxHeight: 0.12,    // Fraction of height for initial wax (reduced)
+};
+
+let W, H;
+let units, temp, velY, velX;  // State arrays
+let unitsNext, tempNext, velYNext, velXNext;  // Double buffer
+
+let frame = 0, paused = false, ff = 1, heatOn = true;
+
+const canvas = document.getElementById('canvas');
+const ctx = canvas.getContext('2d');
+
+function resize() {
+    canvas.width = innerWidth;
+    canvas.height = innerHeight;
+    W = Math.floor(canvas.width / CELL);
+    H = Math.floor(canvas.height / CELL);
+    reset();
+}
+
+function reset() {
+    const size = W * H;
+
+    units = new Float32Array(size);
+    temp = new Float32Array(size);
+    velY = new Float32Array(size);
+    velX = new Float32Array(size);
+
+    unitsNext = new Float32Array(size);
+    tempNext = new Float32Array(size);
+    velYNext = new Float32Array(size);
+    velXNext = new Float32Array(size);
+
+    // Initialize: wax pool at bottom
+    const waxTop = H - Math.floor(H * PARAMS.initialWaxHeight);
+
+    for (let y = 0; y < H; y++) {
+        for (let x = 0; x < W; x++) {
+            const i = y * W + x;
+
+            if (y >= waxTop) {
+                // Add some surface variation
+                const surfaceNoise = Math.sin(x * 0.15) * 3 + Math.random() * 2;
+                if (y >= waxTop + surfaceNoise) {
+                    units[i] = 8.0;  // Full capacity cold wax
+                    temp[i] = 0.1 + Math.random() * 0.05;  // Cold
+                }
+            }
+            velY[i] = 0;
+            velX[i] = 0;
+        }
+    }
+
+    frame = 0;
+}
+
+// Get capacity from temperature
+function getCapacity(t) {
+    if (t >= 0.66) return 6;
+    if (t >= 0.33) return 7;
+    return 8;
+}
+
+function idx(x, y) {
+    // Clamp to boundaries
+    x = Math.max(0, Math.min(W - 1, x));
+    y = Math.max(0, Math.min(H - 1, y));
+    return y * W + x;
+}
+
+function tick() {
+    frame++;
+
+    // Copy current state to next (we'll modify next)
+    unitsNext.set(units);
+    tempNext.set(temp);
+    velYNext.set(velY);
+    velXNext.set(velX);
+
+    // === PHASE 1: Temperature Update ===
+    for (let y = 0; y < H; y++) {
+        for (let x = 0; x < W; x++) {
+            const i = y * W + x;
+
+            if (units[i] < 0.5) continue;  // Skip empty cells
+
+            let t = temp[i];
+
+            // Heat source at bottom center
+            if (heatOn && y >= H - 3) {
+                const centerDist = Math.abs(x / W - 0.5);
+                if (centerDist < PARAMS.heatSourceWidth * 0.5) {
+                    const intensity = 1 - centerDist / (PARAMS.heatSourceWidth * 0.5);
+                    t += PARAMS.heatRate * intensity;
+                }
+            }
+
+            // Heat sink at top
+            if (y <= 3) {
+                t -= PARAMS.coolRate * 2;
+            }
+
+            // Heat equalization with wax neighbors
+            let tempSum = 0;
+            let waxNeighbors = 0;
+
+            for (let dy = -1; dy <= 1; dy++) {
+                for (let dx = -1; dx <= 1; dx++) {
+                    if (dx === 0 && dy === 0) continue;
+                    const ni = idx(x + dx, y + dy);
+                    if (units[ni] > 0.5) {
+                        tempSum += temp[ni];
+                        waxNeighbors++;
+                    }
+                }
+            }
+
+            if (waxNeighbors > 0) {
+                const avgTemp = tempSum / waxNeighbors;
+                t += (avgTemp - t) * PARAMS.heatSpread;
+            }
+
+            // Ambient cooling
+            t -= PARAMS.ambientCool;
+
+            tempNext[i] = Math.max(0, Math.min(1, t));
+        }
+    }
+
+    // Swap temp buffers
+    [temp, tempNext] = [tempNext, temp];
+
+    // === PHASE 2: Pressure Relief & Equalization ===
+    for (let y = 0; y < H; y++) {
+        for (let x = 0; x < W; x++) {
+            const i = y * W + x;
+
+            if (units[i] < 0.5) continue;
+
+            const capacity = getCapacity(temp[i]);
+            let u = units[i];
+
+            // Equalization: exchange units with neighbors based on density ratio
+            for (let dy = -1; dy <= 1; dy++) {
+                for (let dx = -1; dx <= 1; dx++) {
+                    if (dx === 0 && dy === 0) continue;
+
+                    const ni = idx(x + dx, y + dy);
+                    const nUnits = units[ni];
+
+                    if (nUnits > 0.5) {
+                        const nCapacity = getCapacity(temp[ni]);
+                        const myRatio = u / capacity;
+                        const nRatio = nUnits / nCapacity;
+
+                        // Flow from higher ratio to lower ratio
+                        const flow = (nRatio - myRatio) * PARAMS.equalizationRate * 0.125;
+                        u += flow;
+                    }
+                }
+            }
+
+            // Pressure relief: if over capacity, try to shed
+            if (u > capacity) {
+                // Find lowest density wax neighbor
+                let lowestRatio = 1;
+                let lowestIdx = -1;
+
+                for (let dy = -1; dy <= 1; dy++) {
+                    for (let dx = -1; dx <= 1; dx++) {
+                        if (dx === 0 && dy === 0) continue;
+                        const ni = idx(x + dx, y + dy);
+                        const nUnits = units[ni];
+
+                        if (nUnits > 0.5) {
+                            const nCapacity = getCapacity(temp[ni]);
+                            const nRatio = nUnits / nCapacity;
+                            if (nRatio < lowestRatio && nUnits < nCapacity) {
+                                lowestRatio = nRatio;
+                                lowestIdx = ni;
+                            }
+                        }
+                    }
+                }
+
+                if (lowestIdx >= 0) {
+                    const excess = u - capacity;
+                    const transfer = excess * 0.3;
+                    u -= transfer;
+                    unitsNext[lowestIdx] += transfer;
+                }
+            }
+
+            unitsNext[i] = Math.max(0, Math.min(8, u));
+        }
+    }
+
+    [units, unitsNext] = [unitsNext, units];
+
+    // === PHASE 3: Overflow to empty cells ===
+    for (let y = 0; y < H; y++) {
+        for (let x = 0; x < W; x++) {
+            const i = y * W + x;
+
+            if (units[i] < 0.5) {
+                // I'm empty - check if neighbors are overflowing
+                for (let dy = -1; dy <= 1; dy++) {
+                    for (let dx = -1; dx <= 1; dx++) {
+                        if (dx === 0 && dy === 0) continue;
+                        const ni = idx(x + dx, y + dy);
+                        const nUnits = units[ni];
+                        const nCapacity = getCapacity(temp[ni]);
+
+                        if (nUnits > nCapacity + 0.5) {
+                            // Neighbor is overflowing, receive some
+                            const excess = nUnits - nCapacity;
+                            const receive = excess * 0.2;
+                            unitsNext[i] += receive;
+                            unitsNext[ni] -= receive;
+                            tempNext[i] = temp[ni];
+                            break;
+                        }
+                    }
+                    if (unitsNext[i] > 0) break;
+                }
+            } else {
+                unitsNext[i] = units[i];
+                tempNext[i] = temp[i];
+            }
+        }
+    }
+
+    [units, unitsNext] = [unitsNext, units];
+    [temp, tempNext] = [tempNext, temp];
+
+    // === PHASE 4: Buoyancy & Velocity ===
+    for (let y = 0; y < H; y++) {
+        for (let x = 0; x < W; x++) {
+            const i = y * W + x;
+
+            if (units[i] < 0.5) {
+                velYNext[i] = 0;
+                velXNext[i] = 0;
+                continue;
+            }
+
+            const capacity = getCapacity(temp[i]);
+
+            // Buoyancy: units * (7 - capacity)
+            // Positive = up (negative y in screen coords)
+            const buoyancy = units[i] * (7 - capacity) * PARAMS.buoyancyScale;
+
+            let vy = velY[i] - buoyancy;  // Negative = up
+            let vx = velX[i];
+
+            // Partial velocity averaging with wax neighbors (cohesion)
+            // Instead of full average, blend between local and neighbor average
+            let vySum = 0;
+            let vxSum = 0;
+            let waxNeighbors = 0;
+
+            for (let dy = -1; dy <= 1; dy++) {
+                for (let dx = -1; dx <= 1; dx++) {
+                    if (dx === 0 && dy === 0) continue;
+                    const ni = idx(x + dx, y + dy);
+                    if (units[ni] > 0.5) {
+                        vySum += velY[ni];
+                        vxSum += velX[ni];
+                        waxNeighbors++;
+                    }
+                }
+            }
+
+            if (waxNeighbors > 0) {
+                const avgVy = vySum / waxNeighbors;
+                const avgVx = vxSum / waxNeighbors;
+                // Blend: keep some of own velocity, pull toward neighbor average
+                vy = vy * (1 - PARAMS.cohesionStrength) + avgVy * PARAMS.cohesionStrength;
+                vx = vx * (1 - PARAMS.cohesionStrength) + avgVx * PARAMS.cohesionStrength;
+            }
+
+            // Damping
+            vy *= PARAMS.velocityDamping;
+            vx *= PARAMS.velocityDamping;
+
+            // Brownian motion - random velocity noise
+            const noiseY = (Math.random() - 0.5) * 2 * PARAMS.brownianStrength * (1 - PARAMS.horizontalBias);
+            const noiseX = (Math.random() - 0.5) * 2 * PARAMS.brownianStrength * (1 + PARAMS.horizontalBias);
+            vy += noiseY;
+            vx += noiseX;
+
+            velYNext[i] = vy;
+            velXNext[i] = vx;
+        }
+    }
+
+    [velY, velYNext] = [velYNext, velY];
+    [velX, velXNext] = [velXNext, velX];
+
+    // === PHASE 5: Movement ===
+    // Process in checkerboard pattern to avoid conflicts
+    unitsNext.set(units);
+    tempNext.set(temp);
+    velYNext.set(velY);
+    velXNext.set(velX);
+
+    for (let parity = 0; parity < 2; parity++) {
+        for (let y = 0; y < H; y++) {
+            for (let x = 0; x < W; x++) {
+                if ((x + y) % 2 !== parity) continue;
+
+                const i = y * W + x;
+                const u = units[i];
+
+                if (u < 0.5) continue;  // Empty, skip
+
+                const vy = velY[i];
+                const vx = velX[i];
+
+                // Count wax neighbors for surface tension
+                let waxNeighbors = 0;
+                for (let dy2 = -1; dy2 <= 1; dy2++) {
+                    for (let dx2 = -1; dx2 <= 1; dx2++) {
+                        if (dx2 === 0 && dy2 === 0) continue;
+                        const ni = idx(x + dx2, y + dy2);
+                        if (units[ni] > 0.5) waxNeighbors++;
+                    }
+                }
+
+                // More neighbors = harder to break away (surface tension)
+                const effectiveThreshold = PARAMS.velocityThreshold + waxNeighbors * PARAMS.surfaceTension;
+
+                // Determine movement direction
+                let targetX = x;
+                let targetY = y;
+
+                // Calculate move probability based on velocity exceeding threshold
+                const vyExcess = Math.abs(vy) - effectiveThreshold;
+                const vxExcess = Math.abs(vx) - effectiveThreshold * 0.5; // Lower threshold for horizontal
+
+                // Probabilistic vertical movement
+                if (vyExcess > 0) {
+                    const moveChance = Math.min(1, vyExcess * PARAMS.moveChanceScale);
+                    if (Math.random() < moveChance) {
+                        if (vy < 0 && y > 0) {
+                            targetY = y - 1;  // Move up
+                        } else if (vy > 0 && y < H - 1) {
+                            targetY = y + 1;  // Move down
+                        }
+                    }
+                }
+
+                // Probabilistic horizontal movement (if not moving vertically)
+                if (targetY === y && vxExcess > 0) {
+                    const moveChance = Math.min(1, vxExcess * PARAMS.moveChanceScale);
+                    if (Math.random() < moveChance) {
+                        if (vx < 0 && x > 0) {
+                            targetX = x - 1;  // Move left
+                        } else if (vx > 0 && x < W - 1) {
+                            targetX = x + 1;  // Move right
+                        }
+                    }
+                }
+
+                // Check if target is empty and we can move
+                const ti = targetY * W + targetX;
+
+                if (ti !== i && unitsNext[ti] < 0.5) {
+                    // Swap: move wax to target, leave empty behind
+                    unitsNext[ti] = unitsNext[i];
+                    tempNext[ti] = tempNext[i];
+                    velYNext[ti] = velYNext[i] * 0.9;
+                    velXNext[ti] = velXNext[i] * 0.9;
+
+                    unitsNext[i] = 0;
+                    tempNext[i] = 0;
+                    velYNext[i] = 0;
+                    velXNext[i] = 0;
+                }
+            }
+        }
+
+        // Apply this parity's moves before next
+        [units, unitsNext] = [unitsNext, units];
+        [temp, tempNext] = [tempNext, temp];
+        [velY, velYNext] = [velYNext, velY];
+        [velX, velXNext] = [velXNext, velX];
+
+        unitsNext.set(units);
+        tempNext.set(temp);
+        velYNext.set(velY);
+        velXNext.set(velX);
+    }
+}
+
+function render() {
+    const imageData = ctx.createImageData(W, H);
+    const data = imageData.data;
+
+    for (let y = 0; y < H; y++) {
+        for (let x = 0; x < W; x++) {
+            const i = y * W + x;
+            const pi = i * 4;
+
+            const u = units[i];
+            const t = temp[i];
+
+            if (u > 0.5) {
+                // Wax - color by temperature
+                let r, g, b;
+
+                if (t < 0.33) {
+                    // Cold: purple/blue
+                    const f = t / 0.33;
+                    r = 60 + 100 * f;
+                    g = 20 + 50 * f;
+                    b = 120 - 40 * f;
+                } else if (t < 0.66) {
+                    // Warm: red/orange
+                    const f = (t - 0.33) / 0.33;
+                    r = 160 + 70 * f;
+                    g = 70 + 70 * f;
+                    b = 80 - 60 * f;
+                } else {
+                    // Hot: orange/yellow
+                    const f = (t - 0.66) / 0.34;
+                    r = 230 + 25 * f;
+                    g = 140 + 100 * f;
+                    b = 20 + 60 * f;
+                }
+
+                // Brightness by unit density
+                const brightness = 0.6 + (u / 8) * 0.4;
+                data[pi] = Math.min(255, r * brightness);
+                data[pi + 1] = Math.min(255, g * brightness);
+                data[pi + 2] = Math.min(255, b * brightness);
+                data[pi + 3] = 255;
+            } else {
+                // Empty/water - dark background
+                data[pi] = 10;
+                data[pi + 1] = 10;
+                data[pi + 2] = 18;
+                data[pi + 3] = 255;
+            }
+        }
+    }
+
+    // Scale up
+    const tempCanvas = document.createElement('canvas');
+    tempCanvas.width = W;
+    tempCanvas.height = H;
+    tempCanvas.getContext('2d').putImageData(imageData, 0, 0);
+
+    ctx.imageSmoothingEnabled = false;
+    ctx.drawImage(tempCanvas, 0, 0, canvas.width, canvas.height);
+
+    // Heat indicator at bottom
+    if (heatOn) {
+        ctx.fillStyle = 'rgba(255, 80, 0, 0.5)';
+        const heatWidth = canvas.width * PARAMS.heatSourceWidth;
+        ctx.fillRect((canvas.width - heatWidth) / 2, canvas.height - 4, heatWidth, 4);
+    }
+}
+
+function getTotalUnits() {
+    let total = 0;
+    for (let i = 0; i < W * H; i++) {
+        total += units[i];
+    }
+    return total;
+}
+
+function loop() {
+    if (!paused) {
+        for (let i = 0; i < ff; i++) tick();
+    }
+    render();
+
+    const totalUnits = getTotalUnits();
+    document.getElementById('stats').innerHTML =
+        `Tick: ${frame}<br>Units: ${totalUnits.toFixed(0)}<br>Grid: ${W}x${H}`;
+
+    requestAnimationFrame(loop);
+}
+
+// Controls
+document.getElementById('ff').onclick = () => {
+    ff = ff === 1 ? 10 : ff === 10 ? 100 : 1;
+    document.getElementById('ff').textContent = ff + 'x';
+};
+document.getElementById('pp').onclick = () => {
+    paused = !paused;
+    document.getElementById('pp').textContent = paused ? '▶' : '||';
+};
+document.getElementById('heat').onclick = () => {
+    heatOn = !heatOn;
+    document.getElementById('heat').textContent = heatOn ? 'Heat ON' : 'Heat OFF';
+};
+
+addEventListener('resize', resize);
+addEventListener('keydown', e => {
+    if (e.code === 'Space') { paused = !paused; e.preventDefault(); }
+    if (e.code === 'KeyH') { heatOn = !heatOn; document.getElementById('heat').textContent = heatOn ? 'Heat ON' : 'Heat OFF'; }
+});
+
+resize();
+loop();
+</script>
+</body>
+</html>
