@@ -1,0 +1,632 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Lava Lamp - DPLBM Cohesion</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        html, body { height: 100%; overflow: hidden; background: #0a0a12; }
+        #canvas { display: block; image-rendering: pixelated; }
+        #ui { position: absolute; top: 10px; left: 10px; color: #fff; font: 11px monospace; background: rgba(0,0,0,0.8); padding: 10px; border-radius: 4px; transition: opacity 0.2s; max-height: 90vh; overflow-y: auto; }
+        #ui.hidden { opacity: 0; pointer-events: none; }
+        #ui div { margin: 2px 0; }
+        #ui label { display: inline-block; width: 120px; }
+        #ui input { width: 55px; background: #333; color: #fff; border: 1px solid #555; padding: 2px 4px; }
+        #controls { position: absolute; top: 10px; right: 10px; }
+        #controls button { padding: 8px 14px; margin: 2px; background: #222; color: #fff; border: 1px solid #555; cursor: pointer; font: 12px monospace; }
+        .section { color: #888; margin-top: 6px; border-top: 1px solid #444; padding-top: 4px; font-size: 10px; }
+    </style>
+</head>
+<body>
+<canvas id="canvas"></canvas>
+<div id="ui">
+    <div><b>DPLBM Cohesion</b></div>
+    <div style="color:#666;font-size:9px;">LBM cohesion forces (H to hide)</div>
+
+    <div class="section">GRID</div>
+    <div><label>Cell size</label><input type="number" id="cellSize" value="4" step="1"></div>
+    <div><label>Wax height</label><input type="number" id="waxHeight" value="0.15" step="0.05"></div>
+    <div><label>Wax max/cell</label><input type="number" id="waxMax" value="8" step="1"></div>
+
+    <div class="section">LBM</div>
+    <div><label>Tau (viscosity)</label><input type="number" id="tau" value="0.8" step="0.05"></div>
+    <div><label>Max velocity</label><input type="number" id="maxVelocity" value="0.15" step="0.01"></div>
+
+    <div class="section">COHESION (key!)</div>
+    <div><label>Cohesion strength</label><input type="number" id="cohesion" value="0.004" step="0.001"></div>
+    <div><label>Surface only</label><input type="checkbox" id="surfaceOnly" checked></div>
+
+    <div class="section">FORCES</div>
+    <div><label>Buoyancy</label><input type="number" id="buoyancy" value="0.006" step="0.001"></div>
+    <div><label>Gravity</label><input type="number" id="gravity" value="0.0008" step="0.0002"></div>
+    <div><label>Neutral temp</label><input type="number" id="neutralTemp" value="0.45" step="0.05"></div>
+
+    <div class="section">HEAT</div>
+    <div><label>Heat rate</label><input type="number" id="heatRate" value="0.004" step="0.001"></div>
+    <div><label>Cool rate</label><input type="number" id="coolRate" value="0.002" step="0.001"></div>
+    <div><label>Ambient cool</label><input type="number" id="ambientCool" value="0.0003" step="0.0001"></div>
+    <div><label>Diffusion</label><input type="number" id="tempDiffusion" value="0.06" step="0.01"></div>
+    <div><label>Heat zone Y</label><input type="number" id="heatZoneY" value="0.85" step="0.05"></div>
+    <div><label>Cool zone Y</label><input type="number" id="coolZoneY" value="0.15" step="0.05"></div>
+
+    <div class="section">MOVEMENT</div>
+    <div><label>Vel scale</label><input type="number" id="velScale" value="5" step="1"></div>
+    <div><label>Swap chance max</label><input type="number" id="swapChanceMax" value="0.8" step="0.1"></div>
+    <div><label>Swap threshold</label><input type="number" id="swapThreshold" value="0.001" step="0.001"></div>
+
+    <div id="stats" style="margin-top:8px;color:#aaa;font-size:10px;"></div>
+</div>
+<div id="controls">
+    <button id="hide">UI</button>
+    <button id="ff">1x</button>
+    <button id="pp">||</button>
+    <button id="reset">Reset</button>
+    <button id="view">WAX</button>
+</div>
+
+<script>
+// ============================================
+// DPLBM Cohesion - LBM Cohesion Force Model
+// ============================================
+//
+// Key insight: The problem isn't swap logic, it's that LBM velocities
+// are incoherent with respect to blob structure.
+//
+// Solution: Add cohesion forces directly to LBM.
+// For each wax cell, compute a force pointing toward neighboring wax.
+//
+// - Interior cells: neighbors on all sides, forces balance to ~zero
+// - Surface cells: more wax on interior side, net force pulls inward
+//
+// This creates velocity fields that naturally preserve blob structure.
+// Surface cells get velocities pointing inward (unless buoyancy overcomes).
+// The result: blobs stay together because the velocity field says so,
+// not because we're blocking swaps.
+//
+// This is similar in spirit to Shan-Chen (cohesion from forces) but:
+// - We keep discrete wax particles (perfect mass conservation)
+// - The cohesion force is explicit, not from pseudo-potential
+// - Much simpler than full multi-phase LBM
+
+let CELL_SIZE = 4;
+
+// D2Q9 lattice
+const W9 = [4/9, 1/9, 1/9, 1/9, 1/9, 1/36, 1/36, 1/36, 1/36];
+const CX = [0, 1, 0, -1, 0, 1, -1, -1, 1];
+const CY = [0, 0, -1, 0, 1, -1, -1, 1, 1];
+const OPP = [0, 3, 4, 1, 2, 7, 8, 5, 6];
+
+const P = {
+    // Grid
+    cellSize: 4,
+    waxHeight: 0.15,
+    waxMax: 8,
+
+    // LBM
+    tau: 0.8,
+    maxVelocity: 0.15,
+
+    // Cohesion (THE KEY PARAMETER)
+    cohesion: 0.004,     // Strength of cohesion force toward neighboring wax
+    surfaceOnly: true,   // Only apply cohesion to surface cells (more efficient)
+
+    // Forces
+    buoyancy: 0.006,
+    gravity: 0.0008,
+    neutralTemp: 0.45,
+
+    // Heat
+    heatRate: 0.004,
+    coolRate: 0.002,
+    ambientCool: 0.0003,
+    tempDiffusion: 0.06,
+    heatZoneY: 0.85,
+    coolZoneY: 0.15,
+
+    // Movement
+    velScale: 5,
+    swapChanceMax: 0.8,
+    swapThreshold: 0.001,
+};
+
+function loadURLParams() {
+    const params = new URLSearchParams(window.location.search);
+    for (const [key, value] of params) {
+        if (P.hasOwnProperty(key)) {
+            if (typeof P[key] === 'boolean') {
+                P[key] = value === 'true';
+            } else {
+                P[key] = parseFloat(value);
+            }
+            const input = document.getElementById(key);
+            if (input) {
+                if (input.type === 'checkbox') {
+                    input.checked = P[key];
+                } else {
+                    input.value = P[key];
+                }
+            }
+        }
+    }
+}
+
+let W, H, N;
+let f, fTemp;
+let fluidUx, fluidUy;
+let wax, temp;
+let frame = 0, paused = false, ff = 1, viewMode = 0;
+let initialMass = 0;
+let uiHidden = false;
+
+const canvas = document.getElementById('canvas');
+const ctx = canvas.getContext('2d');
+
+function resize() {
+    canvas.width = innerWidth;
+    canvas.height = innerHeight;
+    CELL_SIZE = P.cellSize;
+    W = Math.floor(canvas.width / CELL_SIZE);
+    H = Math.floor(canvas.height / CELL_SIZE);
+    N = W * H;
+    init();
+}
+
+function init() {
+    f = new Float32Array(N * 9);
+    fTemp = new Float32Array(N * 9);
+    fluidUx = new Float32Array(N);
+    fluidUy = new Float32Array(N);
+    wax = new Uint8Array(N);
+    temp = new Float32Array(N);
+
+    const waxTop = H - Math.floor(H * P.waxHeight);
+    initialMass = 0;
+
+    for (let y = 0; y < H; y++) {
+        for (let x = 0; x < W; x++) {
+            const i = y * W + x;
+            const surfaceNoise = Math.sin(x * 0.15) * 3 + Math.random() * 2;
+
+            if (y >= waxTop + surfaceNoise) {
+                wax[i] = P.waxMax;
+                temp[i] = 0.2 + Math.random() * 0.1;
+                initialMass += P.waxMax;
+            }
+            initEquilibrium(i, 1.0, 0, 0);
+        }
+    }
+    frame = 0;
+}
+
+function initEquilibrium(i, rho, ux, uy) {
+    const usq = ux * ux + uy * uy;
+    for (let k = 0; k < 9; k++) {
+        const cu = CX[k] * ux + CY[k] * uy;
+        f[i * 9 + k] = W9[k] * rho * (1 + 3 * cu + 4.5 * cu * cu - 1.5 * usq);
+    }
+}
+
+function wrapX(x) {
+    return (x + W) % W;
+}
+
+function tick() {
+    frame++;
+
+    // === STEP 1: Compute LBM macroscopic quantities ===
+    for (let i = 0; i < N; i++) {
+        let rho = 0, vx = 0, vy = 0;
+        for (let k = 0; k < 9; k++) {
+            const fk = f[i * 9 + k];
+            rho += fk;
+            vx += fk * CX[k];
+            vy += fk * CY[k];
+        }
+        if (rho > 0.001) {
+            vx /= rho;
+            vy /= rho;
+            const mag = Math.sqrt(vx * vx + vy * vy);
+            if (mag > P.maxVelocity) {
+                const scale = P.maxVelocity / mag;
+                vx *= scale;
+                vy *= scale;
+            }
+            fluidUx[i] = vx;
+            fluidUy[i] = vy;
+        } else {
+            fluidUx[i] = 0;
+            fluidUy[i] = 0;
+        }
+    }
+
+    // === STEP 2: Compute forces (buoyancy, gravity, AND COHESION) ===
+    const Fx = new Float32Array(N);
+    const Fy = new Float32Array(N);
+
+    for (let y = 0; y < H; y++) {
+        for (let x = 0; x < W; x++) {
+            const i = y * W + x;
+            if (wax[i] === 0) continue;
+
+            const t = temp[i];
+            const waxAmount = wax[i] / P.waxMax;
+
+            // Thermal buoyancy
+            const tempDiff = t - P.neutralTemp;
+            Fy[i] = -P.buoyancy * waxAmount * tempDiff;
+
+            // Gravity
+            Fy[i] += P.gravity * waxAmount;
+
+            // === COHESION FORCE ===
+            // Compute force pointing toward local wax center of mass
+            // Interior cells: balanced neighbors, ~zero force
+            // Surface cells: more wax inside, force pulls inward
+
+            let waxCx = 0, waxCy = 0;
+            let waxNeighborCount = 0;
+            let hasEmptyNeighbor = false;
+
+            for (let dy = -1; dy <= 1; dy++) {
+                for (let dx = -1; dx <= 1; dx++) {
+                    if (dx === 0 && dy === 0) continue;
+
+                    const nx = wrapX(x + dx);
+                    const ny = y + dy;
+
+                    if (ny < 0 || ny >= H) {
+                        // Boundary counts as empty
+                        hasEmptyNeighbor = true;
+                        continue;
+                    }
+
+                    const ni = ny * W + nx;
+
+                    if (wax[ni] > 0) {
+                        // Weight by wax amount and distance (diagonals are sqrt(2) away)
+                        const dist = (dx !== 0 && dy !== 0) ? 1.414 : 1.0;
+                        const weight = wax[ni] / dist;
+                        waxCx += dx * weight;
+                        waxCy += dy * weight;
+                        waxNeighborCount++;
+                    } else {
+                        hasEmptyNeighbor = true;
+                    }
+                }
+            }
+
+            // Apply cohesion force
+            // If surfaceOnly is true, only apply to cells with empty neighbors
+            if (P.cohesion > 0 && (!P.surfaceOnly || hasEmptyNeighbor)) {
+                // The force points toward the wax centroid
+                // Normalize to get direction, then scale by cohesion strength
+                const mag = Math.sqrt(waxCx * waxCx + waxCy * waxCy);
+                if (mag > 0.01) {
+                    // Scale cohesion by wax amount (heavier wax = more cohesion)
+                    Fx[i] += P.cohesion * waxAmount * waxCx / mag;
+                    Fy[i] += P.cohesion * waxAmount * waxCy / mag;
+                }
+            }
+        }
+    }
+
+    // === STEP 3: LBM Collision with forcing ===
+    for (let i = 0; i < N; i++) {
+        let rho = 0;
+        for (let k = 0; k < 9; k++) {
+            rho += f[i * 9 + k];
+        }
+        if (rho < 0.001) continue;
+
+        const vx = fluidUx[i] + Fx[i] / rho * 0.5;
+        const vy = fluidUy[i] + Fy[i] / rho * 0.5;
+        const usq = vx * vx + vy * vy;
+
+        for (let k = 0; k < 9; k++) {
+            const cu = CX[k] * vx + CY[k] * vy;
+            const feq = W9[k] * rho * (1 + 3 * cu + 4.5 * cu * cu - 1.5 * usq);
+            const Fi = W9[k] * (1 - 0.5 / P.tau) * (
+                3 * (CX[k] - vx) + 9 * cu * CX[k]
+            ) * Fx[i] + W9[k] * (1 - 0.5 / P.tau) * (
+                3 * (CY[k] - vy) + 9 * cu * CY[k]
+            ) * Fy[i];
+
+            f[i * 9 + k] += -(f[i * 9 + k] - feq) / P.tau + Fi;
+        }
+    }
+
+    // === STEP 4: LBM Streaming ===
+    fTemp.fill(0);
+
+    for (let y = 0; y < H; y++) {
+        for (let x = 0; x < W; x++) {
+            const i = y * W + x;
+
+            for (let k = 0; k < 9; k++) {
+                const nx = wrapX(x + CX[k]);
+                const ny = y + CY[k];
+
+                if (ny < 0 || ny >= H) {
+                    fTemp[i * 9 + OPP[k]] += f[i * 9 + k];
+                } else {
+                    const ni = ny * W + nx;
+                    fTemp[ni * 9 + k] += f[i * 9 + k];
+                }
+            }
+        }
+    }
+
+    [f, fTemp] = [fTemp, f];
+
+    // === STEP 5: Temperature evolution ===
+    const newTemp = new Float32Array(N);
+    const heatStart = H * P.heatZoneY;
+    const coolEnd = H * P.coolZoneY;
+
+    for (let y = 0; y < H; y++) {
+        for (let x = 0; x < W; x++) {
+            const i = y * W + x;
+            if (wax[i] === 0) { newTemp[i] = 0; continue; }
+
+            let t = temp[i];
+
+            // Diffusion
+            let sum = t, count = 1;
+            for (let dy = -1; dy <= 1; dy++) {
+                for (let dx = -1; dx <= 1; dx++) {
+                    if (dx === 0 && dy === 0) continue;
+                    const nx = wrapX(x + dx);
+                    const ny = y + dy;
+                    if (ny >= 0 && ny < H) {
+                        const ni = ny * W + nx;
+                        if (wax[ni] > 0) {
+                            sum += temp[ni];
+                            count++;
+                        }
+                    }
+                }
+            }
+            t += (sum / count - t) * P.tempDiffusion;
+
+            // Bottom heating
+            if (y > heatStart) {
+                const vertIntensity = (y - heatStart) / (H - heatStart);
+                const horizIntensity = 1 - Math.abs(x / W - 0.5) * 1.5;
+                if (horizIntensity > 0) {
+                    t += P.heatRate * vertIntensity * horizIntensity;
+                }
+            }
+
+            // Top cooling
+            if (y < coolEnd) {
+                const intensity = 1 - y / coolEnd;
+                t -= P.coolRate * intensity;
+            }
+
+            t -= P.ambientCool;
+            newTemp[i] = Math.max(0, Math.min(1.0, t));
+        }
+    }
+    temp = newTemp;
+
+    // === STEP 6: Discrete wax movement (simple velocity-driven swaps) ===
+    // No special interface logic - cohesion is handled by the velocity field
+    const directions = [
+        {dx: 0, dy: -1},
+        {dx: 0, dy: 1},
+        {dx: -1, dy: 0},
+        {dx: 1, dy: 0},
+    ];
+
+    for (const dir of directions) {
+        for (let phase = 0; phase < 2; phase++) {
+            for (let y = 0; y < H; y++) {
+                for (let x = 0; x < W; x++) {
+                    if ((x + y) % 2 !== phase) continue;
+
+                    const nx = wrapX(x + dir.dx);
+                    const ny = y + dir.dy;
+                    if (ny < 0 || ny >= H) continue;
+
+                    const i1 = y * W + x;
+                    const i2 = ny * W + nx;
+
+                    if (wax[i1] === wax[i2]) continue;
+
+                    let desire = 0;
+
+                    if (wax[i1] > 0) {
+                        const velProj = fluidUx[i1] * dir.dx + fluidUy[i1] * dir.dy;
+                        if (velProj > 0) desire += velProj * P.velScale;
+                    }
+
+                    if (wax[i2] > 0) {
+                        const velProj = fluidUx[i2] * (-dir.dx) + fluidUy[i2] * (-dir.dy);
+                        if (velProj > 0) desire += velProj * P.velScale;
+                    }
+
+                    if (desire > P.swapThreshold) {
+                        const chance = Math.min(P.swapChanceMax, desire * 1.5);
+
+                        if (Math.random() < chance) {
+                            [wax[i1], wax[i2]] = [wax[i2], wax[i1]];
+                            [temp[i1], temp[i2]] = [temp[i2], temp[i1]];
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+function render() {
+    ctx.fillStyle = '#0a0a12';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    const imgData = ctx.createImageData(W, H);
+    const px = imgData.data;
+
+    for (let i = 0; i < N; i++) {
+        const pi = i * 4;
+
+        if (viewMode === 1) {
+            const vy = fluidUy[i] * 500;
+            const vx = fluidUx[i] * 500;
+            const hasWax = wax[i] > 0 ? 1 : 0.3;
+            px[pi] = Math.min(255, Math.max(0, 128 + vy * 10)) * hasWax;
+            px[pi+1] = Math.min(255, Math.max(0, 128 - vy * 10)) * hasWax;
+            px[pi+2] = Math.min(255, Math.abs(vx) * 20) * hasWax;
+            px[pi+3] = 255;
+        } else if (viewMode === 2) {
+            // Temperature view
+            if (wax[i] > 0) {
+                const t = temp[i];
+                px[pi] = t * 255;
+                px[pi+1] = (1-t) * 100;
+                px[pi+2] = (1-t) * 255;
+                px[pi+3] = 255;
+            } else {
+                px[pi] = 10; px[pi+1] = 10; px[pi+2] = 18; px[pi+3] = 255;
+            }
+        } else if (wax[i] > 0) {
+            const t = temp[i];
+            const b = 0.6 + 0.4 * wax[i] / P.waxMax;
+
+            let r, g, bl;
+            if (t < 0.33) {
+                const tf = t / 0.33;
+                r = (60 + 100*tf) * b;
+                g = (20 + 40*tf) * b;
+                bl = (120 - 40*tf) * b;
+            } else if (t < 0.66) {
+                const tf = (t - 0.33) / 0.33;
+                r = (160 + 70*tf) * b;
+                g = (60 + 80*tf) * b;
+                bl = (80 - 60*tf) * b;
+            } else {
+                const tf = (t - 0.66) / 0.34;
+                r = (230 + 25*tf) * b;
+                g = (140 + 110*tf) * b;
+                bl = (20 + 80*tf) * b;
+            }
+            px[pi] = r; px[pi+1] = g; px[pi+2] = bl; px[pi+3] = 255;
+        } else {
+            px[pi] = 10; px[pi+1] = 10; px[pi+2] = 18; px[pi+3] = 255;
+        }
+    }
+
+    const tmp = document.createElement('canvas');
+    tmp.width = W; tmp.height = H;
+    tmp.getContext('2d').putImageData(imgData, 0, 0);
+    ctx.imageSmoothingEnabled = false;
+    ctx.drawImage(tmp, 0, 0, W * CELL_SIZE, H * CELL_SIZE);
+
+    ctx.fillStyle = 'rgba(255,80,0,0.5)';
+    ctx.fillRect(canvas.width * 0.25, canvas.height - 4, canvas.width * 0.5, 4);
+}
+
+function loop() {
+    if (!paused) {
+        for (let i = 0; i < ff; i++) tick();
+    }
+    render();
+
+    let mass = 0, maxV = 0, avgTemp = 0, waxCount = 0;
+    for (let i = 0; i < N; i++) {
+        mass += wax[i];
+        const v = Math.sqrt(fluidUx[i]*fluidUx[i] + fluidUy[i]*fluidUy[i]);
+        if (v > maxV) maxV = v;
+        if (wax[i] > 0) { avgTemp += temp[i]; waxCount++; }
+    }
+    avgTemp = waxCount > 0 ? avgTemp / waxCount : 0;
+
+    document.getElementById('stats').innerHTML =
+        `Frame: ${frame}<br>` +
+        `Mass: ${mass}/${initialMass} ${mass === initialMass ? '✓' : '⚠'}<br>` +
+        `Grid: ${W}×${H}<br>` +
+        `MaxVel: ${maxV.toFixed(4)}<br>` +
+        `AvgTemp: ${avgTemp.toFixed(2)}`;
+
+    requestAnimationFrame(loop);
+}
+
+// UI
+function toggleUI() {
+    uiHidden = !uiHidden;
+    document.getElementById('ui').classList.toggle('hidden', uiHidden);
+}
+
+function bind(id, key, needsResize = false) {
+    const el = document.getElementById(id);
+    if (!el) return;
+    if (el.type === 'checkbox') {
+        el.checked = P[key];
+        el.onchange = () => {
+            P[key] = el.checked;
+            if (needsResize) resize();
+        };
+    } else {
+        el.value = P[key];
+        el.onchange = () => {
+            P[key] = parseFloat(el.value);
+            if (needsResize) resize();
+        };
+    }
+}
+
+loadURLParams();
+
+bind('cellSize', 'cellSize', true);
+bind('waxHeight', 'waxHeight', true);
+bind('waxMax', 'waxMax', true);
+bind('tau', 'tau');
+bind('maxVelocity', 'maxVelocity');
+bind('cohesion', 'cohesion');
+bind('surfaceOnly', 'surfaceOnly');
+bind('buoyancy', 'buoyancy');
+bind('gravity', 'gravity');
+bind('neutralTemp', 'neutralTemp');
+bind('heatRate', 'heatRate');
+bind('coolRate', 'coolRate');
+bind('ambientCool', 'ambientCool');
+bind('tempDiffusion', 'tempDiffusion');
+bind('heatZoneY', 'heatZoneY');
+bind('coolZoneY', 'coolZoneY');
+bind('velScale', 'velScale');
+bind('swapChanceMax', 'swapChanceMax');
+bind('swapThreshold', 'swapThreshold');
+
+document.getElementById('hide').onclick = toggleUI;
+document.getElementById('ff').onclick = () => {
+    ff = ff === 1 ? 5 : ff === 5 ? 20 : 1;
+    document.getElementById('ff').textContent = ff + 'x';
+};
+document.getElementById('pp').onclick = () => {
+    paused = !paused;
+    document.getElementById('pp').textContent = paused ? '▶' : '||';
+};
+document.getElementById('reset').onclick = () => resize();
+document.getElementById('view').onclick = () => {
+    viewMode = (viewMode + 1) % 3;
+    const labels = ['WAX', 'VEL', 'TEMP'];
+    document.getElementById('view').textContent = labels[viewMode];
+};
+
+addEventListener('resize', resize);
+addEventListener('keydown', e => {
+    if (e.code === 'Space') { paused = !paused; e.preventDefault(); }
+    if (e.code === 'KeyR') resize();
+    if (e.code === 'KeyH') toggleUI();
+    if (e.code === 'KeyV') {
+        viewMode = (viewMode + 1) % 3;
+        const labels = ['WAX', 'VEL', 'TEMP'];
+        document.getElementById('view').textContent = labels[viewMode];
+    }
+});
+
+resize();
+loop();
+</script>
+</body>
+</html>
