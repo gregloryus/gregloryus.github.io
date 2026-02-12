@@ -1,0 +1,748 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Lava Lamp - DPLBM Hybrid v5</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        html, body { height: 100%; overflow: hidden; background: #0a0a12; }
+        #canvas { display: block; image-rendering: pixelated; }
+        #ui { position: absolute; top: 10px; left: 10px; color: #fff; font: 11px monospace; background: rgba(0,0,0,0.8); padding: 10px; border-radius: 4px; transition: opacity 0.2s; max-height: 90vh; overflow-y: auto; }
+        #ui.hidden { opacity: 0; pointer-events: none; }
+        #ui div { margin: 2px 0; }
+        #ui label { display: inline-block; width: 120px; }
+        #ui input { width: 55px; background: #333; color: #fff; border: 1px solid #555; padding: 2px 4px; }
+        #controls { position: absolute; top: 10px; right: 10px; }
+        #controls button { padding: 8px 14px; margin: 2px; background: #222; color: #fff; border: 1px solid #555; cursor: pointer; font: 12px monospace; }
+        .section { color: #888; margin-top: 6px; border-top: 1px solid #444; padding-top: 4px; font-size: 10px; }
+    </style>
+</head>
+<body>
+<canvas id="canvas"></canvas>
+<div id="ui">
+    <div><b>DPLBM Hybrid v5</b></div>
+    <div style="color:#666;font-size:9px;">Surface-only + thresholds (H to hide)</div>
+
+    <div class="section">GRID</div>
+    <div><label>Cell size</label><input type="number" id="cellSize" value="4" step="1"></div>
+    <div><label>Wax height</label><input type="number" id="waxHeight" value="0.25" step="0.05"></div>
+    <div><label>Max units/cell</label><input type="number" id="maxUnits" value="8" step="1"></div>
+
+    <div class="section">LBM</div>
+    <div><label>Tau (viscosity)</label><input type="number" id="tau" value="0.8" step="0.05"></div>
+    <div><label>Max velocity</label><input type="number" id="maxVelocity" value="0.12" step="0.01"></div>
+
+    <div class="section">COHESION</div>
+    <div><label>Adhesion (J)</label><input type="number" id="adhesionJ" value="0.5" step="0.05"></div>
+    <div><label>Noise temp</label><input type="number" id="noiseTemp" value="1.2" step="0.1"></div>
+    <div><label>Surface only</label><input type="checkbox" id="surfaceOnly" checked></div>
+
+    <div class="section">THRESHOLDS</div>
+    <div><label>Min temp to rise</label><input type="number" id="minTempToRise" value="0.6" step="0.05"></div>
+    <div><label>Move threshold</label><input type="number" id="moveThreshold" value="0.1" step="0.05"></div>
+    <div><label>Transfer prob</label><input type="number" id="transferProb" value="0.3" step="0.05"></div>
+
+    <div class="section">FORCES</div>
+    <div><label>Buoyancy</label><input type="number" id="buoyancy" value="0.025" step="0.005"></div>
+    <div><label>Gravity</label><input type="number" id="gravity" value="0.006" step="0.001"></div>
+    <div><label>Neutral temp</label><input type="number" id="neutralTemp" value="0.5" step="0.05"></div>
+
+    <div class="section">HEAT</div>
+    <div><label>Heat rate</label><input type="number" id="heatRate" value="0.004" step="0.001"></div>
+    <div><label>Cool rate</label><input type="number" id="coolRate" value="0.002" step="0.001"></div>
+    <div><label>Ambient cool</label><input type="number" id="ambientCool" value="0.0002" step="0.0001"></div>
+    <div><label>Diffusion</label><input type="number" id="tempDiffusion" value="0.08" step="0.01"></div>
+    <div><label>Heat zone Y</label><input type="number" id="heatZoneY" value="0.9" step="0.02"></div>
+    <div><label>Cool zone Y</label><input type="number" id="coolZoneY" value="0.1" step="0.02"></div>
+
+    <div class="section">MOVEMENT</div>
+    <div><label>Vel scale</label><input type="number" id="velScale" value="1" step="0.5"></div>
+
+    <div id="stats" style="margin-top:8px;color:#aaa;font-size:10px;"></div>
+</div>
+<div id="controls">
+    <button id="hide">UI</button>
+    <button id="ff">1x</button>
+    <button id="pp">||</button>
+    <button id="reset">Reset</button>
+    <button id="view">WAX</button>
+</div>
+
+<script>
+// ============================================
+// DPLBM Hybrid v5 - Tipping Point Behavior
+// ============================================
+//
+// Key changes from v3/v4:
+//
+// 1. SURFACE-ONLY TRANSFERS: Interior cells (fully surrounded by wax)
+//    don't try to move. Only surface cells participate in transfers.
+//    This creates stability in the interior and action at boundaries.
+//
+// 2. TEMPERATURE THRESHOLD FOR RISING: Cells must be above minTempToRise
+//    to initiate upward transfers. Creates "tipping point" behavior -
+//    wax heats gradually then suddenly breaks off when hot enough.
+//
+// 3. MOVE THRESHOLD: Combined score must exceed threshold to even
+//    consider the move. Prevents constant small fluctuations.
+//
+// 4. PROBABILISTIC TRANSFERS: Even good moves only happen with
+//    transferProb chance. Slows dynamics, reduces flickering.
+//
+// 5. SLOWER HEATING: Reduced heat/cool rates for more gradual change.
+//
+// The goal: wax should heat up slowly, stay mostly stable, then
+// suddenly have a region break off and rise when it gets hot enough.
+
+let CELL_SIZE = 4;
+
+const W9 = [4/9, 1/9, 1/9, 1/9, 1/9, 1/36, 1/36, 1/36, 1/36];
+const CX = [0, 1, 0, -1, 0, 1, -1, -1, 1];
+const CY = [0, 0, -1, 0, 1, -1, -1, 1, 1];
+const OPP = [0, 3, 4, 1, 2, 7, 8, 5, 6];
+
+const N8X = [1, 1, 0, -1, -1, -1, 0, 1];
+const N8Y = [0, 1, 1, 1, 0, -1, -1, -1];
+
+const P = {
+    cellSize: 4,
+    waxHeight: 0.25,
+    maxUnits: 8,
+
+    tau: 0.8,
+    maxVelocity: 0.12,
+
+    // Cohesion
+    adhesionJ: 0.5,
+    noiseTemp: 1.2,
+    surfaceOnly: true,
+
+    // Thresholds - relaxed for now
+    minTempToRise: 0.0,    // Disabled - any temp can rise
+    moveThreshold: -999,   // Disabled - any score considered
+    transferProb: 1.0,     // Disabled - all good moves execute
+
+    // Forces
+    buoyancy: 0.025,
+    gravity: 0.006,
+    neutralTemp: 0.5,
+
+    // Heat - same as hybrid-3
+    heatRate: 0.006,
+    coolRate: 0.003,
+    ambientCool: 0.0004,
+    tempDiffusion: 0.05,
+    heatZoneY: 0.88,
+    coolZoneY: 0.12,
+
+    // Movement
+    velScale: 1,
+};
+
+function loadURLParams() {
+    const params = new URLSearchParams(window.location.search);
+    for (const [key, value] of params) {
+        if (P.hasOwnProperty(key)) {
+            if (typeof P[key] === 'boolean') {
+                P[key] = value === 'true';
+            } else {
+                P[key] = parseFloat(value);
+            }
+            const input = document.getElementById(key);
+            if (input) {
+                if (input.type === 'checkbox') input.checked = P[key];
+                else input.value = P[key];
+            }
+        }
+    }
+}
+
+let W, H, N;
+let f, fTemp;
+let fluidUx, fluidUy;
+let units, temp;
+let frame = 0, paused = false, ff = 1, viewMode = 0;
+let initialMass = 0;
+let uiHidden = false;
+let Fx, Fy, newTemp;
+let isSurface;  // Cache which cells are at surface
+
+const canvas = document.getElementById('canvas');
+const ctx = canvas.getContext('2d');
+
+function resize() {
+    canvas.width = innerWidth;
+    canvas.height = innerHeight;
+    CELL_SIZE = P.cellSize;
+    W = Math.floor(canvas.width / CELL_SIZE);
+    H = Math.floor(canvas.height / CELL_SIZE);
+    N = W * H;
+    init();
+}
+
+function init() {
+    f = new Float32Array(N * 9);
+    fTemp = new Float32Array(N * 9);
+    fluidUx = new Float32Array(N);
+    fluidUy = new Float32Array(N);
+    units = new Uint8Array(N);
+    temp = new Float32Array(N);
+    Fx = new Float32Array(N);
+    Fy = new Float32Array(N);
+    newTemp = new Float32Array(N);
+    isSurface = new Uint8Array(N);
+
+    const waxTop = H - Math.floor(H * P.waxHeight);
+    initialMass = 0;
+
+    for (let y = 0; y < H; y++) {
+        for (let x = 0; x < W; x++) {
+            const i = y * W + x;
+            const noise = Math.sin(x * 0.12) * 4 + Math.random() * 3;
+
+            if (y >= waxTop + noise) {
+                units[i] = P.maxUnits;
+                temp[i] = 0.3 + Math.random() * 0.05;  // Start cooler
+                initialMass += P.maxUnits;
+            }
+            initEquilibrium(i, 1.0, 0, 0);
+        }
+    }
+    frame = 0;
+}
+
+function initEquilibrium(i, rho, ux, uy) {
+    const usq = ux * ux + uy * uy;
+    for (let k = 0; k < 9; k++) {
+        const cu = CX[k] * ux + CY[k] * uy;
+        f[i * 9 + k] = W9[k] * rho * (1 + 3*cu + 4.5*cu*cu - 1.5*usq);
+    }
+}
+
+function wrapX(x) { return (x + W) % W; }
+
+// Update surface cache - a cell is "surface" if it has any empty neighbor
+function updateSurfaceCache() {
+    for (let y = 0; y < H; y++) {
+        for (let x = 0; x < W; x++) {
+            const i = y * W + x;
+            if (units[i] === 0) {
+                isSurface[i] = 0;
+                continue;
+            }
+
+            let hasEmpty = false;
+            for (let k = 0; k < 8; k++) {
+                const nx = wrapX(x + N8X[k]);
+                const ny = y + N8Y[k];
+                if (ny < 0 || ny >= H || units[ny * W + nx] === 0) {
+                    hasEmpty = true;
+                    break;
+                }
+            }
+            isSurface[i] = hasEmpty ? 1 : 0;
+        }
+    }
+}
+
+// Count empty 8-neighbors
+function countEmptyNeighbors(x, y) {
+    let count = 0;
+    for (let k = 0; k < 8; k++) {
+        const nx = wrapX(x + N8X[k]);
+        const ny = y + N8Y[k];
+        if (ny < 0 || ny >= H || units[ny * W + nx] === 0) count++;
+    }
+    return count;
+}
+
+// Check if transfer would create isolated unit
+function wouldCreateIsolation(srcX, srcY, srcUnits, destX, destY) {
+    const destI = destY * W + destX;
+    if (units[destI] > 0) return false;
+
+    const srcI = srcY * W + srcX;
+    for (let k = 0; k < 8; k++) {
+        const nx = wrapX(destX + N8X[k]);
+        const ny = destY + N8Y[k];
+        if (ny < 0 || ny >= H) continue;
+        const ni = ny * W + nx;
+        if (ni === srcI) {
+            if (srcUnits > 1) return false;
+        } else if (units[ni] > 0) {
+            return false;
+        }
+    }
+    return true;
+}
+
+// Calculate adhesion energy change
+function calcEnergyDelta(srcX, srcY, destX, destY) {
+    const srcI = srcY * W + srcX;
+    const destI = destY * W + destX;
+    const srcUnits = units[srcI];
+    const destUnits = units[destI];
+
+    // Block isolation
+    if (wouldCreateIsolation(srcX, srcY, srcUnits, destX, destY)) {
+        return Infinity;
+    }
+
+    const srcAdhBefore = P.adhesionJ * countEmptyNeighbors(srcX, srcY);
+    const destAdhBefore = destUnits > 0 ? P.adhesionJ * countEmptyNeighbors(destX, destY) : 0;
+
+    let srcAdhAfter = 0;
+    if (srcUnits > 1) {
+        let srcEmpty = countEmptyNeighbors(srcX, srcY);
+        if (destUnits === 0) {
+            for (let k = 0; k < 8; k++) {
+                if (wrapX(srcX + N8X[k]) === destX && srcY + N8Y[k] === destY) {
+                    srcEmpty--;
+                    break;
+                }
+            }
+        }
+        srcAdhAfter = P.adhesionJ * Math.max(0, srcEmpty);
+    }
+
+    let destAdhAfter = 0;
+    if (destUnits === 0) {
+        let destEmpty = 0;
+        for (let k = 0; k < 8; k++) {
+            const nx = wrapX(destX + N8X[k]);
+            const ny = destY + N8Y[k];
+            if (ny < 0 || ny >= H) {
+                destEmpty++;
+            } else {
+                const ni = ny * W + nx;
+                if (ni === srcI) {
+                    if (srcUnits === 1) destEmpty++;
+                } else if (units[ni] === 0) {
+                    destEmpty++;
+                }
+            }
+        }
+        destAdhAfter = P.adhesionJ * destEmpty;
+    } else {
+        let destEmpty = countEmptyNeighbors(destX, destY);
+        if (srcUnits === 1) {
+            for (let k = 0; k < 8; k++) {
+                if (wrapX(destX + N8X[k]) === srcX && destY + N8Y[k] === srcY) {
+                    destEmpty++;
+                    break;
+                }
+            }
+        }
+        destAdhAfter = P.adhesionJ * destEmpty;
+    }
+
+    return (srcAdhAfter + destAdhAfter) - (srcAdhBefore + destAdhBefore);
+}
+
+function tick() {
+    frame++;
+
+    // === STEP 1: LBM macroscopic quantities ===
+    for (let i = 0; i < N; i++) {
+        let rho = 0, vx = 0, vy = 0;
+        for (let k = 0; k < 9; k++) {
+            const fk = f[i * 9 + k];
+            rho += fk;
+            vx += fk * CX[k];
+            vy += fk * CY[k];
+        }
+        if (rho > 0.001) {
+            vx /= rho; vy /= rho;
+            const mag = Math.sqrt(vx*vx + vy*vy);
+            if (mag > P.maxVelocity) {
+                const s = P.maxVelocity / mag;
+                vx *= s; vy *= s;
+            }
+            fluidUx[i] = vx;
+            fluidUy[i] = vy;
+        } else {
+            fluidUx[i] = 0;
+            fluidUy[i] = 0;
+        }
+    }
+
+    // === STEP 2: Buoyancy forces ===
+    Fx.fill(0);
+    Fy.fill(0);
+
+    for (let y = 0; y < H; y++) {
+        for (let x = 0; x < W; x++) {
+            const i = y * W + x;
+            if (units[i] === 0) continue;
+
+            const t = temp[i];
+            const mass = units[i] / P.maxUnits;
+
+            const tempDiff = t - P.neutralTemp;
+            Fy[i] = -P.buoyancy * mass * tempDiff;
+            Fy[i] += P.gravity * mass;
+        }
+    }
+
+    // === STEP 3: LBM Collision ===
+    for (let i = 0; i < N; i++) {
+        let rho = 0;
+        for (let k = 0; k < 9; k++) rho += f[i * 9 + k];
+        if (rho < 0.001) continue;
+
+        const vx = fluidUx[i] + Fx[i] / rho * 0.5;
+        const vy = fluidUy[i] + Fy[i] / rho * 0.5;
+        const usq = vx*vx + vy*vy;
+
+        for (let k = 0; k < 9; k++) {
+            const cu = CX[k]*vx + CY[k]*vy;
+            const feq = W9[k] * rho * (1 + 3*cu + 4.5*cu*cu - 1.5*usq);
+            const Fi = W9[k] * (1 - 0.5/P.tau) * (
+                3*(CX[k] - vx) + 9*cu*CX[k]
+            ) * Fx[i] + W9[k] * (1 - 0.5/P.tau) * (
+                3*(CY[k] - vy) + 9*cu*CY[k]
+            ) * Fy[i];
+            f[i * 9 + k] += -(f[i * 9 + k] - feq) / P.tau + Fi;
+        }
+    }
+
+    // === STEP 4: LBM Streaming ===
+    fTemp.fill(0);
+    for (let y = 0; y < H; y++) {
+        for (let x = 0; x < W; x++) {
+            const i = y * W + x;
+            for (let k = 0; k < 9; k++) {
+                const nx = wrapX(x + CX[k]);
+                const ny = y + CY[k];
+                if (ny < 0 || ny >= H) {
+                    fTemp[i * 9 + OPP[k]] += f[i * 9 + k];
+                } else {
+                    fTemp[(ny * W + nx) * 9 + k] += f[i * 9 + k];
+                }
+            }
+        }
+    }
+    [f, fTemp] = [fTemp, f];
+
+    // === STEP 5: Temperature ===
+    const heatStart = H * P.heatZoneY;
+    const coolEnd = H * P.coolZoneY;
+
+    for (let y = 0; y < H; y++) {
+        for (let x = 0; x < W; x++) {
+            const i = y * W + x;
+            if (units[i] === 0) { newTemp[i] = 0; continue; }
+
+            let t = temp[i];
+
+            // Diffusion
+            let sum = t * units[i], total = units[i];
+            for (let k = 0; k < 8; k++) {
+                const nx = wrapX(x + N8X[k]);
+                const ny = y + N8Y[k];
+                if (ny >= 0 && ny < H && units[ny * W + nx] > 0) {
+                    sum += temp[ny * W + nx] * units[ny * W + nx];
+                    total += units[ny * W + nx];
+                }
+            }
+            t += (sum / total - t) * P.tempDiffusion;
+
+            // Bottom heating
+            if (y > heatStart) {
+                const vert = (y - heatStart) / (H - heatStart);
+                const horiz = 1 - Math.abs(x / W - 0.5) * 1.2;
+                if (horiz > 0) t += P.heatRate * vert * horiz;
+            }
+
+            // Top cooling
+            if (y < coolEnd) {
+                t -= P.coolRate * (1 - y / coolEnd);
+            }
+
+            t -= P.ambientCool;
+            newTemp[i] = Math.max(0, Math.min(1.0, t));
+        }
+    }
+    [temp, newTemp] = [newTemp, temp];
+
+    // === STEP 6: Update surface cache ===
+    updateSurfaceCache();
+
+    // === STEP 7: Unit Transfer with thresholds ===
+
+    // Build list of candidate cells (surface only if enabled)
+    const candidates = [];
+    for (let i = 0; i < N; i++) {
+        if (units[i] > 0) {
+            if (!P.surfaceOnly || isSurface[i]) {
+                candidates.push(i);
+            }
+        }
+    }
+
+    // Shuffle
+    for (let i = candidates.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [candidates[i], candidates[j]] = [candidates[j], candidates[i]];
+    }
+
+    const dirs = [
+        {dx: 0, dy: -1, isUp: true},
+        {dx: 0, dy: 1, isUp: false},
+        {dx: -1, dy: 0, isUp: false},
+        {dx: 1, dy: 0, isUp: false},
+    ];
+
+    for (const srcI of candidates) {
+        if (units[srcI] === 0) continue;
+
+        // Probabilistic skip - slows dynamics
+        if (Math.random() > P.transferProb) continue;
+
+        const srcX = srcI % W;
+        const srcY = Math.floor(srcI / W);
+        const srcTemp = temp[srcI];
+
+        let bestDir = null;
+        let bestScore = -Infinity;
+
+        for (const dir of dirs) {
+            // Temperature threshold for upward movement
+            if (dir.isUp && srcTemp < P.minTempToRise) continue;
+
+            const destX = wrapX(srcX + dir.dx);
+            const destY = srcY + dir.dy;
+            if (destY < 0 || destY >= H) continue;
+
+            const destI = destY * W + destX;
+            if (units[destI] >= P.maxUnits) continue;
+
+            const velProj = fluidUx[srcI] * dir.dx + fluidUy[srcI] * dir.dy;
+            const velScore = velProj * P.velScale;
+
+            const deltaH = calcEnergyDelta(srcX, srcY, destX, destY);
+            if (!isFinite(deltaH)) continue;
+
+            const score = velScore - deltaH;
+
+            // Must exceed threshold to even consider
+            if (score < P.moveThreshold) continue;
+
+            if (score > bestScore) {
+                bestScore = score;
+                bestDir = { destI, deltaH, velScore };
+            }
+        }
+
+        if (!bestDir) continue;
+
+        // Metropolis acceptance
+        const effEnergy = bestDir.deltaH - bestDir.velScore;
+        let accept;
+        if (effEnergy <= 0) {
+            accept = true;
+        } else {
+            accept = Math.random() < Math.exp(-effEnergy / P.noiseTemp);
+        }
+
+        if (accept) {
+            const destI = bestDir.destI;
+
+            if (units[destI] === 0) {
+                temp[destI] = temp[srcI];
+            } else {
+                const newTotal = units[destI] + 1;
+                temp[destI] = (temp[destI] * units[destI] + temp[srcI]) / newTotal;
+            }
+
+            units[srcI]--;
+            units[destI]++;
+        }
+    }
+}
+
+function render() {
+    ctx.fillStyle = '#0a0a12';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    const imgData = ctx.createImageData(W, H);
+    const px = imgData.data;
+
+    for (let i = 0; i < N; i++) {
+        const pi = i * 4;
+
+        if (viewMode === 1) {
+            const vy = fluidUy[i] * 400;
+            const vx = fluidUx[i] * 400;
+            const w = units[i] > 0 ? 1 : 0.3;
+            px[pi] = Math.min(255, Math.max(0, 128 + vy * 8)) * w;
+            px[pi+1] = Math.min(255, Math.max(0, 128 - vy * 8)) * w;
+            px[pi+2] = Math.min(255, Math.abs(vx) * 15) * w;
+            px[pi+3] = 255;
+        } else if (viewMode === 2) {
+            if (units[i] > 0) {
+                const t = temp[i];
+                px[pi] = t * 255;
+                px[pi+1] = (1-t) * 80;
+                px[pi+2] = (1-t) * 200;
+                px[pi+3] = 255;
+            } else {
+                px[pi] = 10; px[pi+1] = 10; px[pi+2] = 18; px[pi+3] = 255;
+            }
+        } else if (viewMode === 3) {
+            // Surface view - show which cells are at surface
+            if (units[i] > 0) {
+                if (isSurface[i]) {
+                    px[pi] = 255; px[pi+1] = 200; px[pi+2] = 100;
+                } else {
+                    px[pi] = 80; px[pi+1] = 60; px[pi+2] = 120;
+                }
+                px[pi+3] = 255;
+            } else {
+                px[pi] = 10; px[pi+1] = 10; px[pi+2] = 18; px[pi+3] = 255;
+            }
+        } else if (units[i] > 0) {
+            const t = temp[i];
+            const b = 0.4 + 0.6 * units[i] / P.maxUnits;
+
+            let r, g, bl;
+            if (t < 0.35) {
+                const tf = t / 0.35;
+                r = (50 + 90*tf) * b;
+                g = (15 + 35*tf) * b;
+                bl = (130 - 30*tf) * b;
+            } else if (t < 0.65) {
+                const tf = (t - 0.35) / 0.3;
+                r = (140 + 80*tf) * b;
+                g = (50 + 70*tf) * b;
+                bl = (100 - 70*tf) * b;
+            } else {
+                const tf = (t - 0.65) / 0.35;
+                r = (220 + 35*tf) * b;
+                g = (120 + 130*tf) * b;
+                bl = (30 + 60*tf) * b;
+            }
+            px[pi] = r; px[pi+1] = g; px[pi+2] = bl; px[pi+3] = 255;
+        } else {
+            px[pi] = 10; px[pi+1] = 10; px[pi+2] = 18; px[pi+3] = 255;
+        }
+    }
+
+    const tmp = document.createElement('canvas');
+    tmp.width = W; tmp.height = H;
+    tmp.getContext('2d').putImageData(imgData, 0, 0);
+    ctx.imageSmoothingEnabled = false;
+    ctx.drawImage(tmp, 0, 0, W * CELL_SIZE, H * CELL_SIZE);
+
+    ctx.fillStyle = 'rgba(255,80,0,0.5)';
+    ctx.fillRect(canvas.width * 0.3, canvas.height - 4, canvas.width * 0.4, 4);
+}
+
+function loop() {
+    if (!paused) {
+        for (let i = 0; i < ff; i++) tick();
+    }
+    render();
+
+    let mass = 0, maxV = 0, avgTemp = 0, waxCells = 0, surfaceCells = 0;
+    for (let i = 0; i < N; i++) {
+        mass += units[i];
+        const v = Math.sqrt(fluidUx[i]*fluidUx[i] + fluidUy[i]*fluidUy[i]);
+        if (v > maxV) maxV = v;
+        if (units[i] > 0) {
+            avgTemp += temp[i] * units[i];
+            waxCells++;
+            if (isSurface[i]) surfaceCells++;
+        }
+    }
+    avgTemp = mass > 0 ? avgTemp / mass : 0;
+
+    document.getElementById('stats').innerHTML =
+        `Frame: ${frame}<br>` +
+        `Mass: ${mass}/${initialMass} ${mass === initialMass ? '✓' : '⚠'}<br>` +
+        `Cells: ${waxCells} (${surfaceCells} surface)<br>` +
+        `MaxVel: ${maxV.toFixed(4)}<br>` +
+        `AvgTemp: ${avgTemp.toFixed(2)}`;
+
+    requestAnimationFrame(loop);
+}
+
+function toggleUI() {
+    uiHidden = !uiHidden;
+    document.getElementById('ui').classList.toggle('hidden', uiHidden);
+}
+
+function bind(id, key, needsResize = false) {
+    const el = document.getElementById(id);
+    if (!el) return;
+    if (el.type === 'checkbox') {
+        el.checked = P[key];
+        el.onchange = () => {
+            P[key] = el.checked;
+            if (needsResize) resize();
+        };
+    } else {
+        el.value = P[key];
+        el.onchange = () => {
+            P[key] = parseFloat(el.value);
+            if (needsResize) resize();
+        };
+    }
+}
+
+loadURLParams();
+
+bind('cellSize', 'cellSize', true);
+bind('waxHeight', 'waxHeight', true);
+bind('maxUnits', 'maxUnits', true);
+bind('tau', 'tau');
+bind('maxVelocity', 'maxVelocity');
+bind('adhesionJ', 'adhesionJ');
+bind('noiseTemp', 'noiseTemp');
+bind('surfaceOnly', 'surfaceOnly');
+bind('minTempToRise', 'minTempToRise');
+bind('moveThreshold', 'moveThreshold');
+bind('transferProb', 'transferProb');
+bind('buoyancy', 'buoyancy');
+bind('gravity', 'gravity');
+bind('neutralTemp', 'neutralTemp');
+bind('heatRate', 'heatRate');
+bind('coolRate', 'coolRate');
+bind('ambientCool', 'ambientCool');
+bind('tempDiffusion', 'tempDiffusion');
+bind('heatZoneY', 'heatZoneY');
+bind('coolZoneY', 'coolZoneY');
+bind('velScale', 'velScale');
+
+document.getElementById('hide').onclick = toggleUI;
+document.getElementById('ff').onclick = () => {
+    ff = ff === 1 ? 5 : ff === 5 ? 20 : 1;
+    document.getElementById('ff').textContent = ff + 'x';
+};
+document.getElementById('pp').onclick = () => {
+    paused = !paused;
+    document.getElementById('pp').textContent = paused ? '▶' : '||';
+};
+document.getElementById('reset').onclick = () => resize();
+document.getElementById('view').onclick = () => {
+    viewMode = (viewMode + 1) % 4;
+    document.getElementById('view').textContent = ['WAX', 'VEL', 'TEMP', 'SURF'][viewMode];
+};
+
+addEventListener('resize', resize);
+addEventListener('keydown', e => {
+    if (e.code === 'Space') { paused = !paused; e.preventDefault(); }
+    if (e.code === 'KeyR') resize();
+    if (e.code === 'KeyH') toggleUI();
+    if (e.code === 'KeyV') {
+        viewMode = (viewMode + 1) % 4;
+        document.getElementById('view').textContent = ['WAX', 'VEL', 'TEMP', 'SURF'][viewMode];
+    }
+});
+
+resize();
+loop();
+</script>
+</body>
+</html>

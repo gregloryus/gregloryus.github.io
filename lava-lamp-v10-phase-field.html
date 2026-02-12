@@ -1,0 +1,635 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Lava Lamp - v10 Phase Field</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        html, body { height: 100%; overflow: hidden; background: #0a0a12; }
+        #canvas { display: block; image-rendering: pixelated; }
+        #ui { position: absolute; top: 10px; left: 10px; color: #fff; font: 11px monospace;
+               background: rgba(0,0,0,0.8); padding: 10px; border-radius: 4px;
+               transition: opacity 0.2s; max-height: 90vh; overflow-y: auto; }
+        #ui.hidden { opacity: 0; pointer-events: none; }
+        #ui div { margin: 2px 0; }
+        #ui label { display: inline-block; width: 130px; }
+        #ui input[type="number"] { width: 60px; background: #333; color: #fff; border: 1px solid #555; padding: 2px 4px; }
+        #controls { position: absolute; top: 10px; right: 10px; }
+        #controls button { padding: 8px 14px; margin: 2px; background: #222; color: #fff;
+                           border: 1px solid #555; cursor: pointer; font: 12px monospace; }
+        .section { color: #888; margin-top: 6px; border-top: 1px solid #444; padding-top: 4px; font-size: 10px; }
+    </style>
+</head>
+<body>
+<canvas id="canvas"></canvas>
+<div id="ui">
+    <div><b>v10 Phase Field</b></div>
+    <div style="color:#666;font-size:9px;">Continuous advection + Allen-Cahn</div>
+
+    <div class="section">GRID</div>
+    <div><label>Cell size</label><input type="number" id="cellSize" value="4" step="1"></div>
+    <div><label>Wax height</label><input type="number" id="waxHeight" value="0.22" step="0.02"></div>
+
+    <div class="section">LBM</div>
+    <div><label>Tau</label><input type="number" id="tau" value="0.8" step="0.05"></div>
+    <div><label>Max velocity</label><input type="number" id="maxVelocity" value="0.12" step="0.01"></div>
+
+    <div class="section">FORCES</div>
+    <div><label>Buoyancy</label><input type="number" id="buoyancy" value="0.012" step="0.001"></div>
+    <div><label>Gravity</label><input type="number" id="gravity" value="0.003" step="0.001"></div>
+    <div><label>Surface tension</label><input type="number" id="sigma" value="0.02" step="0.005"></div>
+    <div><label>Neutral temp</label><input type="number" id="neutralTemp" value="0.4" step="0.05"></div>
+
+    <div class="section">PHASE FIELD</div>
+    <div><label>Interface width</label><input type="number" id="interfaceWidth" value="0.02" step="0.005"></div>
+    <div><label>Sharpen rate</label><input type="number" id="sharpenRate" value="0.15" step="0.01"></div>
+
+    <div class="section">HEAT</div>
+    <div><label>Heat rate</label><input type="number" id="heatRate" value="0.006" step="0.001"></div>
+    <div><label>Cool rate</label><input type="number" id="coolRate" value="0.004" step="0.001"></div>
+    <div><label>Ambient cool</label><input type="number" id="ambientCool" value="0.0003" step="0.0001"></div>
+    <div><label>Temp diffusion</label><input type="number" id="tempDiffusion" value="0.12" step="0.01"></div>
+    <div><label>Heat zone Y</label><input type="number" id="heatZoneY" value="0.87" step="0.02"></div>
+    <div><label>Cool zone Y</label><input type="number" id="coolZoneY" value="0.12" step="0.02"></div>
+
+    <div id="stats" style="margin-top:8px;color:#aaa;font-size:10px;"></div>
+</div>
+<div id="controls">
+    <button id="hide">UI</button>
+    <button id="ff">1x</button>
+    <button id="pp">||</button>
+    <button id="reset">Reset</button>
+    <button id="view">WAX</button>
+</div>
+
+<script>
+// ==================================================================================
+// v10 PHASE-FIELD LAVA LAMP
+// ==================================================================================
+//
+// WHY THIS APPROACH:
+//
+// v6-v9 all used discrete wax cells with integer units, swaps, topology
+// tests, and energy calculations. Every version fought the same battle:
+// how to let the boundary move without creating spray or wires.
+//
+// The fundamental problem: discrete swap-based movement can't naturally
+// produce blob DETACHMENT and MERGING — the core lava lamp behavior.
+// Topology constraints prevent splitting. Energy gates freeze boundaries.
+//
+// PHASE-FIELD SOLUTION:
+//
+// Wax is a continuous density field φ ∈ [0, 1].
+// It's advected by the LBM velocity field (semi-Lagrangian).
+// Allen-Cahn dynamics keep interfaces sharp (φ→0 or φ→1).
+// Surface tension force in the LBM rounds blobs and prevents spray.
+//
+// Blob detachment happens NATURALLY when buoyancy overcomes surface
+// tension — exactly like a real lava lamp. No special logic needed.
+// Blob merging happens naturally when two φ>0.5 regions touch.
+//
+// The entire wax dynamics is: advect + diffuse + sharpen. That's it.
+// No swaps. No topology. No energy. No units.
+//
+// ARCHITECTURE:
+//   LBM (velocity field)
+//     ← buoyancy force (hot wax rises)
+//     ← gravity (wax sinks when cold)
+//     ← surface tension (CSF model, rounds blobs)
+//   Phase field (wax shape)
+//     ← semi-Lagrangian advection by LBM velocity
+//     ← Allen-Cahn: diffusion (interface width) + reaction (sharpening)
+//   Temperature
+//     ← advected with flow
+//     ← diffusion among wax cells
+//     ← heat source at bottom, cooling at top
+
+let CELL_SIZE = 4;
+
+// D2Q9 lattice
+const W9 = [4/9, 1/9, 1/9, 1/9, 1/9, 1/36, 1/36, 1/36, 1/36];
+const CX = [0, 1, 0, -1, 0, 1, -1, -1, 1];
+const CY = [0, 0, -1, 0, 1, -1, -1, 1, 1];
+const OPP = [0, 3, 4, 1, 2, 7, 8, 5, 6];
+
+const P = {
+    cellSize: 4,
+    waxHeight: 0.22,
+
+    tau: 0.8,
+    maxVelocity: 0.12,
+
+    buoyancy: 0.012,
+    gravity: 0.003,
+    sigma: 0.02,          // Surface tension strength (CSF)
+    neutralTemp: 0.4,
+
+    interfaceWidth: 0.02,  // Allen-Cahn diffusion (controls interface thickness)
+    sharpenRate: 0.15,     // Allen-Cahn reaction (pushes toward 0 or 1)
+
+    heatRate: 0.006,
+    coolRate: 0.004,
+    ambientCool: 0.0003,
+    tempDiffusion: 0.12,
+    heatZoneY: 0.87,
+    coolZoneY: 0.12,
+};
+
+function loadURLParams() {
+    const params = new URLSearchParams(window.location.search);
+    for (const [key, value] of params) {
+        if (P.hasOwnProperty(key)) {
+            P[key] = parseFloat(value);
+            const el = document.getElementById(key);
+            if (el) el.value = P[key];
+        }
+    }
+}
+
+let W, H, N;
+let f, fTemp;
+let fluidUx, fluidUy;
+let wax, newWax;           // Phase field [0,1]
+let temp, newTemp;          // Temperature [0,1]
+let Fx, Fy;
+let frame = 0, paused = false, ff = 1, viewMode = 0;
+let initialMass = 0, uiHidden = false;
+
+const canvas = document.getElementById('canvas');
+const ctx = canvas.getContext('2d');
+
+function resize() {
+    canvas.width = innerWidth;
+    canvas.height = innerHeight;
+    CELL_SIZE = P.cellSize;
+    W = Math.floor(canvas.width / CELL_SIZE);
+    H = Math.floor(canvas.height / CELL_SIZE);
+    N = W * H;
+    init();
+}
+
+function init() {
+    f = new Float32Array(N * 9);
+    fTemp = new Float32Array(N * 9);
+    fluidUx = new Float32Array(N);
+    fluidUy = new Float32Array(N);
+    wax = new Float32Array(N);
+    newWax = new Float32Array(N);
+    temp = new Float32Array(N);
+    newTemp = new Float32Array(N);
+    Fx = new Float32Array(N);
+    Fy = new Float32Array(N);
+
+    const waxTop = H - Math.floor(H * P.waxHeight);
+    initialMass = 0;
+
+    for (let y = 0; y < H; y++) {
+        for (let x = 0; x < W; x++) {
+            const i = y * W + x;
+            // Smooth initial interface with slight wave
+            const surfY = waxTop + Math.sin(x * 0.1) * 1.5;
+            const dist = y - surfY; // positive = inside wax
+
+            if (dist > 1) {
+                wax[i] = 1.0;
+            } else if (dist > -1) {
+                // Smooth transition at interface
+                wax[i] = 0.5 + 0.5 * Math.tanh(dist * 2);
+            } else {
+                wax[i] = 0.0;
+            }
+
+            // Temperature: warm at bottom, cool at top
+            temp[i] = wax[i] > 0.5 ? 0.2 + 0.1 * (y / H) : 0.0;
+            initialMass += wax[i];
+
+            // Initialize LBM at rest
+            initEq(i, 1.0, 0, 0);
+        }
+    }
+    frame = 0;
+}
+
+function initEq(i, rho, ux, uy) {
+    const usq = ux * ux + uy * uy;
+    for (let k = 0; k < 9; k++) {
+        const cu = CX[k] * ux + CY[k] * uy;
+        f[i * 9 + k] = W9[k] * rho * (1 + 3 * cu + 4.5 * cu * cu - 1.5 * usq);
+    }
+}
+
+function wxp(x) { return (x + W) % W; }
+
+// Bilinear sample with X-wrap and Y-clamp
+function sampleField(field, sx, sy) {
+    sx = ((sx % W) + W) % W;
+    sy = Math.max(0, Math.min(H - 1.001, sy));
+    const x0 = Math.floor(sx);
+    const y0 = Math.floor(sy);
+    const x1 = (x0 + 1) % W;
+    const y1 = Math.min(y0 + 1, H - 1);
+    const fx = sx - x0;
+    const fy = sy - y0;
+    return field[y0 * W + x0] * (1-fx) * (1-fy) +
+           field[y0 * W + x1] * fx * (1-fy) +
+           field[y1 * W + x0] * (1-fx) * fy +
+           field[y1 * W + x1] * fx * fy;
+}
+
+// ==================================================================================
+// TICK
+// ==================================================================================
+
+function tick() {
+    frame++;
+
+    // === 1. LBM macroscopic quantities ===
+    for (let i = 0; i < N; i++) {
+        let rho = 0, vx = 0, vy = 0;
+        for (let k = 0; k < 9; k++) {
+            const fk = f[i * 9 + k];
+            rho += fk; vx += fk * CX[k]; vy += fk * CY[k];
+        }
+        if (rho > 0.001) {
+            vx /= rho; vy /= rho;
+            const mag = Math.sqrt(vx * vx + vy * vy);
+            if (mag > P.maxVelocity) {
+                const s = P.maxVelocity / mag;
+                vx *= s; vy *= s;
+            }
+        } else { vx = 0; vy = 0; }
+        fluidUx[i] = vx;
+        fluidUy[i] = vy;
+    }
+
+    // === 2. Forces: buoyancy + gravity + surface tension ===
+    Fx.fill(0); Fy.fill(0);
+
+    for (let y = 0; y < H; y++) {
+        for (let x = 0; x < W; x++) {
+            const i = y * W + x;
+            const phi = wax[i];
+
+            if (phi < 0.01) continue;
+
+            // Buoyancy: hot wax rises, cold wax has reduced buoyancy
+            Fy[i] -= P.buoyancy * phi * (temp[i] - P.neutralTemp);
+
+            // Gravity: all wax pulled down
+            Fy[i] += P.gravity * phi;
+
+            // Surface tension (Continuum Surface Force model)
+            // F_st = σ * ∇²φ * ∇φ
+            // This creates a force at interfaces that minimizes surface area
+            const left  = wax[y * W + wxp(x - 1)];
+            const right = wax[y * W + wxp(x + 1)];
+            const up    = y > 0     ? wax[(y-1) * W + x] : phi;
+            const down  = y < H - 1 ? wax[(y+1) * W + x] : phi;
+
+            // Laplacian of φ (curvature proxy)
+            const lap = left + right + up + down - 4 * phi;
+
+            // Gradient of φ (interface normal direction)
+            const gx = (right - left) * 0.5;
+            const gy = (down - up) * 0.5;
+
+            // CSF force: pulls concave surfaces inward, rounds blobs
+            Fx[i] += P.sigma * lap * gx;
+            Fy[i] += P.sigma * lap * gy;
+        }
+    }
+
+    // === 3. LBM collision with Guo forcing ===
+    for (let i = 0; i < N; i++) {
+        let rho = 0;
+        for (let k = 0; k < 9; k++) rho += f[i * 9 + k];
+        if (rho < 0.001) continue;
+
+        const vx = fluidUx[i] + (Fx[i] / rho) * 0.5;
+        const vy = fluidUy[i] + (Fy[i] / rho) * 0.5;
+        const usq = vx * vx + vy * vy;
+
+        for (let k = 0; k < 9; k++) {
+            const cu = CX[k] * vx + CY[k] * vy;
+            const feq = W9[k] * rho * (1 + 3 * cu + 4.5 * cu * cu - 1.5 * usq);
+
+            // Guo forcing term
+            const Fk = W9[k] * (1 - 0.5 / P.tau) * (
+                (3 * (CX[k] - vx) + 9 * cu * CX[k]) * Fx[i] +
+                (3 * (CY[k] - vy) + 9 * cu * CY[k]) * Fy[i]
+            );
+
+            f[i * 9 + k] += -(f[i * 9 + k] - feq) / P.tau + Fk;
+        }
+    }
+
+    // === 4. LBM streaming ===
+    fTemp.fill(0);
+    for (let y = 0; y < H; y++) {
+        for (let x = 0; x < W; x++) {
+            const i = y * W + x;
+            for (let k = 0; k < 9; k++) {
+                const nx = wxp(x + CX[k]);
+                const ny = y + CY[k];
+                if (ny < 0 || ny >= H) {
+                    // Bounce-back at top/bottom walls
+                    fTemp[i * 9 + OPP[k]] += f[i * 9 + k];
+                } else {
+                    fTemp[(ny * W + nx) * 9 + k] += f[i * 9 + k];
+                }
+            }
+        }
+    }
+    [f, fTemp] = [fTemp, f];
+
+    // === 5. Advect wax field (semi-Lagrangian) ===
+    for (let y = 0; y < H; y++) {
+        for (let x = 0; x < W; x++) {
+            const i = y * W + x;
+            // Trace backward along velocity
+            const srcX = x - fluidUx[i];
+            const srcY = y - fluidUy[i];
+            newWax[i] = sampleField(wax, srcX, srcY);
+        }
+    }
+    [wax, newWax] = [newWax, wax];
+
+    // === 6. Allen-Cahn phase-field update ===
+    // Two competing terms:
+    //   Diffusion: widens interface (prevents numerical sharpness issues)
+    //   Reaction:  sharpens interface (pushes φ toward 0 or 1)
+    // Balance determines interface width (~1-2 cells for pixel art look)
+
+    for (let y = 0; y < H; y++) {
+        for (let x = 0; x < W; x++) {
+            const i = y * W + x;
+            let phi = wax[i];
+
+            // Laplacian for diffusion
+            const left  = wax[y * W + wxp(x - 1)];
+            const right = wax[y * W + wxp(x + 1)];
+            const up    = y > 0     ? wax[(y-1) * W + x] : phi;
+            const down  = y < H - 1 ? wax[(y+1) * W + x] : phi;
+            const lap = left + right + up + down - 4 * phi;
+
+            // Diffusion (interface width control)
+            phi += P.interfaceWidth * lap;
+
+            // Allen-Cahn reaction: derivative of double-well W(φ) = φ²(1-φ)²
+            // dW/dφ = 2φ(1-φ)(2φ-1) → we use a simplified form
+            // This pushes φ toward 0 or 1, creating sharp interfaces
+            phi += P.sharpenRate * phi * (1 - phi) * (phi - 0.5);
+
+            wax[i] = Math.max(0, Math.min(1, phi));
+        }
+    }
+
+    // === 7. Mass conservation correction ===
+    // Semi-Lagrangian advection doesn't perfectly conserve mass.
+    // Gently correct to maintain total wax amount.
+    let currentMass = 0;
+    for (let i = 0; i < N; i++) currentMass += wax[i];
+    if (currentMass > 0.01) {
+        const correction = initialMass / currentMass;
+        // Soft correction (don't snap instantly, blend toward target)
+        const blend = 0.98 + 0.02 * correction;
+        for (let i = 0; i < N; i++) {
+            wax[i] *= blend;
+            wax[i] = Math.max(0, Math.min(1, wax[i]));
+        }
+    }
+
+    // === 8. Temperature evolution ===
+    const heatStart = H * P.heatZoneY;
+    const coolEnd = H * P.coolZoneY;
+
+    // First: advect temperature with flow
+    for (let y = 0; y < H; y++) {
+        for (let x = 0; x < W; x++) {
+            const i = y * W + x;
+            const srcX = x - fluidUx[i];
+            const srcY = y - fluidUy[i];
+            newTemp[i] = sampleField(temp, srcX, srcY);
+        }
+    }
+    [temp, newTemp] = [newTemp, temp];
+
+    // Then: diffusion + heating/cooling
+    for (let y = 0; y < H; y++) {
+        for (let x = 0; x < W; x++) {
+            const i = y * W + x;
+            let t = temp[i];
+
+            // Temperature diffusion (weighted by wax density)
+            if (wax[i] > 0.1) {
+                const left  = temp[y * W + wxp(x-1)];
+                const right = temp[y * W + wxp(x+1)];
+                const up    = y > 0     ? temp[(y-1)*W+x] : t;
+                const down  = y < H-1   ? temp[(y+1)*W+x] : t;
+                const avg = (left + right + up + down) * 0.25;
+                t += (avg - t) * P.tempDiffusion;
+            }
+
+            // Heat source at bottom
+            if (y > heatStart) {
+                const vertI = (y - heatStart) / (H - heatStart);
+                const horizI = Math.max(0, 1 - Math.abs(x / W - 0.5) * 1.5);
+                t += P.heatRate * vertI * horizI * wax[i];
+            }
+
+            // Cooling at top
+            if (y < coolEnd) {
+                t -= P.coolRate * (1 - y / coolEnd) * wax[i];
+            }
+
+            // Ambient cooling (everywhere)
+            t -= P.ambientCool * wax[i];
+
+            // Non-wax cells tend toward ambient
+            if (wax[i] < 0.1) {
+                t *= 0.95; // Quickly cool empty space
+            }
+
+            temp[i] = Math.max(0, Math.min(1, t));
+        }
+    }
+}
+
+// ==================================================================================
+// RENDERING
+// ==================================================================================
+
+function render() {
+    ctx.fillStyle = '#0a0a12';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    const imgData = ctx.createImageData(W, H);
+    const px = imgData.data;
+
+    for (let i = 0; i < N; i++) {
+        const pi = i * 4;
+        const phi = wax[i];
+        const t = temp[i];
+
+        if (viewMode === 1) {
+            // Velocity view
+            const vmag = Math.sqrt(fluidUx[i]*fluidUx[i] + fluidUy[i]*fluidUy[i]) * 2000;
+            const up = Math.max(0, -fluidUy[i]) * 5000;
+            const dn = Math.max(0, fluidUy[i]) * 5000;
+            const brightness = phi > 0.1 ? 1 : 0.25;
+            px[pi]   = Math.min(255, up) * brightness;
+            px[pi+1] = Math.min(255, vmag * 0.3) * brightness;
+            px[pi+2] = Math.min(255, dn) * brightness;
+            px[pi+3] = 255;
+
+        } else if (viewMode === 2) {
+            // Temperature view
+            if (phi > 0.1) {
+                px[pi]   = t * 255 * phi;
+                px[pi+1] = (1-t) * 80 * phi;
+                px[pi+2] = (1-t) * 220 * phi;
+                px[pi+3] = 255;
+            } else {
+                px[pi] = 10; px[pi+1] = 10; px[pi+2] = 18; px[pi+3] = 255;
+            }
+
+        } else if (viewMode === 3) {
+            // Raw phase field (continuous)
+            px[pi]   = phi * 200;
+            px[pi+1] = phi * 100;
+            px[pi+2] = phi * 255;
+            px[pi+3] = 255;
+
+        } else {
+            // Default wax view
+            if (phi > 0.3) {
+                // Map temperature to warm color palette
+                const density = Math.min(1, phi * 1.2); // slight boost for partial cells
+                let r, g, b;
+
+                if (t < 0.3) {
+                    // Cool: deep purple
+                    const tf = t / 0.3;
+                    r = (50 + 110*tf) * density;
+                    g = (15 + 35*tf) * density;
+                    b = (110 - 30*tf) * density;
+                } else if (t < 0.6) {
+                    // Warm: orange-red
+                    const tf = (t - 0.3) / 0.3;
+                    r = (160 + 75*tf) * density;
+                    g = (50 + 90*tf) * density;
+                    b = (80 - 65*tf) * density;
+                } else {
+                    // Hot: bright yellow-orange
+                    const tf = (t - 0.6) / 0.4;
+                    r = (235 + 20*tf) * density;
+                    g = (140 + 115*tf) * density;
+                    b = (15 + 85*tf) * density;
+                }
+                px[pi] = r; px[pi+1] = g; px[pi+2] = b; px[pi+3] = 255;
+            } else {
+                // Background: very dark
+                px[pi] = 10; px[pi+1] = 10; px[pi+2] = 18; px[pi+3] = 255;
+            }
+        }
+    }
+
+    const tmp = document.createElement('canvas');
+    tmp.width = W; tmp.height = H;
+    tmp.getContext('2d').putImageData(imgData, 0, 0);
+    ctx.imageSmoothingEnabled = false;
+    ctx.drawImage(tmp, 0, 0, W * CELL_SIZE, H * CELL_SIZE);
+
+    // Heat indicator
+    ctx.fillStyle = 'rgba(255,80,0,0.5)';
+    ctx.fillRect(canvas.width * 0.25, canvas.height - 4, canvas.width * 0.5, 4);
+}
+
+function loop() {
+    if (!paused) {
+        for (let i = 0; i < ff; i++) tick();
+    }
+    render();
+
+    // Stats
+    let mass = 0, maxV = 0, avgTemp = 0, waxCells = 0;
+    for (let i = 0; i < N; i++) {
+        mass += wax[i];
+        const v = Math.sqrt(fluidUx[i]*fluidUx[i] + fluidUy[i]*fluidUy[i]);
+        if (v > maxV) maxV = v;
+        if (wax[i] > 0.5) {
+            avgTemp += temp[i];
+            waxCells++;
+        }
+    }
+    avgTemp = waxCells > 0 ? avgTemp / waxCells : 0;
+    const massDrift = ((mass - initialMass) / initialMass * 100).toFixed(2);
+
+    document.getElementById('stats').innerHTML =
+        `Frame: ${frame}<br>` +
+        `Mass: ${mass.toFixed(0)}/${initialMass.toFixed(0)} (${massDrift}%)<br>` +
+        `Grid: ${W}×${H} | Wax: ${waxCells}<br>` +
+        `MaxVel: ${maxV.toFixed(4)}<br>` +
+        `AvgTemp: ${avgTemp.toFixed(3)}`;
+
+    requestAnimationFrame(loop);
+}
+
+// ==================================================================================
+// UI
+// ==================================================================================
+
+function toggleUI() {
+    uiHidden = !uiHidden;
+    document.getElementById('ui').classList.toggle('hidden', uiHidden);
+}
+
+function bind(id, key, needsResize) {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.value = P[key];
+    el.onchange = () => { P[key] = parseFloat(el.value); if (needsResize) resize(); };
+}
+
+loadURLParams();
+bind('cellSize','cellSize',1); bind('waxHeight','waxHeight',1);
+bind('tau','tau'); bind('maxVelocity','maxVelocity');
+bind('buoyancy','buoyancy'); bind('gravity','gravity');
+bind('sigma','sigma'); bind('neutralTemp','neutralTemp');
+bind('interfaceWidth','interfaceWidth'); bind('sharpenRate','sharpenRate');
+bind('heatRate','heatRate'); bind('coolRate','coolRate');
+bind('ambientCool','ambientCool'); bind('tempDiffusion','tempDiffusion');
+bind('heatZoneY','heatZoneY'); bind('coolZoneY','coolZoneY');
+
+document.getElementById('hide').onclick = toggleUI;
+document.getElementById('ff').onclick = () => {
+    ff = ff===1?5:ff===5?20:1;
+    document.getElementById('ff').textContent = ff+'x';
+};
+document.getElementById('pp').onclick = () => {
+    paused = !paused;
+    document.getElementById('pp').textContent = paused ? '▶' : '||';
+};
+document.getElementById('reset').onclick = () => resize();
+document.getElementById('view').onclick = () => {
+    viewMode = (viewMode+1)%4;
+    document.getElementById('view').textContent = ['WAX','VEL','TEMP','PHI'][viewMode];
+};
+
+addEventListener('resize', resize);
+addEventListener('keydown', e => {
+    if (e.code==='Space') { paused=!paused; e.preventDefault(); }
+    if (e.code==='KeyR') resize();
+    if (e.code==='KeyH') toggleUI();
+    if (e.code==='KeyV') {
+        viewMode=(viewMode+1)%4;
+        document.getElementById('view').textContent=['WAX','VEL','TEMP','PHI'][viewMode];
+    }
+});
+
+resize();
+loop();
+</script>
+</body>
+</html>

@@ -12,6 +12,8 @@
         #ui div { margin: 2px 0; }
         #ui label { display: inline-block; width: 110px; }
         #ui input[type="range"] { width: 80px; vertical-align: middle; }
+        #ui input[type="number"] { width: 70px; vertical-align: middle; margin-left: 6px; background: #111; color: #fff; border: 1px solid #333; padding: 2px 4px; }
+        #ui .rec { color: #666; margin-left: 6px; }
         #ui .section { color: #888; margin-top: 8px; border-top: 1px solid #333; padding-top: 4px; }
         #controls { position: absolute; top: 10px; right: 10px; }
         #controls button { padding: 8px 14px; margin: 2px; background: #222; color: #fff; border: 1px solid #555; cursor: pointer; font: 12px monospace; }
@@ -28,6 +30,9 @@
         <div><label>heatSpread</label><input type="range" id="p_heatSpread" min="0.01" max="0.3" step="0.01"><span id="v_heatSpread"></span></div>
         <div><label>coolRate</label><input type="range" id="p_coolRate" min="0.001" max="0.02" step="0.001"><span id="v_coolRate"></span></div>
         <div><label>heatSourceWidth</label><input type="range" id="p_heatSourceWidth" min="0.1" max="1.0" step="0.1"><span id="v_heatSourceWidth"></span></div>
+        <div><label>radiantHeat</label><input type="range" id="p_radiantHeat" min="0" max="0.02" step="0.001"><span id="v_radiantHeat"></span></div>
+        <div><label>radiantCool</label><input type="range" id="p_radiantCool" min="0" max="0.02" step="0.001"><span id="v_radiantCool"></span></div>
+        <div><label>radiantExponent</label><input type="range" id="p_radiantExponent" min="1" max="8" step="0.5"><span id="v_radiantExponent"></span></div>
         <div class="section">Movement</div>
         <div><label>buoyancyScale</label><input type="range" id="p_buoyancyScale" min="0.01" max="0.5" step="0.01"><span id="v_buoyancyScale"></span></div>
         <div><label>velocityDamping</label><input type="range" id="p_velocityDamping" min="0.5" max="0.99" step="0.01"><span id="v_velocityDamping"></span></div>
@@ -36,11 +41,13 @@
         <div class="section">Boids Forces</div>
         <div><label>alignment</label><input type="range" id="p_alignment" min="0" max="0.9" step="0.05"><span id="v_alignment"></span></div>
         <div><label>cohesion</label><input type="range" id="p_cohesion" min="0" max="1.0" step="0.05"><span id="v_cohesion"></span></div>
+        <div><label>cohesionRadius</label><input type="range" id="p_cohesionRadius" min="1" max="6" step="1"><span id="v_cohesionRadius"></span></div>
         <div><label>surfaceTension</label><input type="range" id="p_surfaceTension" min="0" max="0.2" step="0.01"><span id="v_surfaceTension"></span></div>
         <div class="section">Brownian</div>
         <div><label>brownianStrength</label><input type="range" id="p_brownianStrength" min="0" max="0.2" step="0.01"><span id="v_brownianStrength"></span></div>
         <div><label>horizontalBias</label><input type="range" id="p_horizontalBias" min="0" max="1" step="0.1"><span id="v_horizontalBias"></span></div>
         <div class="section">Setup</div>
+        <div><label>cellSize</label><input type="range" id="p_cellSize" min="1" max="12" step="1"><span id="v_cellSize"></span></div>
         <div><label>initialWaxHeight</label><input type="range" id="p_initialWaxHeight" min="0.05" max="0.3" step="0.01"><span id="v_initialWaxHeight"></span></div>
     </div>
 </div>
@@ -63,7 +70,7 @@
 // - Temperature-dependent capacity: cold=8, neutral=7, hot=6
 // - Mass is PERFECTLY conserved
 
-const CELL = 4;
+let CELL = 4;
 
 const PARAMS = {
     // Heat
@@ -71,6 +78,9 @@ const PARAMS = {
     heatSpread: 0.12,
     coolRate: 0.005,
     heatSourceWidth: 0.5,
+    radiantHeat: 0.002,
+    radiantCool: 0.0015,
+    radiantExponent: 4,
 
     // Movement (user's preferred values)
     buoyancyScale: 0.3,
@@ -81,6 +91,7 @@ const PARAMS = {
     // Boids forces
     alignment: 0,
     cohesion: 0.5,
+    cohesionRadius: 2,
     surfaceTension: 0.03,
 
     // Brownian
@@ -88,6 +99,7 @@ const PARAMS = {
     horizontalBias: 0.7,
 
     // Setup
+    cellSize: 4,
     initialWaxHeight: 0.12,
 };
 
@@ -105,28 +117,91 @@ let initialTotalUnits = 0;
 
 const canvas = document.getElementById('canvas');
 const ctx = canvas.getContext('2d');
+const offCanvas = document.createElement('canvas');
+const offCtx = offCanvas.getContext('2d');
 
 function setupUI() {
     for (const key of Object.keys(PARAMS)) {
         const slider = document.getElementById('p_' + key);
         const display = document.getElementById('v_' + key);
-        if (slider && display) {
-            slider.value = PARAMS[key];
-            display.textContent = PARAMS[key];
-            slider.addEventListener('input', () => {
-                PARAMS[key] = parseFloat(slider.value);
-                display.textContent = PARAMS[key];
-                reset();
-            });
+        if (!slider || !display) continue;
+
+        // Create numeric input (unconstrained) next to the slider
+        let num = document.getElementById('n_' + key);
+        if (!num) {
+            num = document.createElement('input');
+            num.type = 'number';
+            num.id = 'n_' + key;
+            num.step = 'any';
+            slider.insertAdjacentElement('afterend', num);
         }
+
+        // Create a small recommended-range label based on the slider’s min/max
+        let rec = document.getElementById('r_' + key);
+        if (!rec) {
+            rec = document.createElement('span');
+            rec.id = 'r_' + key;
+            rec.className = 'rec';
+            slider.parentElement.appendChild(rec);
+        }
+        rec.textContent = `[${slider.min}..${slider.max}]`;
+
+        const setDisplay = (val) => {
+            display.textContent = String(val);
+            num.value = String(val);
+        };
+
+        const applyValue = (val) => {
+            if (!Number.isFinite(val)) return;
+            PARAMS[key] = val;
+            setDisplay(val);
+
+            // If the value is within the slider’s recommended range, sync the slider.
+            const sMin = parseFloat(slider.min);
+            const sMax = parseFloat(slider.max);
+            if (Number.isFinite(sMin) && Number.isFinite(sMax) && val >= sMin && val <= sMax) {
+                slider.value = String(val);
+            }
+
+            // Changing cell size requires a resize; everything else resets simulation.
+            if (key === 'cellSize') resize();
+            else reset();
+        };
+
+        // Init
+        slider.value = String(PARAMS[key]);
+        setDisplay(PARAMS[key]);
+
+        // Slider: update live readout while dragging, apply on release
+        slider.addEventListener('input', () => {
+            const v = parseFloat(slider.value);
+            if (Number.isFinite(v)) setDisplay(v);
+        });
+        slider.addEventListener('change', () => {
+            applyValue(parseFloat(slider.value));
+        });
+
+        // Numeric input: apply on change (allows extreme values)
+        num.addEventListener('change', () => {
+            applyValue(parseFloat(num.value));
+        });
     }
 }
 
 function resize() {
     canvas.width = innerWidth;
     canvas.height = innerHeight;
+
+    // CELL size is now user-tunable
+    CELL = Math.max(1, Math.floor(PARAMS.cellSize || 4));
+
     W = Math.floor(canvas.width / CELL);
     H = Math.floor(canvas.height / CELL);
+
+    // Offscreen buffer matches the logical grid
+    offCanvas.width = W;
+    offCanvas.height = H;
+
     reset();
 }
 
@@ -212,6 +287,20 @@ function tick() {
                 t -= PARAMS.coolRate * 2;
             }
 
+            // Radiant vertical gradient: gentle warming in the lower half, gentle cooling in the upper half.
+            // Designed to be near-zero around the midpoint and stronger toward the extremes.
+            const mid = (H - 1) * 0.5;
+            const exp = Math.max(1, PARAMS.radiantExponent || 1);
+            if (PARAMS.radiantHeat > 0 && y > mid) {
+                const denom = Math.max(1, (H - 1) - mid);
+                const f = Math.pow((y - mid) / denom, exp);
+                t += PARAMS.radiantHeat * f;
+            } else if (PARAMS.radiantCool > 0 && y < mid) {
+                const denom = Math.max(1, mid);
+                const f = Math.pow((mid - y) / denom, exp);
+                t -= PARAMS.radiantCool * f;
+            }
+
             // Heat equalization with wax neighbors
             let tempSum = 0, waxNeighbors = 0;
             for (let dy = -1; dy <= 1; dy++) {
@@ -286,7 +375,7 @@ function tick() {
         }
     }
 
-    // === PHASE 3: Buoyancy + Cohesion (5x5 neighborhood) ===
+    // === PHASE 3: Buoyancy + Cohesion (variable radius neighborhood) ===
     for (let y = 0; y < H; y++) {
         for (let x = 0; x < W; x++) {
             const i = y * W + x;
@@ -307,13 +396,14 @@ function tick() {
             let vy = velY[i] - buoyancy;  // Negative = up
             let vx = velX[i];
 
-            // 5x5 neighborhood for cohesion (24 neighbors for rounder blobs)
+            // Variable radius neighborhood for cohesion
+            const R = Math.max(1, Math.floor(PARAMS.cohesionRadius || 2));
             let vySum = 0, vxSum = 0;
             let centerOffsetY = 0, centerOffsetX = 0;
             let waxNeighbors = 0;
 
-            for (let dy = -2; dy <= 2; dy++) {
-                for (let dx = -2; dx <= 2; dx++) {
+            for (let dy = -R; dy <= R; dy++) {
+                for (let dx = -R; dx <= R; dx++) {
                     if (dx === 0 && dy === 0) continue;
                     const nx = x + dx, ny = y + dy;
                     if (nx < 0 || nx >= W || ny < 0 || ny >= H) continue;
@@ -508,13 +598,10 @@ function render() {
         }
     }
 
-    const tempCanvas = document.createElement('canvas');
-    tempCanvas.width = W;
-    tempCanvas.height = H;
-    tempCanvas.getContext('2d').putImageData(imageData, 0, 0);
+    offCtx.putImageData(imageData, 0, 0);
 
     ctx.imageSmoothingEnabled = false;
-    ctx.drawImage(tempCanvas, 0, 0, canvas.width, canvas.height);
+    ctx.drawImage(offCanvas, 0, 0, canvas.width, canvas.height);
 
     // Heat source indicator
     if (heatOn) {

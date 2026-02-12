@@ -1,0 +1,526 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Lava Lamp - Pure CPM v1</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        html, body { height: 100%; overflow: hidden; background: #0a0a12; }
+        #canvas { display: block; image-rendering: pixelated; }
+        #ui { position: absolute; top: 10px; left: 10px; color: #fff; font: 11px monospace; background: rgba(0,0,0,0.8); padding: 10px; border-radius: 4px; transition: opacity 0.2s; max-height: 90vh; overflow-y: auto; }
+        #ui.hidden { opacity: 0; pointer-events: none; }
+        #ui div { margin: 2px 0; }
+        #ui label { display: inline-block; width: 130px; }
+        #ui input { width: 55px; background: #333; color: #fff; border: 1px solid #555; padding: 2px 4px; }
+        #controls { position: absolute; top: 10px; right: 10px; }
+        #controls button { padding: 8px 14px; margin: 2px; background: #222; color: #fff; border: 1px solid #555; cursor: pointer; font: 12px monospace; }
+        .section { color: #888; margin-top: 6px; border-top: 1px solid #444; padding-top: 4px; font-size: 10px; }
+    </style>
+</head>
+<body>
+<canvas id="canvas"></canvas>
+<div id="ui">
+    <div><b>Pure CPM v1</b></div>
+    <div style="color:#666;font-size:9px;">No LBM - energy only (H to hide)</div>
+
+    <div class="section">GRID</div>
+    <div><label>Cell size</label><input type="number" id="cellSize" value="4" step="1"></div>
+    <div><label>Wax height</label><input type="number" id="waxHeight" value="0.25" step="0.05"></div>
+    <div><label>Max units/cell</label><input type="number" id="maxUnits" value="8" step="1"></div>
+
+    <div class="section">ENERGY</div>
+    <div><label>Adhesion (J)</label><input type="number" id="adhesionJ" value="1.5" step="0.1"></div>
+    <div><label>Gravity (g)</label><input type="number" id="gravityG" value="0.08" step="0.01"></div>
+    <div><label>Noise temp</label><input type="number" id="noiseTemp" value="0.8" step="0.1"></div>
+    <div><label>Neutral temp</label><input type="number" id="neutralTemp" value="0.5" step="0.05"></div>
+
+    <div class="section">HEAT</div>
+    <div><label>Heat rate</label><input type="number" id="heatRate" value="0.008" step="0.001"></div>
+    <div><label>Cool rate</label><input type="number" id="coolRate" value="0.004" step="0.001"></div>
+    <div><label>Ambient cool</label><input type="number" id="ambientCool" value="0.0003" step="0.0001"></div>
+    <div><label>Diffusion</label><input type="number" id="tempDiffusion" value="0.1" step="0.01"></div>
+    <div><label>Heat zone Y</label><input type="number" id="heatZoneY" value="0.88" step="0.02"></div>
+    <div><label>Cool zone Y</label><input type="number" id="coolZoneY" value="0.12" step="0.02"></div>
+
+    <div class="section">DYNAMICS</div>
+    <div><label>Attempts/cell</label><input type="number" id="attemptsPerCell" value="2" step="1"></div>
+
+    <div id="stats" style="margin-top:8px;color:#aaa;font-size:10px;"></div>
+</div>
+<div id="controls">
+    <button id="hide">UI</button>
+    <button id="ff">1x</button>
+    <button id="pp">||</button>
+    <button id="reset">Reset</button>
+    <button id="view">WAX</button>
+</div>
+
+<script>
+// ============================================
+// Pure CPM v1 - No LBM, Energy-Based Only
+// ============================================
+//
+// A clean Cellular Potts Model without LBM velocity fields.
+// Movement is driven entirely by energy minimization via Metropolis.
+//
+// ENERGY = H_adhesion + H_gravity
+//
+// H_adhesion = J × (empty 8-neighbors)
+//   - Penalizes surface area → creates surface tension
+//
+// H_gravity = g × y × (T - neutralTemp)
+//   - y increases downward (y=0 is top)
+//   - Hot (T > neutral): positive coefficient
+//     Moving DOWN (increasing y) INCREASES energy → prefers UP
+//   - Cold (T < neutral): negative coefficient
+//     Moving DOWN (increasing y) DECREASES energy → prefers DOWN
+//
+// So: hot rises, cold sinks. Simple temperature-based buoyancy.
+
+let CELL_SIZE = 4;
+
+const N8X = [1, 1, 0, -1, -1, -1, 0, 1];
+const N8Y = [0, 1, 1, 1, 0, -1, -1, -1];
+
+const P = {
+    cellSize: 4,
+    waxHeight: 0.25,
+    maxUnits: 8,
+
+    // Energy
+    adhesionJ: 1.5,
+    gravityG: 0.08,
+    noiseTemp: 0.8,
+    neutralTemp: 0.5,
+
+    // Heat
+    heatRate: 0.008,
+    coolRate: 0.004,
+    ambientCool: 0.0003,
+    tempDiffusion: 0.1,
+    heatZoneY: 0.88,
+    coolZoneY: 0.12,
+
+    // Dynamics
+    attemptsPerCell: 2,
+};
+
+function loadURLParams() {
+    const params = new URLSearchParams(window.location.search);
+    for (const [key, value] of params) {
+        if (P.hasOwnProperty(key)) {
+            P[key] = parseFloat(value);
+            const input = document.getElementById(key);
+            if (input) input.value = P[key];
+        }
+    }
+}
+
+let W, H, N;
+let units, temp, newTemp;
+let frame = 0, paused = false, ff = 1, viewMode = 0;
+let initialMass = 0;
+let uiHidden = false;
+
+const canvas = document.getElementById('canvas');
+const ctx = canvas.getContext('2d');
+
+function resize() {
+    canvas.width = innerWidth;
+    canvas.height = innerHeight;
+    CELL_SIZE = P.cellSize;
+    W = Math.floor(canvas.width / CELL_SIZE);
+    H = Math.floor(canvas.height / CELL_SIZE);
+    N = W * H;
+    init();
+}
+
+function init() {
+    units = new Uint8Array(N);
+    temp = new Float32Array(N);
+    newTemp = new Float32Array(N);
+
+    const waxTop = H - Math.floor(H * P.waxHeight);
+    initialMass = 0;
+
+    for (let y = 0; y < H; y++) {
+        for (let x = 0; x < W; x++) {
+            const i = y * W + x;
+            const noise = Math.sin(x * 0.12) * 4 + Math.random() * 3;
+
+            if (y >= waxTop + noise) {
+                units[i] = P.maxUnits;
+                temp[i] = 0.35 + Math.random() * 0.1;
+                initialMass += P.maxUnits;
+            }
+        }
+    }
+    frame = 0;
+}
+
+function wrapX(x) { return (x + W) % W; }
+
+// Count empty 8-neighbors
+function countEmptyNeighbors(x, y) {
+    let count = 0;
+    for (let k = 0; k < 8; k++) {
+        const nx = wrapX(x + N8X[k]);
+        const ny = y + N8Y[k];
+        if (ny < 0 || ny >= H || units[ny * W + nx] === 0) count++;
+    }
+    return count;
+}
+
+// Check if transfer would create isolated unit
+function wouldCreateIsolation(srcX, srcY, srcUnits, destX, destY) {
+    const destI = destY * W + destX;
+    if (units[destI] > 0) return false;
+
+    const srcI = srcY * W + srcX;
+    for (let k = 0; k < 8; k++) {
+        const nx = wrapX(destX + N8X[k]);
+        const ny = destY + N8Y[k];
+        if (ny < 0 || ny >= H) continue;
+        const ni = ny * W + nx;
+        if (ni === srcI) {
+            if (srcUnits > 1) return false;
+        } else if (units[ni] > 0) {
+            return false;
+        }
+    }
+    return true;
+}
+
+// Calculate total energy change for transferring 1 unit
+function calcEnergyDelta(srcX, srcY, destX, destY) {
+    const srcI = srcY * W + srcX;
+    const destI = destY * W + destX;
+    const srcUnits = units[srcI];
+    const destUnits = units[destI];
+    const srcTemp = temp[srcI];
+
+    // Block isolation
+    if (wouldCreateIsolation(srcX, srcY, srcUnits, destX, destY)) {
+        return Infinity;
+    }
+
+    // === ADHESION ENERGY ===
+    const srcAdhBefore = P.adhesionJ * countEmptyNeighbors(srcX, srcY);
+    const destAdhBefore = destUnits > 0 ? P.adhesionJ * countEmptyNeighbors(destX, destY) : 0;
+
+    let srcAdhAfter = 0;
+    if (srcUnits > 1) {
+        let srcEmpty = countEmptyNeighbors(srcX, srcY);
+        if (destUnits === 0) {
+            // dest becoming wax means one less empty neighbor for src
+            for (let k = 0; k < 8; k++) {
+                if (wrapX(srcX + N8X[k]) === destX && srcY + N8Y[k] === destY) {
+                    srcEmpty--;
+                    break;
+                }
+            }
+        }
+        srcAdhAfter = P.adhesionJ * Math.max(0, srcEmpty);
+    }
+
+    let destAdhAfter = 0;
+    if (destUnits === 0) {
+        // Count dest's empty neighbors after it becomes wax
+        let destEmpty = 0;
+        for (let k = 0; k < 8; k++) {
+            const nx = wrapX(destX + N8X[k]);
+            const ny = destY + N8Y[k];
+            if (ny < 0 || ny >= H) {
+                destEmpty++;
+            } else {
+                const ni = ny * W + nx;
+                if (ni === srcI) {
+                    if (srcUnits === 1) destEmpty++;
+                } else if (units[ni] === 0) {
+                    destEmpty++;
+                }
+            }
+        }
+        destAdhAfter = P.adhesionJ * destEmpty;
+    } else {
+        let destEmpty = countEmptyNeighbors(destX, destY);
+        if (srcUnits === 1) {
+            for (let k = 0; k < 8; k++) {
+                if (wrapX(destX + N8X[k]) === srcX && destY + N8Y[k] === srcY) {
+                    destEmpty++;
+                    break;
+                }
+            }
+        }
+        destAdhAfter = P.adhesionJ * destEmpty;
+    }
+
+    const deltaAdhesion = (srcAdhAfter + destAdhAfter) - (srcAdhBefore + destAdhBefore);
+
+    // === GRAVITY ENERGY ===
+    // E = g × y × (T - neutral)
+    // Hot (T > neutral): moving up (decreasing y) DECREASES energy → preferred
+    // Cold (T < neutral): moving down (increasing y) DECREASES energy → preferred
+    const buoyancyCoeff = srcTemp - P.neutralTemp;
+    const gravityBefore = P.gravityG * srcY * buoyancyCoeff;
+    const gravityAfter = P.gravityG * destY * buoyancyCoeff;
+    const deltaGravity = gravityAfter - gravityBefore;
+
+    return deltaAdhesion + deltaGravity;
+}
+
+function tick() {
+    frame++;
+
+    // === STEP 1: Temperature evolution ===
+    const heatStart = H * P.heatZoneY;
+    const coolEnd = H * P.coolZoneY;
+
+    for (let y = 0; y < H; y++) {
+        for (let x = 0; x < W; x++) {
+            const i = y * W + x;
+            if (units[i] === 0) { newTemp[i] = 0; continue; }
+
+            let t = temp[i];
+
+            // Diffusion
+            let sum = t * units[i], total = units[i];
+            for (let k = 0; k < 8; k++) {
+                const nx = wrapX(x + N8X[k]);
+                const ny = y + N8Y[k];
+                if (ny >= 0 && ny < H && units[ny * W + nx] > 0) {
+                    const ni = ny * W + nx;
+                    sum += temp[ni] * units[ni];
+                    total += units[ni];
+                }
+            }
+            t += (sum / total - t) * P.tempDiffusion;
+
+            // Bottom heating
+            if (y > heatStart) {
+                const vert = (y - heatStart) / (H - heatStart);
+                const horiz = 1 - Math.abs(x / W - 0.5) * 1.5;
+                if (horiz > 0) t += P.heatRate * vert * horiz;
+            }
+
+            // Top cooling
+            if (y < coolEnd) {
+                t -= P.coolRate * (1 - y / coolEnd);
+            }
+
+            t -= P.ambientCool;
+            newTemp[i] = Math.max(0, Math.min(1.0, t));
+        }
+    }
+    [temp, newTemp] = [newTemp, temp];
+
+    // === STEP 2: Monte Carlo unit transfers ===
+
+    // Build list of wax cells
+    const waxCells = [];
+    for (let i = 0; i < N; i++) {
+        if (units[i] > 0) waxCells.push(i);
+    }
+
+    const numAttempts = waxCells.length * P.attemptsPerCell;
+
+    // 4 cardinal directions
+    const dirs = [
+        {dx: 0, dy: -1},
+        {dx: 0, dy: 1},
+        {dx: -1, dy: 0},
+        {dx: 1, dy: 0},
+    ];
+
+    for (let attempt = 0; attempt < numAttempts; attempt++) {
+        // Pick random source cell
+        const srcI = waxCells[Math.floor(Math.random() * waxCells.length)];
+        if (units[srcI] === 0) continue;
+
+        const srcX = srcI % W;
+        const srcY = Math.floor(srcI / W);
+
+        // Pick random direction
+        const dir = dirs[Math.floor(Math.random() * dirs.length)];
+        const destX = wrapX(srcX + dir.dx);
+        const destY = srcY + dir.dy;
+        if (destY < 0 || destY >= H) continue;
+
+        const destI = destY * W + destX;
+        if (units[destI] >= P.maxUnits) continue;
+
+        // Calculate energy change
+        const deltaH = calcEnergyDelta(srcX, srcY, destX, destY);
+        if (!isFinite(deltaH)) continue;
+
+        // Metropolis acceptance
+        let accept;
+        if (deltaH <= 0) {
+            accept = true;
+        } else {
+            accept = Math.random() < Math.exp(-deltaH / P.noiseTemp);
+        }
+
+        if (accept) {
+            // Temperature blending
+            if (units[destI] === 0) {
+                temp[destI] = temp[srcI];
+            } else {
+                const newTotal = units[destI] + 1;
+                temp[destI] = (temp[destI] * units[destI] + temp[srcI]) / newTotal;
+            }
+
+            units[srcI]--;
+            units[destI]++;
+        }
+    }
+}
+
+function render() {
+    ctx.fillStyle = '#0a0a12';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    const imgData = ctx.createImageData(W, H);
+    const px = imgData.data;
+
+    for (let i = 0; i < N; i++) {
+        const pi = i * 4;
+
+        if (viewMode === 1) {
+            // Temperature view
+            if (units[i] > 0) {
+                const t = temp[i];
+                px[pi] = t * 255;
+                px[pi+1] = (1-t) * 80;
+                px[pi+2] = (1-t) * 200;
+                px[pi+3] = 255;
+            } else {
+                px[pi] = 10; px[pi+1] = 10; px[pi+2] = 18; px[pi+3] = 255;
+            }
+        } else if (units[i] > 0) {
+            // Wax view
+            const t = temp[i];
+            const b = 0.4 + 0.6 * units[i] / P.maxUnits;
+
+            let r, g, bl;
+            if (t < 0.35) {
+                const f = t / 0.35;
+                r = (50 + 90*f) * b;
+                g = (15 + 35*f) * b;
+                bl = (130 - 30*f) * b;
+            } else if (t < 0.65) {
+                const f = (t - 0.35) / 0.3;
+                r = (140 + 80*f) * b;
+                g = (50 + 70*f) * b;
+                bl = (100 - 70*f) * b;
+            } else {
+                const f = (t - 0.65) / 0.35;
+                r = (220 + 35*f) * b;
+                g = (120 + 130*f) * b;
+                bl = (30 + 60*f) * b;
+            }
+            px[pi] = r; px[pi+1] = g; px[pi+2] = bl; px[pi+3] = 255;
+        } else {
+            px[pi] = 10; px[pi+1] = 10; px[pi+2] = 18; px[pi+3] = 255;
+        }
+    }
+
+    const tmp = document.createElement('canvas');
+    tmp.width = W; tmp.height = H;
+    tmp.getContext('2d').putImageData(imgData, 0, 0);
+    ctx.imageSmoothingEnabled = false;
+    ctx.drawImage(tmp, 0, 0, W * CELL_SIZE, H * CELL_SIZE);
+
+    ctx.fillStyle = 'rgba(255,80,0,0.5)';
+    ctx.fillRect(canvas.width * 0.3, canvas.height - 4, canvas.width * 0.4, 4);
+}
+
+function loop() {
+    if (!paused) {
+        for (let i = 0; i < ff; i++) tick();
+    }
+    render();
+
+    let mass = 0, avgTemp = 0, waxCells = 0;
+    for (let i = 0; i < N; i++) {
+        mass += units[i];
+        if (units[i] > 0) {
+            avgTemp += temp[i] * units[i];
+            waxCells++;
+        }
+    }
+    avgTemp = mass > 0 ? avgTemp / mass : 0;
+
+    document.getElementById('stats').innerHTML =
+        `Frame: ${frame}<br>` +
+        `Mass: ${mass}/${initialMass} ${mass === initialMass ? '✓' : '⚠'}<br>` +
+        `Cells: ${waxCells}<br>` +
+        `AvgTemp: ${avgTemp.toFixed(2)}`;
+
+    requestAnimationFrame(loop);
+}
+
+function toggleUI() {
+    uiHidden = !uiHidden;
+    document.getElementById('ui').classList.toggle('hidden', uiHidden);
+}
+
+function bind(id, key, needsResize = false) {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.value = P[key];
+    el.onchange = () => {
+        P[key] = parseFloat(el.value);
+        if (needsResize) resize();
+    };
+}
+
+loadURLParams();
+
+bind('cellSize', 'cellSize', true);
+bind('waxHeight', 'waxHeight', true);
+bind('maxUnits', 'maxUnits', true);
+bind('adhesionJ', 'adhesionJ');
+bind('gravityG', 'gravityG');
+bind('noiseTemp', 'noiseTemp');
+bind('neutralTemp', 'neutralTemp');
+bind('heatRate', 'heatRate');
+bind('coolRate', 'coolRate');
+bind('ambientCool', 'ambientCool');
+bind('tempDiffusion', 'tempDiffusion');
+bind('heatZoneY', 'heatZoneY');
+bind('coolZoneY', 'coolZoneY');
+bind('attemptsPerCell', 'attemptsPerCell');
+
+document.getElementById('hide').onclick = toggleUI;
+document.getElementById('ff').onclick = () => {
+    ff = ff === 1 ? 5 : ff === 5 ? 20 : 1;
+    document.getElementById('ff').textContent = ff + 'x';
+};
+document.getElementById('pp').onclick = () => {
+    paused = !paused;
+    document.getElementById('pp').textContent = paused ? '▶' : '||';
+};
+document.getElementById('reset').onclick = () => resize();
+document.getElementById('view').onclick = () => {
+    viewMode = (viewMode + 1) % 2;
+    document.getElementById('view').textContent = ['WAX', 'TEMP'][viewMode];
+};
+
+addEventListener('resize', resize);
+addEventListener('keydown', e => {
+    if (e.code === 'Space') { paused = !paused; e.preventDefault(); }
+    if (e.code === 'KeyR') resize();
+    if (e.code === 'KeyH') toggleUI();
+    if (e.code === 'KeyV') {
+        viewMode = (viewMode + 1) % 2;
+        document.getElementById('view').textContent = ['WAX', 'TEMP'][viewMode];
+    }
+});
+
+resize();
+loop();
+</script>
+</body>
+</html>
