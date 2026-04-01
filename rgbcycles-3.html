@@ -1,0 +1,1531 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>RGBcycles v3</title>
+  <style>
+    * {
+      box-sizing: border-box;
+    }
+    body {
+      margin: 0;
+      padding: 20px;
+      background: #111;
+      color: #eee;
+      font-family: monospace;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      min-height: 100vh;
+    }
+    h2 {
+      margin: 0 0 10px 0;
+    }
+    #canvas-container {
+      border: 2px solid #444;
+      margin: 10px 0;
+      line-height: 0; /* Remove extra space below canvas */
+    }
+    #controls {
+      display: flex;
+      gap: 20px;
+      flex-wrap: wrap;
+      justify-content: center;
+      max-width: 800px;
+    }
+    #stats {
+      margin-top: 10px;
+      text-align: center;
+    }
+    .key {
+      background: #333;
+      padding: 2px 6px;
+      border-radius: 3px;
+    }
+    #tuning-panel input[type="number"] {
+      background: #333;
+      color: #fff;
+      border: 1px solid #555;
+      padding: 3px 6px;
+      border-radius: 3px;
+    }
+    #tuning-panel input[type="checkbox"] {
+      margin-right: 8px;
+    }
+    #tuning-panel button {
+      background: #444;
+      color: #fff;
+      border: 1px solid #666;
+      cursor: pointer;
+      border-radius: 3px;
+    }
+    #tuning-panel button:hover {
+      background: #555;
+    }
+    #tuning-panel fieldset {
+      margin: 0;
+    }
+    #tuning-panel label {
+      color: #ccc;
+    }
+  </style>
+</head>
+<body>
+  <h2>RGBcycles v3 - Field-Based Cellular Automaton</h2>
+  <div id="canvas-container"></div>
+  <div id="controls">
+    <span><span class="key">Space</span> Step (when paused)</span>
+    <span><span class="key">P</span> Pause/Play</span>
+    <span><span class="key">R</span> Reset</span>
+    <span><span class="key">C</span> Conservation check</span>
+    <span><span class="key">S</span> Reset (same seed)</span>
+  </div>
+  <div id="stats">Loading...</div>
+  <div style="margin-top: 10px; font-size: 12px; color: #888;">
+    Tip: Set seed via URL: <code>?seed=12345</code>
+  </div>
+  <div id="legend" style="margin-top: 15px; display: flex; gap: 15px; flex-wrap: wrap; justify-content: center; font-size: 12px;">
+    <span><span style="background:#000; color:#fff; padding:2px 6px;">0</span> Empty</span>
+    <span><span style="background:#00f; color:#fff; padding:2px 6px;">1</span> Water (B)</span>
+    <span><span style="background:#0f0; color:#000; padding:2px 6px;">2</span> Fuel (G)</span>
+    <span><span style="background:#0ff; color:#000; padding:2px 6px;">3</span> Freeze (G+B)</span>
+    <span><span style="background:#f00; color:#fff; padding:2px 6px;">4</span> Heat (R)</span>
+    <span><span style="background:#f0f; color:#fff; padding:2px 6px;">5</span> Boil (R+B)</span>
+    <span><span style="background:#ff0; color:#000; padding:2px 6px;">6</span> Burn (R+G)</span>
+    <span><span style="background:#fff; color:#000; padding:2px 6px;">7</span> Life (R+G+B)</span>
+  </div>
+
+  <!-- Tuning Panel -->
+  <details id="tuning-panel" style="margin-top: 20px; width: 100%; max-width: 900px;">
+    <summary style="cursor: pointer; font-size: 14px; padding: 8px; background: #222; border-radius: 4px;">
+      Tuning Panel (click to expand)
+    </summary>
+    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 15px; padding: 15px; background: #1a1a1a; border-radius: 0 0 4px 4px;">
+
+      <!-- Grid Settings -->
+      <fieldset style="border: 1px solid #444; padding: 10px; border-radius: 4px;">
+        <legend style="color: #aaa;">Grid Settings</legend>
+        <label style="display: block; margin: 5px 0;">
+          Columns: <input type="number" id="cfg-cols" min="4" max="256" style="width: 60px;">
+        </label>
+        <label style="display: block; margin: 5px 0;">
+          Rows: <input type="number" id="cfg-rows" min="4" max="256" style="width: 60px;">
+        </label>
+        <label style="display: block; margin: 5px 0;">
+          Block Size: <input type="number" id="cfg-blocksize" min="1" max="32" style="width: 60px;">
+        </label>
+        <label style="display: block; margin: 5px 0;">
+          Tick Interval (ms): <input type="number" id="cfg-tickinterval" min="10" max="2000" style="width: 60px;">
+        </label>
+        <div style="font-size: 11px; color: #666; margin-top: 5px;">Cell size auto-calculated from window</div>
+        <button id="btn-apply-grid" style="margin-top: 8px; padding: 4px 12px;">Apply Grid (resets sim)</button>
+      </fieldset>
+
+      <!-- BURN Movement -->
+      <fieldset style="border: 1px solid #ff0; padding: 10px; border-radius: 4px;">
+        <legend style="color: #ff0;">BURN Movement (R+G)</legend>
+        <label style="display: block; margin: 5px 0;">
+          Up %: <input type="number" id="cfg-burn-up" min="0" max="100" style="width: 50px;">
+        </label>
+        <label style="display: block; margin: 5px 0;">
+          Down %: <input type="number" id="cfg-burn-down" min="0" max="100" style="width: 50px;">
+        </label>
+        <label style="display: block; margin: 5px 0;">
+          Left %: <input type="number" id="cfg-burn-left" min="0" max="100" style="width: 50px;">
+        </label>
+        <label style="display: block; margin: 5px 0;">
+          Right %: <input type="number" id="cfg-burn-right" min="0" max="100" style="width: 50px;">
+        </label>
+        <div id="burn-sum" style="font-size: 11px; color: #888; margin-top: 5px;"></div>
+      </fieldset>
+
+      <!-- BOIL Movement -->
+      <fieldset style="border: 1px solid #f0f; padding: 10px; border-radius: 4px;">
+        <legend style="color: #f0f;">BOIL Movement (R+B)</legend>
+        <label style="display: block; margin: 5px 0;">
+          Up %: <input type="number" id="cfg-boil-up" min="0" max="100" style="width: 50px;">
+        </label>
+        <label style="display: block; margin: 5px 0;">
+          Down %: <input type="number" id="cfg-boil-down" min="0" max="100" style="width: 50px;">
+        </label>
+        <label style="display: block; margin: 5px 0;">
+          Left %: <input type="number" id="cfg-boil-left" min="0" max="100" style="width: 50px;">
+        </label>
+        <label style="display: block; margin: 5px 0;">
+          Right %: <input type="number" id="cfg-boil-right" min="0" max="100" style="width: 50px;">
+        </label>
+        <div id="boil-sum" style="font-size: 11px; color: #888; margin-top: 5px;"></div>
+      </fieldset>
+
+      <!-- Decoupling Probabilities -->
+      <fieldset style="border: 1px solid #888; padding: 10px; border-radius: 4px;">
+        <legend style="color: #aaa;">Decoupling (per tick)</legend>
+        <label style="display: block; margin: 5px 0;">
+          <span style="color: #ff0;">BURN</span> (1/n): <input type="number" id="cfg-decouple-burn" min="1" max="10000" style="width: 60px;">
+        </label>
+        <label style="display: block; margin: 5px 0;">
+          <span style="color: #f0f;">BOIL</span> (1/n): <input type="number" id="cfg-decouple-boil" min="1" max="10000" style="width: 60px;">
+        </label>
+        <label style="display: block; margin: 5px 0;">
+          <span style="color: #0ff;">FREEZE</span> (1/n): <input type="number" id="cfg-decouple-freeze" min="1" max="10000" style="width: 60px;">
+        </label>
+        <label style="display: block; margin: 5px 0;">
+          <span style="color: #fff;">LIFE death</span> (1/n): <input type="number" id="cfg-decouple-life" min="1" max="10000" style="width: 60px;">
+        </label>
+        <div style="font-size: 11px; color: #666; margin-top: 5px;">Lower = more frequent. LIFE death spreads to neighbors.</div>
+      </fieldset>
+
+      <!-- Transmutation Probabilities -->
+      <fieldset style="border: 1px solid #888; padding: 10px; border-radius: 4px;">
+        <legend style="color: #aaa;">Transmutation (per tick)</legend>
+        <label style="display: block; margin: 5px 0;">
+          <span style="color: #ff0;">BURN</span> G->R (1/n): <input type="number" id="cfg-transmute-burn" min="1" max="1000" style="width: 60px;">
+        </label>
+        <label style="display: block; margin: 5px 0;">
+          <span style="color: #f0f;">BOIL</span> R->B (1/n): <input type="number" id="cfg-transmute-boil" min="1" max="1000" style="width: 60px;">
+        </label>
+        <label style="display: block; margin: 5px 0;">
+          <span style="color: #0ff;">FREEZE</span> B->G (1/n): <input type="number" id="cfg-transmute-freeze" min="1" max="1000" style="width: 60px;">
+        </label>
+        <div style="font-size: 11px; color: #666; margin-top: 5px;">Lower = more frequent</div>
+      </fieldset>
+
+      <!-- Boundary Settings -->
+      <fieldset style="border: 1px solid #444; padding: 10px; border-radius: 4px;">
+        <legend style="color: #aaa;">Boundaries</legend>
+        <label style="display: block; margin: 5px 0;">
+          <input type="checkbox" id="cfg-wrap-x"> Wrap Horizontal
+        </label>
+        <label style="display: block; margin: 5px 0;">
+          <input type="checkbox" id="cfg-wrap-y"> Wrap Vertical
+        </label>
+        <label style="display: block; margin: 5px 0;">
+          <input type="checkbox" id="cfg-condense-top"> R->B at Top Row
+        </label>
+      </fieldset>
+
+    </div>
+  </details>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pixi.js/7.2.4/pixi.min.js"></script>
+  <script>
+// ============================================================================
+// RGBcycles v3
+// ============================================================================
+// Changes from v2:
+// - 64x64 grid with 8x8 blocks (was 16x16 with 2x2)
+// - Dynamic cell size calculated from window
+// - LIFE has 1/256 spontaneous death chance that spreads to adjacent LIFE
+// ============================================================================
+
+console.log("RGBcycles v3: Field-based CA with R-G-B transmutation cycle");
+
+// ============================================================================
+// SECTION 1: CONFIGURATION
+// ============================================================================
+
+const CONFIG = {
+  // Grid dimensions (now 64x64 default)
+  COLS: 64,
+  ROWS: 64,
+  BLOCK_SIZE: 8,  // Size of initial state blocks
+  CELL_SIZE: 8,   // Will be recalculated dynamically
+
+  // Random seed (null = random each time, or set via URL ?seed=1234)
+  SEED: null,
+
+  // Tick rate (ms between ticks when running)
+  TICK_INTERVAL: 50,
+
+  // Movement biases (must sum to 1.0 for each state)
+  MOVE: {
+    // BURN (R+G): flames rise
+    BURN_UP: 0.40,
+    BURN_DOWN: 0.20,
+    BURN_LEFT: 0.20,
+    BURN_RIGHT: 0.20,
+
+    // BOIL (R+B): steam, more horizontal/chaotic
+    BOIL_UP: 0.30,
+    BOIL_DOWN: 0.20,
+    BOIL_LEFT: 0.25,
+    BOIL_RIGHT: 0.25,
+
+    // FREEZE (G+B): falls straight down, slight lateral
+    FREEZE_UP: 0.05,
+    FREEZE_DOWN: 0.70,
+    FREEZE_LEFT: 0.125,
+    FREEZE_RIGHT: 0.125,
+  },
+
+  // Decoupling probabilities (per tick)
+  DECOUPLE: {
+    BURN: 1/8,     // 12.5% - fire goes out relatively often
+    BOIL: 1/16,    // 6.25% - steam is more stable
+    FREEZE: 1/32,  // 3.125% - ice/wet matter is very stable
+    LIFE: 1/256,   // ~0.4% - LIFE can spontaneously die, spreads to neighbors
+  },
+
+  // Transmutation probabilities (per tick)
+  TRANSMUTE: {
+    BURN: 1/64,    // G->R: fire consumes fuel, spreads
+    BOIL: 1/128,   // R->B: steam condenses
+    FREEZE: 1/256, // B->G: wet biomass grows
+  },
+
+  // Boundary wrapping
+  WRAP_X: true,   // Horizontal wrapping
+  WRAP_Y: false,  // Vertical: closed (no wrap)
+
+  // R at top row always condenses to B
+  CONDENSE_AT_TOP: true,
+};
+
+// Calculate optimal cell size based on window
+function calculateCellSize() {
+  // Available space (accounting for UI elements)
+  const headerHeight = 50;   // h2 title
+  const controlsHeight = 40; // controls row
+  const statsHeight = 30;    // stats row
+  const legendHeight = 40;   // legend row
+  const padding = 60;        // body padding + margins
+  const tuningBuffer = 20;   // extra buffer
+
+  const availableWidth = window.innerWidth - padding;
+  const availableHeight = window.innerHeight - headerHeight - controlsHeight - statsHeight - legendHeight - padding - tuningBuffer;
+
+  // Calculate cell size to fit grid in available space
+  const cellWidth = Math.floor(availableWidth / CONFIG.COLS);
+  const cellHeight = Math.floor(availableHeight / CONFIG.ROWS);
+
+  // Use the smaller of the two to ensure it fits, minimum 2px
+  return Math.max(2, Math.min(cellWidth, cellHeight));
+}
+
+// ============================================================================
+// SECTION 2: STATE AND FIELD SETUP
+// ============================================================================
+
+let N = CONFIG.COLS * CONFIG.ROWS;
+
+// Direction constants
+const DIR = { N: 0, E: 1, S: 2, W: 3 };
+const DIR_NAME = ['N', 'E', 'S', 'W'];
+
+// Cardinal neighbor offsets (will be computed)
+let neighborTable; // Int32Array(N * 4): for each cell, [N, E, S, W] neighbor indices (-1 if none)
+
+// Field arrays - current state
+let R = new Uint8Array(N);  // 0 or 1 (heat)
+let G = new Uint8Array(N);  // 0 = none, 4-7 = exists with heading (bits: 1xx where xx = heading)
+let B = new Uint8Array(N);  // 0 = none, 1 = water+left, 2 = water+right
+
+// Field arrays - next state (double buffering)
+let R_next = new Uint8Array(N);
+let G_next = new Uint8Array(N);
+let B_next = new Uint8Array(N);
+
+// Claim arrays - track which cells are claimed this tick
+let R_claimed = new Uint8Array(N);
+let G_claimed = new Uint8Array(N);
+let B_claimed = new Uint8Array(N);
+
+// Skip-transmute arrays - cells where decoupled particles landed this tick
+let R_justDecoupled = new Uint8Array(N);
+let G_justDecoupled = new Uint8Array(N);
+let B_justDecoupled = new Uint8Array(N);
+
+// LIFE death tracking (two arrays for tick-boundary persistence)
+let lifeDiedHere_current = new Uint8Array(N);  // Deaths happening this tick
+let lifeDiedHere_previous = new Uint8Array(N); // Deaths from last tick (for spreading)
+
+// Processing order (shuffled each tick)
+let processingOrder = new Uint32Array(N);
+for (let i = 0; i < N; i++) processingOrder[i] = i;
+
+// PRNG state
+let rngState;
+
+// Simulation state
+let paused = true;
+let ticks = 0;
+let tickInterval = null;
+
+// ============================================================================
+// SECTION 3: HELPER FUNCTIONS
+// ============================================================================
+
+// Seeded PRNG (same as rgbfields-17)
+function initRNG(seed) {
+  let x = seed;
+  x = Math.imul(x ^ (x >>> 16), 0x7feb352d);
+  x = Math.imul(x ^ (x >>> 15), 0x846ca68b);
+  rngState = (x ^ (x >>> 16)) >>> 0;
+}
+
+function rand() {
+  rngState = (1664525 * rngState + 1013904223) >>> 0;
+  return rngState / 4294967296;
+}
+
+function randInt(max) {
+  return (rand() * max) | 0;
+}
+
+// Fisher-Yates shuffle
+function shuffleOrder() {
+  for (let i = N - 1; i > 0; i--) {
+    const j = randInt(i + 1);
+    const tmp = processingOrder[i];
+    processingOrder[i] = processingOrder[j];
+    processingOrder[j] = tmp;
+  }
+}
+
+// Field accessors
+function hasR(i) { return R[i] === 1; }
+function hasG(i) { return (G[i] & 4) !== 0; }
+function hasB(i) { return B[i] > 0; }
+
+function getGHeading(i) { return G[i] & 3; } // 0=N, 1=E, 2=S, 3=W
+function getBMomentum(i) { return B[i]; }    // 1=left, 2=right
+
+function setG(arr, i, exists, heading = DIR.N) {
+  arr[i] = exists ? (4 | (heading & 3)) : 0;
+}
+
+function setB(arr, i, exists, momentum = 1) {
+  arr[i] = exists ? momentum : 0;
+}
+
+// Get cell state as 0-7
+function getState(i) {
+  return (hasR(i) ? 4 : 0) | (hasG(i) ? 2 : 0) | (hasB(i) ? 1 : 0);
+}
+
+// Get coordinates from index
+function toXY(i) {
+  return { x: i % CONFIG.COLS, y: (i / CONFIG.COLS) | 0 };
+}
+
+function toIndex(x, y) {
+  return y * CONFIG.COLS + x;
+}
+
+// Get neighbor in direction (using precomputed table)
+function getNeighbor(i, dir) {
+  return neighborTable[i * 4 + dir];
+}
+
+// Check if cell has ANY G neighbors (for solo G staying put)
+function hasGNeighbor(i) {
+  for (let d = 0; d < 4; d++) {
+    const n = getNeighbor(i, d);
+    if (n >= 0 && hasG(n)) return true;
+  }
+  return false;
+}
+
+// Check if cell is surrounded by B (for R condensation)
+function surroundedByB(i) {
+  let bCount = 0;
+  let validNeighbors = 0;
+  for (let d = 0; d < 4; d++) {
+    const n = getNeighbor(i, d);
+    if (n >= 0) {
+      validNeighbors++;
+      if (hasB(n)) bCount++;
+    }
+  }
+  return validNeighbors > 0 && bCount === validNeighbors;
+}
+
+// Check if neighbor has ANY G (for FREEZE stickiness)
+function hasNeighborWithG(i) {
+  for (let d = 0; d < 4; d++) {
+    const n = getNeighbor(i, d);
+    if (n >= 0 && hasG(n)) return true;
+  }
+  return false;
+}
+
+// Check if adjacent LIFE died last tick (for death spreading)
+function adjacentLifeDiedLastTick(i) {
+  for (let d = 0; d < 4; d++) {
+    const n = getNeighbor(i, d);
+    if (n >= 0 && lifeDiedHere_previous[n]) return true;
+  }
+  return false;
+}
+
+// Build neighbor lookup table
+function buildNeighborTable() {
+  neighborTable = new Int32Array(N * 4);
+
+  for (let i = 0; i < N; i++) {
+    const { x, y } = toXY(i);
+    const base = i * 4;
+
+    // North (y - 1)
+    if (y > 0) {
+      neighborTable[base + DIR.N] = toIndex(x, y - 1);
+    } else if (CONFIG.WRAP_Y) {
+      neighborTable[base + DIR.N] = toIndex(x, CONFIG.ROWS - 1);
+    } else {
+      neighborTable[base + DIR.N] = -1;
+    }
+
+    // East (x + 1)
+    if (x < CONFIG.COLS - 1) {
+      neighborTable[base + DIR.E] = toIndex(x + 1, y);
+    } else if (CONFIG.WRAP_X) {
+      neighborTable[base + DIR.E] = toIndex(0, y);
+    } else {
+      neighborTable[base + DIR.E] = -1;
+    }
+
+    // South (y + 1)
+    if (y < CONFIG.ROWS - 1) {
+      neighborTable[base + DIR.S] = toIndex(x, y + 1);
+    } else if (CONFIG.WRAP_Y) {
+      neighborTable[base + DIR.S] = toIndex(x, 0);
+    } else {
+      neighborTable[base + DIR.S] = -1;
+    }
+
+    // West (x - 1)
+    if (x > 0) {
+      neighborTable[base + DIR.W] = toIndex(x - 1, y);
+    } else if (CONFIG.WRAP_X) {
+      neighborTable[base + DIR.W] = toIndex(CONFIG.COLS - 1, y);
+    } else {
+      neighborTable[base + DIR.W] = -1;
+    }
+  }
+}
+
+// Pick direction based on probability weights
+function pickDirection(up, down, left, right) {
+  const r = rand();
+  if (r < up) return DIR.N;
+  if (r < up + down) return DIR.S;
+  if (r < up + down + left) return DIR.W;
+  return DIR.E;
+}
+
+// Pick random cardinal direction (25% each)
+function randomDirection() {
+  return randInt(4);
+}
+
+// Opposite direction
+function oppositeDir(d) {
+  return (d + 2) % 4;
+}
+
+// ============================================================================
+// SECTION 4: MOVEMENT LOGIC
+// ============================================================================
+
+// Check if claim is possible (no side effects)
+function canClaimR(to) {
+  if (to < 0) return false;
+  if (R[to] === 1) return false;
+  if (R_claimed[to] === 1) return false;
+  return true;
+}
+
+function canClaimG(to) {
+  if (to < 0) return false;
+  if (hasG(to)) return false;
+  if (G_claimed[to] === 1) return false;
+  return true;
+}
+
+function canClaimB(to) {
+  if (to < 0) return false;
+  if (hasB(to)) return false;
+  if (B_claimed[to] === 1) return false;
+  return true;
+}
+
+// Try to claim (has side effects - sets claimed flag)
+function tryClaimR(from, to) {
+  if (!canClaimR(to)) return false;
+  R_claimed[to] = 1;
+  return true;
+}
+
+function tryClaimG(from, to) {
+  if (!canClaimG(to)) return false;
+  G_claimed[to] = 1;
+  return true;
+}
+
+function tryClaimB(from, to) {
+  if (!canClaimB(to)) return false;
+  B_claimed[to] = 1;
+  return true;
+}
+
+function movePhase() {
+  // Clear next state and claims
+  R_next.fill(0);
+  G_next.fill(0);
+  B_next.fill(0);
+  R_claimed.fill(0);
+  G_claimed.fill(0);
+  B_claimed.fill(0);
+  R_justDecoupled.fill(0);
+  G_justDecoupled.fill(0);
+  B_justDecoupled.fill(0);
+
+  // Clear current tick's death array (previous tick's is preserved)
+  lifeDiedHere_current.fill(0);
+
+  // Shuffle processing order
+  shuffleOrder();
+
+  // Process each cell
+  for (let idx = 0; idx < N; idx++) {
+    const i = processingOrder[idx];
+    const state = getState(i);
+
+    switch (state) {
+      case 0: // Empty
+        break;
+
+      case 1: // Water only (B)
+        moveSoloB(i);
+        break;
+
+      case 2: // Fuel only (G)
+        moveSoloG(i);
+        break;
+
+      case 3: // Freeze (G+B)
+        moveFreeze(i);
+        break;
+
+      case 4: // Heat only (R)
+        moveSoloR(i);
+        break;
+
+      case 5: // Boil (R+B)
+        moveBoil(i);
+        break;
+
+      case 6: // Burn (R+G)
+        moveBurn(i);
+        break;
+
+      case 7: // Life (R+G+B)
+        moveLife(i);
+        break;
+    }
+  }
+}
+
+function moveSoloR(i) {
+  // Random movement, 25% each direction
+  const dir = randomDirection();
+  const target = getNeighbor(i, dir);
+
+  if (tryClaimR(i, target)) {
+    R_next[target] = 1;
+  } else {
+    // Stay in place
+    R_next[i] = 1;
+    R_claimed[i] = 1;
+  }
+}
+
+function moveSoloG(i) {
+  // Solo G (fuel/ash) falls DOWN only if ISOLATED from other G
+  // If connected to other G, it stays put (structural support)
+
+  if (hasGNeighbor(i)) {
+    // Connected to other G - stay put
+    G_next[i] = G[i];
+    G_claimed[i] = 1;
+    return;
+  }
+
+  // Isolated - try to fall
+  const below = getNeighbor(i, DIR.S);
+
+  if (tryClaimG(i, below)) {
+    G_next[below] = G[i]; // Preserve heading
+  } else {
+    // Can't fall - stay in place
+    G_next[i] = G[i];
+    G_claimed[i] = 1;
+  }
+}
+
+function moveSoloB(i) {
+  // Falls with momentum, spreads laterally if blocked
+  const below = getNeighbor(i, DIR.S);
+  const momentum = getBMomentum(i); // 1 = left, 2 = right
+
+  // Try to fall straight down
+  if (tryClaimB(i, below)) {
+    B_next[below] = momentum; // Preserve momentum
+    return;
+  }
+
+  // Blocked below - try diagonal in momentum direction
+  const { x, y } = toXY(i);
+  let diagX = (momentum === 1) ? x - 1 : x + 1;
+  let diagY = y + 1;
+
+  // Handle wrapping
+  if (CONFIG.WRAP_X) {
+    diagX = (diagX + CONFIG.COLS) % CONFIG.COLS;
+  }
+
+  if (diagX >= 0 && diagX < CONFIG.COLS && diagY < CONFIG.ROWS) {
+    const diagIdx = toIndex(diagX, diagY);
+    if (tryClaimB(i, diagIdx)) {
+      B_next[diagIdx] = momentum;
+      return;
+    }
+  }
+
+  // Try pure lateral movement
+  const lateralDir = (momentum === 1) ? DIR.W : DIR.E;
+  const lateral = getNeighbor(i, lateralDir);
+  if (tryClaimB(i, lateral)) {
+    B_next[lateral] = momentum;
+    return;
+  }
+
+  // Blocked - flip momentum and stay
+  B_next[i] = (momentum === 1) ? 2 : 1;
+  B_claimed[i] = 1;
+}
+
+function moveFreeze(i) {
+  // G+B COUPLED: they move as ONE unit
+  // Rule 1: If adjacent to ANY G-containing cell, stick (stay put)
+  // Rule 2: Otherwise, try to fall straight DOWN
+  // Rule 3: If can't fall, stay put (no lateral movement)
+
+  // Check stickiness - if adjacent to ANY cell with G, stay put
+  if (hasNeighborWithG(i)) {
+    G_next[i] = G[i];
+    B_next[i] = B[i];
+    G_claimed[i] = 1;
+    B_claimed[i] = 1;
+    return;
+  }
+
+  // Try to fall straight down (coupled unit)
+  const below = getNeighbor(i, DIR.S);
+
+  if (canClaimG(below) && canClaimB(below)) {
+    // Move down as coupled unit
+    G_claimed[below] = 1;
+    B_claimed[below] = 1;
+    G_next[below] = G[i];
+    B_next[below] = B[i];
+  } else {
+    // Can't fall - stay put
+    G_next[i] = G[i];
+    B_next[i] = B[i];
+    G_claimed[i] = 1;
+    B_claimed[i] = 1;
+  }
+}
+
+function moveBoil(i) {
+  // R+B coupled: Brownian, more horizontal
+  const dir = pickDirection(
+    CONFIG.MOVE.BOIL_UP,
+    CONFIG.MOVE.BOIL_DOWN,
+    CONFIG.MOVE.BOIL_LEFT,
+    CONFIG.MOVE.BOIL_RIGHT
+  );
+
+  const target = getNeighbor(i, dir);
+
+  // Atomic check before claiming
+  if (canClaimR(target) && canClaimB(target)) {
+    R_claimed[target] = 1;
+    B_claimed[target] = 1;
+    R_next[target] = 1;
+    B_next[target] = B[i];
+  } else {
+    R_next[i] = 1;
+    B_next[i] = B[i];
+    R_claimed[i] = 1;
+    B_claimed[i] = 1;
+  }
+}
+
+function moveBurn(i) {
+  // R+G coupled: upward bias (flames rise)
+  const dir = pickDirection(
+    CONFIG.MOVE.BURN_UP,
+    CONFIG.MOVE.BURN_DOWN,
+    CONFIG.MOVE.BURN_LEFT,
+    CONFIG.MOVE.BURN_RIGHT
+  );
+
+  const target = getNeighbor(i, dir);
+
+  // Atomic check before claiming
+  if (canClaimR(target) && canClaimG(target)) {
+    R_claimed[target] = 1;
+    G_claimed[target] = 1;
+    R_next[target] = 1;
+    G_next[target] = G[i];
+  } else {
+    R_next[i] = 1;
+    G_next[i] = G[i];
+    R_claimed[i] = 1;
+    G_claimed[i] = 1;
+  }
+}
+
+function moveLife(i) {
+  // R+G+B: stable, doesn't move
+  R_next[i] = 1;
+  G_next[i] = G[i];
+  B_next[i] = B[i];
+  R_claimed[i] = 1;
+  G_claimed[i] = 1;
+  B_claimed[i] = 1;
+}
+
+// ============================================================================
+// SECTION 5: DECOUPLING LOGIC
+// ============================================================================
+
+function decouplePhase() {
+  // Work on _next arrays (after movement)
+  for (let i = 0; i < N; i++) {
+    const r = R_next[i];
+    const gExists = (G_next[i] & 4) !== 0;
+    const b = B_next[i];
+    const bExists = b > 0;
+
+    // BURN decoupling (R+G, no B)
+    if (r && gExists && !bExists) {
+      if (rand() < CONFIG.DECOUPLE.BURN) {
+        // R tries to escape to a neighbor without R
+        const dir = randomDirection();
+        const target = getNeighbor(i, dir);
+        if (target >= 0 && R_next[target] === 0) {
+          R_next[i] = 0;
+          R_next[target] = 1;
+          R_justDecoupled[target] = 1;
+        }
+        // If can't escape, stays coupled
+      }
+    }
+
+    // BOIL decoupling (R+B, no G)
+    if (r && !gExists && bExists) {
+      if (rand() < CONFIG.DECOUPLE.BOIL) {
+        const dir = randomDirection();
+        const target = getNeighbor(i, dir);
+        if (target >= 0 && R_next[target] === 0) {
+          R_next[i] = 0;
+          R_next[target] = 1;
+          R_justDecoupled[target] = 1;
+        }
+      }
+    }
+
+    // FREEZE decoupling (G+B, no R)
+    if (!r && gExists && bExists) {
+      if (rand() < CONFIG.DECOUPLE.FREEZE) {
+        const dir = randomDirection();
+        const target = getNeighbor(i, dir);
+        if (target >= 0 && B_next[target] === 0) {
+          const momentum = B_next[i] || 1;
+          B_next[i] = 0;
+          B_next[target] = momentum;
+          B_justDecoupled[target] = 1;
+        }
+      }
+    }
+
+    // LIFE decoupling - spontaneous OR via death spread
+    if (r && gExists && bExists) {
+      // Check if this LIFE should die:
+      // 1. Adjacent LIFE died last tick (chain reaction)
+      // 2. Spontaneous death (1/256 chance)
+      const shouldDie = adjacentLifeDiedLastTick(i) || rand() < CONFIG.DECOUPLE.LIFE;
+
+      if (shouldDie) {
+        // Randomly choose which component leaves: 0=R, 1=G, 2=B
+        const which = randInt(3);
+        const dir = randomDirection();
+        const target = getNeighbor(i, dir);
+
+        let died = false;
+        if (which === 0 && target >= 0 && R_next[target] === 0) {
+          R_next[i] = 0;
+          R_next[target] = 1;
+          R_justDecoupled[target] = 1;
+          died = true;
+        } else if (which === 1 && target >= 0 && (G_next[target] & 4) === 0) {
+          const heading = G_next[i] & 3;
+          G_next[i] = 0;
+          G_next[target] = 4 | heading;
+          G_justDecoupled[target] = 1;
+          died = true;
+        } else if (which === 2 && target >= 0 && B_next[target] === 0) {
+          const momentum = B_next[i] || 1;
+          B_next[i] = 0;
+          B_next[target] = momentum;
+          B_justDecoupled[target] = 1;
+          died = true;
+        }
+
+        if (died) {
+          // Mark this cell as having died THIS tick (for next tick's spreading)
+          lifeDiedHere_current[i] = 1;
+        }
+      }
+    }
+  }
+}
+
+// ============================================================================
+// SECTION 6: TRANSMUTATION LOGIC
+// ============================================================================
+
+function transmutePhase() {
+  for (let i = 0; i < N; i++) {
+    const r = R_next[i];
+    const gExists = (G_next[i] & 4) !== 0;
+    const bExists = B_next[i] > 0;
+    const { x, y } = toXY(i);
+
+    // Skip freshly decoupled particles - they don't transmute on the same tick
+    const rJustDecoupled = R_justDecoupled[i] === 1;
+
+    // R->B: Condensation at top row (skip if R just decoupled)
+    if (r && !rJustDecoupled && y === 0 && CONFIG.CONDENSE_AT_TOP && !bExists) {
+      R_next[i] = 0;
+      B_next[i] = rand() < 0.5 ? 1 : 2; // Random momentum
+      continue;
+    }
+
+    // R->B: Condensation when surrounded by B (skip if R just decoupled)
+    if (r && !rJustDecoupled && !bExists && surroundedByB_next(i)) {
+      R_next[i] = 0;
+      B_next[i] = rand() < 0.5 ? 1 : 2;
+      continue;
+    }
+
+    // BURN transmutation: G->R (fire spreads)
+    // Note: LIFE is immune (has B, so this condition won't match)
+    if (r && gExists && !bExists) {
+      if (rand() < CONFIG.TRANSMUTE.BURN) {
+        // This G is consumed, new R appears at neighbor (preferring dry G)
+        G_next[i] = 0; // G consumed
+
+        // Find target for new R: prefer dry G neighbors
+        let targets = [];
+        let dryGTargets = [];
+
+        for (let d = 0; d < 4; d++) {
+          const n = getNeighbor(i, d);
+          if (n >= 0 && R_next[n] === 0) {
+            targets.push(n);
+            // Check if dry G (G exists, no B)
+            if ((G_next[n] & 4) !== 0 && B_next[n] === 0) {
+              dryGTargets.push(n);
+            }
+          }
+        }
+
+        const targetList = dryGTargets.length > 0 ? dryGTargets : targets;
+        if (targetList.length > 0) {
+          const target = targetList[randInt(targetList.length)];
+          R_next[target] = 1;
+        }
+        // If no valid target, transmutation blocked (R stays, G gone)
+      }
+    }
+
+    // BOIL transmutation: R->B (steam condenses)
+    // Note: LIFE is immune (has G, so this condition won't match)
+    if (r && !gExists && bExists) {
+      if (rand() < CONFIG.TRANSMUTE.BOIL) {
+        // R disappears, B stays
+        R_next[i] = 0;
+      }
+    }
+
+    // FREEZE transmutation: B->G (growth)
+    // Note: LIFE is immune (has R, so this condition won't match)
+    if (!r && gExists && bExists) {
+      if (rand() < CONFIG.TRANSMUTE.FREEZE) {
+        // B consumed, new G appears at empty neighbor
+        let emptyTargets = [];
+        for (let d = 0; d < 4; d++) {
+          const n = getNeighbor(i, d);
+          if (n >= 0 && (G_next[n] & 4) === 0) {
+            emptyTargets.push(n);
+          }
+        }
+
+        if (emptyTargets.length > 0) {
+          B_next[i] = 0; // B consumed
+          const target = emptyTargets[randInt(emptyTargets.length)];
+          setG(G_next, target, true, DIR.N); // New G with default heading N
+        }
+        // If no empty neighbor, transmutation blocked
+      }
+    }
+  }
+}
+
+// Helper for checking surrounded by B in next state
+function surroundedByB_next(i) {
+  let bCount = 0;
+  let validNeighbors = 0;
+  for (let d = 0; d < 4; d++) {
+    const n = getNeighbor(i, d);
+    if (n >= 0) {
+      validNeighbors++;
+      if (B_next[n] > 0) bCount++;
+    }
+  }
+  return validNeighbors > 0 && bCount === validNeighbors;
+}
+
+// ============================================================================
+// SECTION 7: MAIN UPDATE LOOP
+// ============================================================================
+
+function tick() {
+  // Before movePhase, copy current deaths to previous for spreading
+  lifeDiedHere_previous.set(lifeDiedHere_current);
+
+  movePhase();
+  decouplePhase();
+  transmutePhase();
+
+  // Swap buffers
+  [R, R_next] = [R_next, R];
+  [G, G_next] = [G_next, G];
+  [B, B_next] = [B_next, B];
+
+  ticks++;
+  render();
+  updateStats();
+}
+
+// ============================================================================
+// SECTION 8: RENDERING
+// ============================================================================
+
+let app, texture, sprite, rgba;
+
+function initRenderer() {
+  // Calculate cell size dynamically
+  CONFIG.CELL_SIZE = calculateCellSize();
+
+  app = new PIXI.Application({
+    width: CONFIG.COLS * CONFIG.CELL_SIZE,
+    height: CONFIG.ROWS * CONFIG.CELL_SIZE,
+    backgroundColor: 0x000000,
+  });
+
+  document.getElementById('canvas-container').appendChild(app.view);
+  app.view.style.imageRendering = 'pixelated';
+
+  // Create RGBA buffer for texture
+  rgba = new Uint8Array(N * 4);
+  texture = PIXI.Texture.fromBuffer(rgba, CONFIG.COLS, CONFIG.ROWS);
+  sprite = new PIXI.Sprite(texture);
+  sprite.scale.set(CONFIG.CELL_SIZE);
+  app.stage.addChild(sprite);
+}
+
+function render() {
+  for (let i = 0; i < N; i++) {
+    const state = getState(i);
+    const j = i * 4;
+
+    // Color based on state
+    switch (state) {
+      case 0: // Empty - black
+        rgba[j] = 0; rgba[j+1] = 0; rgba[j+2] = 0;
+        break;
+      case 1: // Water (B only) - blue
+        rgba[j] = 0; rgba[j+1] = 0; rgba[j+2] = 255;
+        break;
+      case 2: // Fuel (G only) - green
+        rgba[j] = 0; rgba[j+1] = 255; rgba[j+2] = 0;
+        break;
+      case 3: // Freeze (G+B) - cyan
+        rgba[j] = 0; rgba[j+1] = 255; rgba[j+2] = 255;
+        break;
+      case 4: // Heat (R only) - red
+        rgba[j] = 255; rgba[j+1] = 0; rgba[j+2] = 0;
+        break;
+      case 5: // Boil (R+B) - magenta
+        rgba[j] = 255; rgba[j+1] = 0; rgba[j+2] = 255;
+        break;
+      case 6: // Burn (R+G) - yellow
+        rgba[j] = 255; rgba[j+1] = 255; rgba[j+2] = 0;
+        break;
+      case 7: // Life (R+G+B) - white
+        rgba[j] = 255; rgba[j+1] = 255; rgba[j+2] = 255;
+        break;
+    }
+    rgba[j+3] = 255; // Alpha
+  }
+
+  texture.baseTexture.update();
+}
+
+// ============================================================================
+// SECTION 9: INITIALIZATION AND STATE
+// ============================================================================
+
+// Current seed (set during init)
+let currentSeed = null;
+
+// Get the 8 positions for placing state blocks (corners and edge centers)
+function getBlockPositions() {
+  const bs = CONFIG.BLOCK_SIZE;
+  return [
+    { x: 0, y: 0 },                                         // Top-left
+    { x: Math.floor(CONFIG.COLS / 2) - Math.floor(bs / 2), y: 0 },  // Top-center
+    { x: CONFIG.COLS - bs, y: 0 },                          // Top-right
+    { x: CONFIG.COLS - bs, y: Math.floor(CONFIG.ROWS / 2) - Math.floor(bs / 2) }, // Right-center
+    { x: CONFIG.COLS - bs, y: CONFIG.ROWS - bs },           // Bottom-right
+    { x: Math.floor(CONFIG.COLS / 2) - Math.floor(bs / 2), y: CONFIG.ROWS - bs }, // Bottom-center
+    { x: 0, y: CONFIG.ROWS - bs },                          // Bottom-left
+    { x: 0, y: Math.floor(CONFIG.ROWS / 2) - Math.floor(bs / 2) }, // Left-center
+  ];
+}
+
+// Place all 8 states in shuffled positions
+function placeAllStates() {
+  const positions = getBlockPositions();
+
+  // Shuffle states 0-7 into random order
+  const states = [0, 1, 2, 3, 4, 5, 6, 7];
+  for (let i = states.length - 1; i > 0; i--) {
+    const j = randInt(i + 1);
+    [states[i], states[j]] = [states[j], states[i]];
+  }
+
+  // Place each state at its position
+  for (let p = 0; p < 8; p++) {
+    const pos = positions[p];
+    const state = states[p];
+    placeStateBlock(pos.x, pos.y, state);
+  }
+}
+
+function initState() {
+  // Determine seed: URL param > CONFIG > random
+  const params = new URLSearchParams(window.location.search);
+  const urlSeed = params.get('seed');
+
+  if (urlSeed !== null && !isNaN(parseInt(urlSeed))) {
+    currentSeed = parseInt(urlSeed) >>> 0;
+  } else if (CONFIG.SEED !== null) {
+    currentSeed = CONFIG.SEED >>> 0;
+  } else {
+    currentSeed = (Math.random() * 0xFFFFFFFF) >>> 0;
+  }
+
+  initRNG(currentSeed);
+  console.log(`Seed: ${currentSeed}`);
+
+  R.fill(0);
+  G.fill(0);
+  B.fill(0);
+  lifeDiedHere_current.fill(0);
+  lifeDiedHere_previous.fill(0);
+
+  placeAllStates();
+  ticks = 0;
+}
+
+// Place a block of a given state at position (x, y)
+function placeStateBlock(startX, startY, state) {
+  const hasR_state = (state & 4) !== 0;
+  const hasG_state = (state & 2) !== 0;
+  const hasB_state = (state & 1) !== 0;
+  const bs = CONFIG.BLOCK_SIZE;
+
+  for (let dy = 0; dy < bs; dy++) {
+    for (let dx = 0; dx < bs; dx++) {
+      const x = startX + dx;
+      const y = startY + dy;
+
+      if (x >= 0 && x < CONFIG.COLS && y >= 0 && y < CONFIG.ROWS) {
+        const i = toIndex(x, y);
+
+        if (hasR_state) R[i] = 1;
+        if (hasG_state) setG(G, i, true, DIR.N);
+        if (hasB_state) B[i] = rand() < 0.5 ? 1 : 2; // Random momentum
+      }
+    }
+  }
+}
+
+function reset(newRandomSeed = true) {
+  // If no URL seed and we want a new random seed
+  const params = new URLSearchParams(window.location.search);
+  const hasUrlSeed = params.get('seed') !== null;
+
+  if (newRandomSeed && !hasUrlSeed) {
+    currentSeed = (Math.random() * 0xFFFFFFFF) >>> 0;
+    initRNG(currentSeed);
+    console.log(`New seed: ${currentSeed}`);
+
+    R.fill(0);
+    G.fill(0);
+    B.fill(0);
+    lifeDiedHere_current.fill(0);
+    lifeDiedHere_previous.fill(0);
+
+    placeAllStates();
+    ticks = 0;
+  } else {
+    initState();
+  }
+
+  render();
+  updateStats();
+}
+
+// ============================================================================
+// SECTION 10: STATS AND CONSERVATION
+// ============================================================================
+
+function countField(arr, predicate) {
+  let count = 0;
+  for (let i = 0; i < N; i++) {
+    if (predicate(arr[i])) count++;
+  }
+  return count;
+}
+
+function getConservationStats() {
+  const rCount = countField(R, v => v === 1);
+  const gCount = countField(G, v => (v & 4) !== 0);
+  const bCount = countField(B, v => v > 0);
+  return { r: rCount, g: gCount, b: bCount, total: rCount + gCount + bCount };
+}
+
+function updateStats() {
+  const stats = getConservationStats();
+  const statsEl = document.getElementById('stats');
+  statsEl.innerHTML = `
+    Seed: <span style="color:#ff0">${currentSeed}</span> |
+    Tick: ${ticks} |
+    <span style="color:#f00">R: ${stats.r}</span> |
+    <span style="color:#0f0">G: ${stats.g}</span> |
+    <span style="color:#00f">B: ${stats.b}</span> |
+    Total: ${stats.total} |
+    ${paused ? 'PAUSED' : 'RUNNING'}
+  `;
+}
+
+function logConservation() {
+  const stats = getConservationStats();
+  console.log(`Tick ${ticks}: R=${stats.r}, G=${stats.g}, B=${stats.b}, Total=${stats.total}`);
+}
+
+// ============================================================================
+// SECTION 11: CONTROLS
+// ============================================================================
+
+function initControls() {
+  document.addEventListener('keydown', (e) => {
+    if (e.key === ' ') {
+      if (paused) {
+        tick();
+      }
+      e.preventDefault();
+    }
+    if (e.key === 'p' || e.key === 'P') {
+      paused = !paused;
+      if (!paused) {
+        tickInterval = setInterval(tick, CONFIG.TICK_INTERVAL);
+      } else {
+        clearInterval(tickInterval);
+      }
+      updateStats();
+    }
+    if (e.key === 'r' || e.key === 'R') {
+      paused = true;
+      clearInterval(tickInterval);
+      reset();
+    }
+    if (e.key === 'c' || e.key === 'C') {
+      logConservation();
+    }
+    if (e.key === 's' || e.key === 'S') {
+      // Reset with same seed
+      paused = true;
+      clearInterval(tickInterval);
+      initRNG(currentSeed); // Re-init with same seed
+      R.fill(0);
+      G.fill(0);
+      B.fill(0);
+      lifeDiedHere_current.fill(0);
+      lifeDiedHere_previous.fill(0);
+
+      placeAllStates();
+      ticks = 0;
+
+      render();
+      updateStats();
+      console.log(`Reset with same seed: ${currentSeed}`);
+    }
+  });
+}
+
+// ============================================================================
+// SECTION 12: TUNING PANEL
+// ============================================================================
+
+function initTuningPanel() {
+  // Grid settings
+  document.getElementById('cfg-cols').value = CONFIG.COLS;
+  document.getElementById('cfg-rows').value = CONFIG.ROWS;
+  document.getElementById('cfg-blocksize').value = CONFIG.BLOCK_SIZE;
+  document.getElementById('cfg-tickinterval').value = CONFIG.TICK_INTERVAL;
+
+  // BURN movement (convert to percentages)
+  document.getElementById('cfg-burn-up').value = Math.round(CONFIG.MOVE.BURN_UP * 100);
+  document.getElementById('cfg-burn-down').value = Math.round(CONFIG.MOVE.BURN_DOWN * 100);
+  document.getElementById('cfg-burn-left').value = Math.round(CONFIG.MOVE.BURN_LEFT * 100);
+  document.getElementById('cfg-burn-right').value = Math.round(CONFIG.MOVE.BURN_RIGHT * 100);
+
+  // BOIL movement
+  document.getElementById('cfg-boil-up').value = Math.round(CONFIG.MOVE.BOIL_UP * 100);
+  document.getElementById('cfg-boil-down').value = Math.round(CONFIG.MOVE.BOIL_DOWN * 100);
+  document.getElementById('cfg-boil-left').value = Math.round(CONFIG.MOVE.BOIL_LEFT * 100);
+  document.getElementById('cfg-boil-right').value = Math.round(CONFIG.MOVE.BOIL_RIGHT * 100);
+
+  // Decoupling (convert from fraction to denominator)
+  document.getElementById('cfg-decouple-burn').value = Math.round(1 / CONFIG.DECOUPLE.BURN);
+  document.getElementById('cfg-decouple-boil').value = Math.round(1 / CONFIG.DECOUPLE.BOIL);
+  document.getElementById('cfg-decouple-freeze').value = Math.round(1 / CONFIG.DECOUPLE.FREEZE);
+  document.getElementById('cfg-decouple-life').value = Math.round(1 / CONFIG.DECOUPLE.LIFE);
+
+  // Transmutation
+  document.getElementById('cfg-transmute-burn').value = Math.round(1 / CONFIG.TRANSMUTE.BURN);
+  document.getElementById('cfg-transmute-boil').value = Math.round(1 / CONFIG.TRANSMUTE.BOIL);
+  document.getElementById('cfg-transmute-freeze').value = Math.round(1 / CONFIG.TRANSMUTE.FREEZE);
+
+  // Boundaries
+  document.getElementById('cfg-wrap-x').checked = CONFIG.WRAP_X;
+  document.getElementById('cfg-wrap-y').checked = CONFIG.WRAP_Y;
+  document.getElementById('cfg-condense-top').checked = CONFIG.CONDENSE_AT_TOP;
+
+  // Add event listeners for live updates (non-grid settings)
+  const liveUpdate = (id, callback) => {
+    document.getElementById(id).addEventListener('change', callback);
+  };
+
+  // BURN movement
+  const updateBurn = () => {
+    CONFIG.MOVE.BURN_UP = parseInt(document.getElementById('cfg-burn-up').value) / 100;
+    CONFIG.MOVE.BURN_DOWN = parseInt(document.getElementById('cfg-burn-down').value) / 100;
+    CONFIG.MOVE.BURN_LEFT = parseInt(document.getElementById('cfg-burn-left').value) / 100;
+    CONFIG.MOVE.BURN_RIGHT = parseInt(document.getElementById('cfg-burn-right').value) / 100;
+    const sum = CONFIG.MOVE.BURN_UP + CONFIG.MOVE.BURN_DOWN + CONFIG.MOVE.BURN_LEFT + CONFIG.MOVE.BURN_RIGHT;
+    document.getElementById('burn-sum').textContent = `Sum: ${Math.round(sum * 100)}% ${Math.abs(sum - 1) < 0.01 ? '' : '(should be 100%)'}`;
+  };
+  ['cfg-burn-up', 'cfg-burn-down', 'cfg-burn-left', 'cfg-burn-right'].forEach(id => liveUpdate(id, updateBurn));
+  updateBurn();
+
+  // BOIL movement
+  const updateBoil = () => {
+    CONFIG.MOVE.BOIL_UP = parseInt(document.getElementById('cfg-boil-up').value) / 100;
+    CONFIG.MOVE.BOIL_DOWN = parseInt(document.getElementById('cfg-boil-down').value) / 100;
+    CONFIG.MOVE.BOIL_LEFT = parseInt(document.getElementById('cfg-boil-left').value) / 100;
+    CONFIG.MOVE.BOIL_RIGHT = parseInt(document.getElementById('cfg-boil-right').value) / 100;
+    const sum = CONFIG.MOVE.BOIL_UP + CONFIG.MOVE.BOIL_DOWN + CONFIG.MOVE.BOIL_LEFT + CONFIG.MOVE.BOIL_RIGHT;
+    document.getElementById('boil-sum').textContent = `Sum: ${Math.round(sum * 100)}% ${Math.abs(sum - 1) < 0.01 ? '' : '(should be 100%)'}`;
+  };
+  ['cfg-boil-up', 'cfg-boil-down', 'cfg-boil-left', 'cfg-boil-right'].forEach(id => liveUpdate(id, updateBoil));
+  updateBoil();
+
+  // Decoupling
+  liveUpdate('cfg-decouple-burn', () => {
+    CONFIG.DECOUPLE.BURN = 1 / parseInt(document.getElementById('cfg-decouple-burn').value);
+  });
+  liveUpdate('cfg-decouple-boil', () => {
+    CONFIG.DECOUPLE.BOIL = 1 / parseInt(document.getElementById('cfg-decouple-boil').value);
+  });
+  liveUpdate('cfg-decouple-freeze', () => {
+    CONFIG.DECOUPLE.FREEZE = 1 / parseInt(document.getElementById('cfg-decouple-freeze').value);
+  });
+  liveUpdate('cfg-decouple-life', () => {
+    CONFIG.DECOUPLE.LIFE = 1 / parseInt(document.getElementById('cfg-decouple-life').value);
+  });
+
+  // Transmutation
+  liveUpdate('cfg-transmute-burn', () => {
+    CONFIG.TRANSMUTE.BURN = 1 / parseInt(document.getElementById('cfg-transmute-burn').value);
+  });
+  liveUpdate('cfg-transmute-boil', () => {
+    CONFIG.TRANSMUTE.BOIL = 1 / parseInt(document.getElementById('cfg-transmute-boil').value);
+  });
+  liveUpdate('cfg-transmute-freeze', () => {
+    CONFIG.TRANSMUTE.FREEZE = 1 / parseInt(document.getElementById('cfg-transmute-freeze').value);
+  });
+
+  // Boundaries (live update)
+  liveUpdate('cfg-wrap-x', () => {
+    CONFIG.WRAP_X = document.getElementById('cfg-wrap-x').checked;
+    buildNeighborTable();
+  });
+  liveUpdate('cfg-wrap-y', () => {
+    CONFIG.WRAP_Y = document.getElementById('cfg-wrap-y').checked;
+    buildNeighborTable();
+  });
+  liveUpdate('cfg-condense-top', () => {
+    CONFIG.CONDENSE_AT_TOP = document.getElementById('cfg-condense-top').checked;
+  });
+
+  // Tick interval (live update)
+  liveUpdate('cfg-tickinterval', () => {
+    CONFIG.TICK_INTERVAL = parseInt(document.getElementById('cfg-tickinterval').value);
+    if (!paused) {
+      clearInterval(tickInterval);
+      tickInterval = setInterval(tick, CONFIG.TICK_INTERVAL);
+    }
+  });
+
+  // Apply Grid button (requires full reset)
+  document.getElementById('btn-apply-grid').addEventListener('click', () => {
+    const newCols = parseInt(document.getElementById('cfg-cols').value);
+    const newRows = parseInt(document.getElementById('cfg-rows').value);
+    const newBlockSize = parseInt(document.getElementById('cfg-blocksize').value);
+
+    if (newCols < 4 || newRows < 4 || newBlockSize < 1) {
+      alert('Invalid grid settings');
+      return;
+    }
+
+    // Update CONFIG
+    CONFIG.COLS = newCols;
+    CONFIG.ROWS = newRows;
+    CONFIG.BLOCK_SIZE = newBlockSize;
+
+    // Reinitialize everything
+    reinitializeGrid();
+  });
+}
+
+function reinitializeGrid() {
+  // Stop simulation
+  paused = true;
+  clearInterval(tickInterval);
+
+  // Update N
+  N = CONFIG.COLS * CONFIG.ROWS;
+
+  // Recreate arrays with new size
+  R = new Uint8Array(N);
+  G = new Uint8Array(N);
+  B = new Uint8Array(N);
+  R_next = new Uint8Array(N);
+  G_next = new Uint8Array(N);
+  B_next = new Uint8Array(N);
+  R_claimed = new Uint8Array(N);
+  G_claimed = new Uint8Array(N);
+  B_claimed = new Uint8Array(N);
+  R_justDecoupled = new Uint8Array(N);
+  G_justDecoupled = new Uint8Array(N);
+  B_justDecoupled = new Uint8Array(N);
+  lifeDiedHere_current = new Uint8Array(N);
+  lifeDiedHere_previous = new Uint8Array(N);
+  processingOrder = new Uint32Array(N);
+  for (let i = 0; i < N; i++) processingOrder[i] = i;
+
+  // Rebuild neighbor table
+  buildNeighborTable();
+
+  // Recreate renderer
+  if (app) {
+    app.destroy(true, { children: true, texture: true, baseTexture: true });
+  }
+  initRenderer();
+
+  // Reset state
+  initState();
+  render();
+  updateStats();
+
+  console.log(`Grid reinitialized: ${CONFIG.COLS}x${CONFIG.ROWS}, block size: ${CONFIG.BLOCK_SIZE}, cell size: ${CONFIG.CELL_SIZE}px`);
+}
+
+// ============================================================================
+// SECTION 13: BOOT
+// ============================================================================
+
+function boot() {
+  // Check URL params for grid overrides
+  const params = new URLSearchParams(window.location.search);
+  if (params.has('cols')) CONFIG.COLS = parseInt(params.get('cols'));
+  if (params.has('rows')) CONFIG.ROWS = parseInt(params.get('rows'));
+  if (params.has('blocksize')) CONFIG.BLOCK_SIZE = parseInt(params.get('blocksize'));
+
+  // Update N based on CONFIG
+  N = CONFIG.COLS * CONFIG.ROWS;
+
+  // Recreate arrays if needed (for URL param overrides)
+  if (R.length !== N) {
+    R = new Uint8Array(N);
+    G = new Uint8Array(N);
+    B = new Uint8Array(N);
+    R_next = new Uint8Array(N);
+    G_next = new Uint8Array(N);
+    B_next = new Uint8Array(N);
+    R_claimed = new Uint8Array(N);
+    G_claimed = new Uint8Array(N);
+    B_claimed = new Uint8Array(N);
+    R_justDecoupled = new Uint8Array(N);
+    G_justDecoupled = new Uint8Array(N);
+    B_justDecoupled = new Uint8Array(N);
+    lifeDiedHere_current = new Uint8Array(N);
+    lifeDiedHere_previous = new Uint8Array(N);
+    processingOrder = new Uint32Array(N);
+    for (let i = 0; i < N; i++) processingOrder[i] = i;
+  }
+
+  buildNeighborTable();
+  initRenderer();
+  initState();
+  initControls();
+  initTuningPanel();
+  render();
+  updateStats();
+
+  console.log(`RGBcycles v3 initialized: ${CONFIG.COLS}x${CONFIG.ROWS} grid, block size: ${CONFIG.BLOCK_SIZE}, cell size: ${CONFIG.CELL_SIZE}px`);
+  console.log('Controls: Space=step, P=play/pause, R=reset, C=conservation check');
+  console.log('v3: 64x64 grid, 8x8 blocks, dynamic cell sizing, LIFE death spreading');
+  logConservation();
+}
+
+// Start when DOM ready
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', boot);
+} else {
+  boot();
+}
+
+  </script>
+</body>
+</html>

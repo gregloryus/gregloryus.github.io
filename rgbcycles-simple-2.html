@@ -1,0 +1,582 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>RGBcycles Simple v2</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body { height: 100%; overflow: hidden; background: #000; }
+    #canvas { display: block; image-rendering: pixelated; }
+    #ui {
+      position: absolute;
+      top: 10px;
+      left: 10px;
+      color: #fff;
+      font: 11px monospace;
+      background: rgba(0,0,0,0.85);
+      padding: 10px;
+      border-radius: 4px;
+      transition: opacity 0.2s;
+      max-height: 90vh;
+      overflow-y: auto;
+      min-width: 200px;
+    }
+    #ui.hidden { opacity: 0; pointer-events: none; }
+    #ui div { margin: 2px 0; }
+    #ui label { display: inline-block; width: 110px; }
+    #ui input { width: 60px; background: #333; color: #fff; border: 1px solid #555; padding: 2px 4px; }
+    #controls {
+      position: absolute;
+      top: 10px;
+      right: 10px;
+    }
+    #controls button {
+      padding: 8px 14px;
+      margin: 2px;
+      background: #222;
+      color: #fff;
+      border: 1px solid #555;
+      cursor: pointer;
+      font: 12px monospace;
+    }
+    #controls button:hover { background: #444; }
+    .section {
+      color: #888;
+      margin-top: 8px;
+      border-top: 1px solid #444;
+      padding-top: 4px;
+      font-size: 10px;
+      text-transform: uppercase;
+    }
+    .legend-item { display: inline-block; margin-right: 10px; }
+    .legend-color { display: inline-block; width: 12px; height: 12px; margin-right: 4px; vertical-align: middle; }
+  </style>
+</head>
+<body>
+<canvas id="canvas"></canvas>
+
+<div id="ui">
+  <div><b>RGBcycles Simple v2</b></div>
+  <div style="color:#666;font-size:9px;">Pure RPS + Anti-Monochrome (H to hide)</div>
+
+  <div class="section">Grid</div>
+  <div><label>Cell size</label><input type="number" id="cellSize" min="1" max="64" step="1"></div>
+  <div><label>Cols (0=auto)</label><input type="number" id="cols" min="0" max="512" step="1"></div>
+  <div><label>Rows (0=auto)</label><input type="number" id="rows" min="0" max="512" step="1"></div>
+  <div><label>Fill %</label><input type="number" id="fillRate" min="0" max="1" step="0.1"></div>
+  <div><label>Tick interval</label><input type="number" id="tickInterval" min="10" max="2000" step="10"></div>
+
+  <div class="section">Contact (RPS)</div>
+  <div><label>R burns G</label><input type="number" id="rBurnsG" min="0" max="1" step="0.1"></div>
+  <div><label>G absorbs B</label><input type="number" id="gAbsorbsB" min="0" max="1" step="0.1"></div>
+  <div><label>B quenches R</label><input type="number" id="bQuenchesR" min="0" max="1" step="0.1"></div>
+
+  <div class="section">Spontaneous</div>
+  <div><label>R@top → B</label><input type="number" id="condenseRate" min="0" max="1" step="0.1"></div>
+  <div><label>G exp → R</label><input type="number" id="lightningRate" min="0" max="1" step="0.001"></div>
+  <div><label>B exp → G</label><input type="number" id="sporeRate" min="0" max="1" step="0.001"></div>
+
+  <div class="section">Legend</div>
+  <div>
+    <span class="legend-item"><span class="legend-color" style="background:#f00;"></span>R</span>
+    <span class="legend-item"><span class="legend-color" style="background:#0f0;"></span>G</span>
+    <span class="legend-item"><span class="legend-color" style="background:#00f;"></span>B</span>
+  </div>
+
+  <div class="section">Rules</div>
+  <div style="font-size:9px;color:#aaa;line-height:1.4;">
+    <b>Move:</b> R=random, G=down, B=down/diag/lat<br>
+    <b>Contact:</b> R burns G, G absorbs B, B quenches R<br>
+    <b>Spontaneous:</b> R@top→B, G exp→R, B exp→G
+  </div>
+
+  <div id="stats" style="margin-top:8px;color:#aaa;font-size:10px;"></div>
+</div>
+
+<div id="controls">
+  <button id="btnUI">UI</button>
+  <button id="btnSpeed">1x</button>
+  <button id="btnPause">▶</button>
+  <button id="btnReset">Reset</button>
+  <button id="btnSeed">Same</button>
+</div>
+
+<script>
+// ============================================================================
+// RGBcycles Simple v2
+// ============================================================================
+// Pure RPS dynamics without coupled states.
+// Each cell is EMPTY, R, G, or B - never combinations.
+// v2: Anti-monochrome mechanisms prevent any single color from dominating:
+//     - R at top row → B (condensation)
+//     - G exposed to sky → R (lightning, 1/1024)
+//     - B exposed to sky → G (spores, 1/1024)
+// ============================================================================
+
+console.log("RGBcycles Simple v2: Pure RPS with anti-monochrome mechanisms");
+
+// ============================================================================
+// PARAMETERS
+// ============================================================================
+
+const P = {
+  cellSize: 8,
+  cols: 0,        // 0 = auto-calculate from window
+  rows: 0,        // 0 = auto-calculate from window
+  fillRate: 0.5,  // Initial fill percentage
+  tickInterval: 50,
+  // Contact-based transmutation (RPS) - probability 0-1
+  rBurnsG: 0.1,       // R converts adjacent G to R
+  gAbsorbsB: 0.01,    // G converts adjacent B to G
+  bQuenchesR: 0.05,   // B converts adjacent R to B
+  // Spontaneous conversions - probability 0-1
+  condenseRate: 1.0,    // R at top row becomes B
+  lightningRate: 0.001, // Exposed G becomes R (~1/1024)
+  sporeRate: 0.001,     // Exposed B becomes G (~1/1024)
+};
+
+// Cell states
+const EMPTY = 0;
+const R = 1;
+const G = 2;
+const B = 3;
+
+const STATE_COLORS = [
+  [0, 0, 0],       // EMPTY - black
+  [255, 0, 0],     // R - red
+  [0, 255, 0],     // G - green
+  [0, 0, 255],     // B - blue
+];
+
+// ============================================================================
+// STATE
+// ============================================================================
+
+let COLS, ROWS, N;
+let state, state_next, claimed, processingOrder;
+let rngState, currentSeed;
+let paused = true;
+let ticks = 0;
+let speed = 1;
+let uiHidden = false;
+let lastTickTime = 0;
+
+const canvas = document.getElementById('canvas');
+const ctx = canvas.getContext('2d');
+
+// ============================================================================
+// URL PARAMS
+// ============================================================================
+
+function loadURLParams() {
+  const params = new URLSearchParams(window.location.search);
+  for (const [key, value] of params) {
+    if (P.hasOwnProperty(key)) {
+      P[key] = parseFloat(value);
+      const input = document.getElementById(key);
+      if (input) input.value = P[key];
+    }
+  }
+  if (params.has('seed')) {
+    currentSeed = parseInt(params.get('seed')) >>> 0;
+  }
+}
+
+// ============================================================================
+// RNG
+// ============================================================================
+
+function initRNG(seed) {
+  let x = seed;
+  x = Math.imul(x ^ (x >>> 16), 0x7feb352d);
+  x = Math.imul(x ^ (x >>> 15), 0x846ca68b);
+  rngState = (x ^ (x >>> 16)) >>> 0;
+}
+
+function rand() {
+  rngState = (1664525 * rngState + 1013904223) >>> 0;
+  return rngState / 4294967296;
+}
+
+function randInt(max) {
+  return (rand() * max) | 0;
+}
+
+function shuffle(arr) {
+  for (let i = arr.length - 1; i > 0; i--) {
+    const j = randInt(i + 1);
+    [arr[i], arr[j]] = [arr[j], arr[i]];
+  }
+}
+
+// ============================================================================
+// GRID HELPERS
+// ============================================================================
+
+function toXY(i) {
+  return { x: i % COLS, y: (i / COLS) | 0 };
+}
+
+function toIndex(x, y) {
+  return y * COLS + x;
+}
+
+function getNeighbor(i, dir) {
+  const { x, y } = toXY(i);
+  switch (dir) {
+    case 0: return y > 0 ? toIndex(x, y - 1) : -1;
+    case 1: return x < COLS - 1 ? toIndex(x + 1, y) : -1;
+    case 2: return y < ROWS - 1 ? toIndex(x, y + 1) : -1;
+    case 3: return x > 0 ? toIndex(x - 1, y) : -1;
+  }
+  return -1;
+}
+
+function getDiagonal(i, dir) {
+  const { x, y } = toXY(i);
+  const newY = y + 1;
+  if (newY >= ROWS) return -1;
+  const newX = dir === 0 ? x - 1 : x + 1;
+  if (newX < 0 || newX >= COLS) return -1;
+  return toIndex(newX, newY);
+}
+
+// ============================================================================
+// RESIZE & INIT
+// ============================================================================
+
+function resize() {
+  canvas.width = innerWidth;
+  canvas.height = innerHeight;
+
+  COLS = P.cols > 0 ? P.cols : Math.floor(canvas.width / P.cellSize);
+  ROWS = P.rows > 0 ? P.rows : Math.floor(canvas.height / P.cellSize);
+  N = COLS * ROWS;
+
+  state = new Uint8Array(N);
+  state_next = new Uint8Array(N);
+  claimed = new Uint8Array(N);
+  processingOrder = new Uint32Array(N);
+  for (let i = 0; i < N; i++) processingOrder[i] = i;
+
+  if (!currentSeed) {
+    currentSeed = (Math.random() * 0xFFFFFFFF) >>> 0;
+  }
+  initRNG(currentSeed);
+
+  state.fill(EMPTY);
+  initializeThirds();
+  ticks = 0;
+  lastTickTime = 0;
+
+  console.log(`Grid: ${COLS}x${ROWS}, cellSize: ${P.cellSize}, seed: ${currentSeed}`);
+}
+
+function initializeThirds() {
+  // Randomly assign R, G, B to left, middle, right thirds
+  const states = [R, G, B];
+  shuffle(states);
+
+  const third1 = Math.floor(COLS / 3);
+  const third2 = Math.floor(2 * COLS / 3);
+
+  for (let y = 0; y < ROWS; y++) {
+    for (let x = 0; x < COLS; x++) {
+      // Only fill with fillRate probability
+      if (rand() > P.fillRate) continue;
+
+      // Determine which third this cell is in
+      let cellState;
+      if (x < third1) {
+        cellState = states[0];
+      } else if (x < third2) {
+        cellState = states[1];
+      } else {
+        cellState = states[2];
+      }
+
+      state[toIndex(x, y)] = cellState;
+    }
+  }
+}
+
+// ============================================================================
+// MOVEMENT
+// ============================================================================
+
+function movePhase() {
+  state_next.fill(EMPTY);
+  claimed.fill(0);
+  shuffle(processingOrder);
+
+  for (let idx = 0; idx < N; idx++) {
+    const i = processingOrder[idx];
+    const s = state[i];
+    if (s === EMPTY) continue;
+    if (s === R) moveR(i);
+    else if (s === G) moveG(i);
+    else if (s === B) moveB(i);
+  }
+}
+
+function tryMove(from, to, cellState) {
+  if (to < 0 || state[to] !== EMPTY || claimed[to]) return false;
+  claimed[to] = 1;
+  state_next[to] = cellState;
+  return true;
+}
+
+function stayPut(i, cellState) {
+  claimed[i] = 1;
+  state_next[i] = cellState;
+}
+
+function moveR(i) {
+  const dir = randInt(4);
+  if (!tryMove(i, getNeighbor(i, dir), R)) stayPut(i, R);
+}
+
+function moveG(i) {
+  if (!tryMove(i, getNeighbor(i, 2), G)) stayPut(i, G);
+}
+
+function moveB(i) {
+  const below = getNeighbor(i, 2);
+  if (tryMove(i, below, B)) return;
+
+  const diagFirst = randInt(2);
+  if (tryMove(i, getDiagonal(i, diagFirst), B)) return;
+  if (tryMove(i, getDiagonal(i, 1 - diagFirst), B)) return;
+
+  const latFirst = randInt(2);
+  if (tryMove(i, getNeighbor(i, latFirst === 0 ? 3 : 1), B)) return;
+  if (tryMove(i, getNeighbor(i, latFirst === 0 ? 1 : 3), B)) return;
+
+  stayPut(i, B);
+}
+
+// ============================================================================
+// TRANSMUTATION
+// ============================================================================
+
+function transmutePhase() {
+  for (let i = 0; i < N; i++) {
+    const s = state[i];
+    if (s === EMPTY) { state_next[i] = EMPTY; continue; }
+
+    let newState = s;
+
+    for (let d = 0; d < 4; d++) {
+      const n = getNeighbor(i, d);
+      if (n < 0) continue;
+      const ns = state[n];
+
+      // R burns G: if I'm G and neighbor is R
+      if (s === G && ns === R && rand() < P.rBurnsG) { newState = R; break; }
+      // G absorbs B: if I'm B and neighbor is G
+      if (s === B && ns === G && rand() < P.gAbsorbsB) { newState = G; break; }
+      // B quenches R: if I'm R and neighbor is B
+      if (s === R && ns === B && rand() < P.bQuenchesR) { newState = B; break; }
+    }
+
+    state_next[i] = newState;
+  }
+}
+
+// ============================================================================
+// SPONTANEOUS CONVERSION
+// ============================================================================
+
+function spontaneousPhase() {
+  for (let i = 0; i < N; i++) {
+    const s = state[i];
+    if (s === EMPTY) continue;
+
+    const above = getNeighbor(i, 0);
+    const exposedToSky = (above < 0) || (state[above] === EMPTY);
+
+    if (s === R) {
+      // R at top row condenses to B
+      if (above < 0 && rand() < P.condenseRate) state[i] = B;
+    } else if (s === G) {
+      // Exposed G can be struck by lightning → R
+      if (exposedToSky && rand() < P.lightningRate) state[i] = R;
+    } else if (s === B) {
+      // Exposed B can receive spores → G
+      if (exposedToSky && rand() < P.sporeRate) state[i] = G;
+    }
+  }
+}
+
+// ============================================================================
+// MAIN TICK
+// ============================================================================
+
+function tick() {
+  movePhase();
+  [state, state_next] = [state_next, state];
+
+  transmutePhase();
+  [state, state_next] = [state_next, state];
+
+  spontaneousPhase();
+
+  ticks++;
+}
+
+// ============================================================================
+// RENDERING
+// ============================================================================
+
+function render() {
+  ctx.fillStyle = '#000';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+  const imgData = ctx.createImageData(COLS, ROWS);
+  const px = imgData.data;
+
+  for (let i = 0; i < N; i++) {
+    const s = state[i];
+    const pi = i * 4;
+    const [r, g, b] = STATE_COLORS[s];
+    px[pi] = r;
+    px[pi + 1] = g;
+    px[pi + 2] = b;
+    px[pi + 3] = 255;
+  }
+
+  const tmp = document.createElement('canvas');
+  tmp.width = COLS;
+  tmp.height = ROWS;
+  tmp.getContext('2d').putImageData(imgData, 0, 0);
+  ctx.imageSmoothingEnabled = false;
+  ctx.drawImage(tmp, 0, 0, COLS * P.cellSize, ROWS * P.cellSize);
+}
+
+// ============================================================================
+// STATS
+// ============================================================================
+
+function updateStats() {
+  let rCount = 0, gCount = 0, bCount = 0;
+  for (let i = 0; i < N; i++) {
+    if (state[i] === R) rCount++;
+    else if (state[i] === G) gCount++;
+    else if (state[i] === B) bCount++;
+  }
+  const total = rCount + gCount + bCount;
+
+  document.getElementById('stats').innerHTML = `
+    Seed: ${currentSeed}<br>
+    Tick: ${ticks}<br>
+    <span style="color:#f00">R: ${rCount}</span> |
+    <span style="color:#0f0">G: ${gCount}</span> |
+    <span style="color:#00f">B: ${bCount}</span><br>
+    Total: ${total} | ${paused ? 'PAUSED' : speed + 'x'}
+  `;
+}
+
+// ============================================================================
+// MAIN LOOP
+// ============================================================================
+
+function loop(timestamp) {
+  if (!paused) {
+    const elapsed = timestamp - lastTickTime;
+    if (elapsed >= P.tickInterval) {
+      for (let i = 0; i < speed; i++) tick();
+      lastTickTime = timestamp;
+    }
+  }
+  render();
+  updateStats();
+  requestAnimationFrame(loop);
+}
+
+// ============================================================================
+// UI BINDING
+// ============================================================================
+
+function toggleUI() {
+  uiHidden = !uiHidden;
+  document.getElementById('ui').classList.toggle('hidden', uiHidden);
+}
+
+function bind(id, key, needsResize = false) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.value = P[key];
+  el.onchange = () => {
+    P[key] = parseFloat(el.value);
+    if (needsResize) {
+      currentSeed = (Math.random() * 0xFFFFFFFF) >>> 0;
+      resize();
+    }
+  };
+}
+
+function reset(newSeed = true) {
+  if (newSeed) {
+    currentSeed = (Math.random() * 0xFFFFFFFF) >>> 0;
+  }
+  lastTickTime = 0;
+  resize();
+}
+
+// ============================================================================
+// INIT
+// ============================================================================
+
+loadURLParams();
+
+bind('cellSize', 'cellSize', true);
+bind('cols', 'cols', true);
+bind('rows', 'rows', true);
+bind('fillRate', 'fillRate', true);
+bind('tickInterval', 'tickInterval');
+// Contact rates
+bind('rBurnsG', 'rBurnsG');
+bind('gAbsorbsB', 'gAbsorbsB');
+bind('bQuenchesR', 'bQuenchesR');
+// Spontaneous rates
+bind('condenseRate', 'condenseRate');
+bind('lightningRate', 'lightningRate');
+bind('sporeRate', 'sporeRate');
+
+document.getElementById('btnUI').onclick = toggleUI;
+document.getElementById('btnSpeed').onclick = () => {
+  speed = speed === 1 ? 5 : speed === 5 ? 20 : 1;
+  document.getElementById('btnSpeed').textContent = speed + 'x';
+};
+document.getElementById('btnPause').onclick = () => {
+  paused = !paused;
+  document.getElementById('btnPause').textContent = paused ? '▶' : '||';
+};
+document.getElementById('btnReset').onclick = () => reset(true);
+document.getElementById('btnSeed').onclick = () => reset(false);
+
+addEventListener('resize', () => {
+  currentSeed = (Math.random() * 0xFFFFFFFF) >>> 0;
+  resize();
+});
+
+addEventListener('keydown', e => {
+  if (e.target.tagName === 'INPUT') return;
+  if (e.code === 'Space') { paused = !paused; document.getElementById('btnPause').textContent = paused ? '▶' : '||'; e.preventDefault(); }
+  if (e.code === 'KeyR') reset(true);
+  if (e.code === 'KeyS') reset(false);
+  if (e.code === 'KeyH') toggleUI();
+  if (e.code === 'KeyP') {
+    paused = !paused;
+    document.getElementById('btnPause').textContent = paused ? '▶' : '||';
+  }
+});
+
+resize();
+loop();
+
+console.log('Controls: Space/P=pause, R=reset, S=same seed, H=hide UI');
+</script>
+</body>
+</html>

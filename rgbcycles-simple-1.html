@@ -1,0 +1,555 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>RGBcycles Simple v1</title>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      padding: 20px;
+      background: #111;
+      color: #eee;
+      font-family: monospace;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      min-height: 100vh;
+    }
+    h2 { margin: 0 0 10px 0; }
+    #canvas-container {
+      border: 2px solid #444;
+      margin: 10px 0;
+      line-height: 0;
+    }
+    #controls {
+      display: flex;
+      gap: 20px;
+      flex-wrap: wrap;
+      justify-content: center;
+      max-width: 600px;
+    }
+    #stats { margin-top: 10px; text-align: center; }
+    .key {
+      background: #333;
+      padding: 2px 6px;
+      border-radius: 3px;
+    }
+    #legend {
+      margin-top: 15px;
+      display: flex;
+      gap: 20px;
+      font-size: 14px;
+    }
+    #rules {
+      margin-top: 20px;
+      max-width: 500px;
+      font-size: 12px;
+      color: #aaa;
+      line-height: 1.6;
+    }
+    #rules h3 { color: #eee; margin: 10px 0 5px 0; }
+  </style>
+</head>
+<body>
+  <h2>RGBcycles Simple v1 - Pure RPS Dynamics</h2>
+  <div id="canvas-container"></div>
+  <div id="controls">
+    <span><span class="key">Space</span> Step</span>
+    <span><span class="key">P</span> Play/Pause</span>
+    <span><span class="key">R</span> Reset</span>
+    <span><span class="key">S</span> Same seed</span>
+  </div>
+  <div id="stats">Loading...</div>
+  <div id="legend">
+    <span><span style="background:#f00; padding:2px 8px;">&nbsp;</span> R (Heat)</span>
+    <span><span style="background:#0f0; padding:2px 8px;">&nbsp;</span> G (Fuel)</span>
+    <span><span style="background:#00f; padding:2px 8px;">&nbsp;</span> B (Water)</span>
+  </div>
+  <div id="rules">
+    <h3>Movement Rules</h3>
+    <b style="color:#f00">R</b>: Random cardinal direction (if empty)<br>
+    <b style="color:#0f0">G</b>: Falls straight down (if empty)<br>
+    <b style="color:#00f">B</b>: Down > down-diagonal > lateral (if empty)
+
+    <h3>Transmutation Rules (RPS)</h3>
+    <b style="color:#f00">R</b> converts adjacent <b style="color:#0f0">G</b> to <b style="color:#f00">R</b> (fire burns fuel)<br>
+    <b style="color:#0f0">G</b> converts adjacent <b style="color:#00f">B</b> to <b style="color:#0f0">G</b> (plants absorb water)<br>
+    <b style="color:#00f">B</b> converts adjacent <b style="color:#f00">R</b> to <b style="color:#00f">B</b> (water quenches fire)
+  </div>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pixi.js/7.2.4/pixi.min.js"></script>
+  <script>
+// ============================================================================
+// RGBcycles Simple v1
+// ============================================================================
+// Pure RPS dynamics without coupled states.
+// Each cell is EMPTY, R, G, or B - never combinations.
+// ============================================================================
+
+console.log("RGBcycles Simple v1: Pure RPS with direct transmutation");
+
+// ============================================================================
+// CONFIGURATION
+// ============================================================================
+
+const CONFIG = {
+  COLS: 16,
+  ROWS: 16,
+  CELL_SIZE: 32,  // Large cells for visibility
+  BLOCK_SIZE: 4,  // 4x4 starting blocks
+  TICK_INTERVAL: 100,
+  SEED: null,
+  TRANSMUTE_PROB: 1.0,  // 100% chance - set lower to slow down
+};
+
+// Cell states
+const EMPTY = 0;
+const R = 1;
+const G = 2;
+const B = 3;
+
+const STATE_COLORS = [
+  [0, 0, 0],       // EMPTY - black
+  [255, 0, 0],     // R - red
+  [0, 255, 0],     // G - green
+  [0, 0, 255],     // B - blue
+];
+
+// ============================================================================
+// STATE
+// ============================================================================
+
+const N = CONFIG.COLS * CONFIG.ROWS;
+let state = new Uint8Array(N);
+let state_next = new Uint8Array(N);
+let claimed = new Uint8Array(N);  // For movement collision resolution
+
+let processingOrder = new Uint32Array(N);
+for (let i = 0; i < N; i++) processingOrder[i] = i;
+
+let rngState;
+let currentSeed;
+let paused = true;
+let ticks = 0;
+let tickInterval = null;
+
+// ============================================================================
+// RNG
+// ============================================================================
+
+function initRNG(seed) {
+  let x = seed;
+  x = Math.imul(x ^ (x >>> 16), 0x7feb352d);
+  x = Math.imul(x ^ (x >>> 15), 0x846ca68b);
+  rngState = (x ^ (x >>> 16)) >>> 0;
+}
+
+function rand() {
+  rngState = (1664525 * rngState + 1013904223) >>> 0;
+  return rngState / 4294967296;
+}
+
+function randInt(max) {
+  return (rand() * max) | 0;
+}
+
+function shuffle(arr) {
+  for (let i = arr.length - 1; i > 0; i--) {
+    const j = randInt(i + 1);
+    [arr[i], arr[j]] = [arr[j], arr[i]];
+  }
+}
+
+// ============================================================================
+// GRID HELPERS
+// ============================================================================
+
+function toXY(i) {
+  return { x: i % CONFIG.COLS, y: (i / CONFIG.COLS) | 0 };
+}
+
+function toIndex(x, y) {
+  return y * CONFIG.COLS + x;
+}
+
+// Get cardinal neighbor index (-1 if out of bounds)
+// dir: 0=N, 1=E, 2=S, 3=W
+function getNeighbor(i, dir) {
+  const { x, y } = toXY(i);
+  switch (dir) {
+    case 0: return y > 0 ? toIndex(x, y - 1) : -1;                    // N
+    case 1: return x < CONFIG.COLS - 1 ? toIndex(x + 1, y) : -1;      // E
+    case 2: return y < CONFIG.ROWS - 1 ? toIndex(x, y + 1) : -1;      // S
+    case 3: return x > 0 ? toIndex(x - 1, y) : -1;                    // W
+  }
+  return -1;
+}
+
+// Get diagonal neighbor
+function getDiagonal(i, dir) {
+  const { x, y } = toXY(i);
+  // dir: 0=SW, 1=SE
+  const newY = y + 1;
+  if (newY >= CONFIG.ROWS) return -1;
+  const newX = dir === 0 ? x - 1 : x + 1;
+  if (newX < 0 || newX >= CONFIG.COLS) return -1;
+  return toIndex(newX, newY);
+}
+
+// ============================================================================
+// MOVEMENT
+// ============================================================================
+
+function movePhase() {
+  state_next.fill(EMPTY);
+  claimed.fill(0);
+
+  // Shuffle processing order
+  shuffle(processingOrder);
+
+  for (let idx = 0; idx < N; idx++) {
+    const i = processingOrder[idx];
+    const s = state[i];
+
+    if (s === EMPTY) continue;
+
+    if (s === R) {
+      moveR(i);
+    } else if (s === G) {
+      moveG(i);
+    } else if (s === B) {
+      moveB(i);
+    }
+  }
+}
+
+function tryMove(from, to, cellState) {
+  if (to < 0) return false;
+  if (state[to] !== EMPTY) return false;
+  if (claimed[to]) return false;
+
+  claimed[to] = 1;
+  state_next[to] = cellState;
+  return true;
+}
+
+function stayPut(i, cellState) {
+  claimed[i] = 1;
+  state_next[i] = cellState;
+}
+
+// R: random cardinal movement
+function moveR(i) {
+  const dir = randInt(4);
+  const target = getNeighbor(i, dir);
+
+  if (!tryMove(i, target, R)) {
+    stayPut(i, R);
+  }
+}
+
+// G: falls straight down only
+function moveG(i) {
+  const below = getNeighbor(i, 2);  // South
+
+  if (!tryMove(i, below, G)) {
+    stayPut(i, G);
+  }
+}
+
+// B: tries down, then down-diagonals (random order), then laterals (random order)
+function moveB(i) {
+  // Try straight down
+  const below = getNeighbor(i, 2);
+  if (tryMove(i, below, B)) return;
+
+  // Try down-diagonals in random order
+  const diagFirst = randInt(2);  // 0=SW first, 1=SE first
+  const diag1 = getDiagonal(i, diagFirst);
+  const diag2 = getDiagonal(i, 1 - diagFirst);
+
+  if (tryMove(i, diag1, B)) return;
+  if (tryMove(i, diag2, B)) return;
+
+  // Try laterals in random order
+  const latFirst = randInt(2);  // 0=W first, 1=E first
+  const lat1 = getNeighbor(i, latFirst === 0 ? 3 : 1);  // W or E
+  const lat2 = getNeighbor(i, latFirst === 0 ? 1 : 3);  // E or W
+
+  if (tryMove(i, lat1, B)) return;
+  if (tryMove(i, lat2, B)) return;
+
+  // Can't move - stay put
+  stayPut(i, B);
+}
+
+// ============================================================================
+// TRANSMUTATION
+// ============================================================================
+
+function transmutePhase() {
+  // For each cell, check if any neighbor converts it
+  // R converts G to R
+  // G converts B to G
+  // B converts R to B
+
+  for (let i = 0; i < N; i++) {
+    const s = state[i];
+
+    if (s === EMPTY) {
+      state_next[i] = EMPTY;
+      continue;
+    }
+
+    // Start with current state
+    let newState = s;
+
+    // Check all cardinal neighbors for attackers
+    for (let d = 0; d < 4; d++) {
+      const n = getNeighbor(i, d);
+      if (n < 0) continue;
+
+      const ns = state[n];
+
+      // Roll for transmutation (currently 100%)
+      if (rand() > CONFIG.TRANSMUTE_PROB) continue;
+
+      // R beats G: if I'm G and neighbor is R, I become R
+      if (s === G && ns === R) {
+        newState = R;
+        break;
+      }
+      // G beats B: if I'm B and neighbor is G, I become G
+      if (s === B && ns === G) {
+        newState = G;
+        break;
+      }
+      // B beats R: if I'm R and neighbor is B, I become B
+      if (s === R && ns === B) {
+        newState = B;
+        break;
+      }
+    }
+
+    state_next[i] = newState;
+  }
+}
+
+// ============================================================================
+// MAIN TICK
+// ============================================================================
+
+function tick() {
+  // Phase 1: Movement
+  movePhase();
+  [state, state_next] = [state_next, state];
+
+  // Phase 2: Transmutation
+  transmutePhase();
+  [state, state_next] = [state_next, state];
+
+  ticks++;
+  render();
+  updateStats();
+}
+
+// ============================================================================
+// RENDERING
+// ============================================================================
+
+let app, texture, sprite, rgba;
+
+function initRenderer() {
+  app = new PIXI.Application({
+    width: CONFIG.COLS * CONFIG.CELL_SIZE,
+    height: CONFIG.ROWS * CONFIG.CELL_SIZE,
+    backgroundColor: 0x000000,
+  });
+
+  document.getElementById('canvas-container').appendChild(app.view);
+  app.view.style.imageRendering = 'pixelated';
+
+  rgba = new Uint8Array(N * 4);
+  texture = PIXI.Texture.fromBuffer(rgba, CONFIG.COLS, CONFIG.ROWS);
+  sprite = new PIXI.Sprite(texture);
+  sprite.scale.set(CONFIG.CELL_SIZE);
+  app.stage.addChild(sprite);
+}
+
+function render() {
+  for (let i = 0; i < N; i++) {
+    const s = state[i];
+    const j = i * 4;
+    const [r, g, b] = STATE_COLORS[s];
+    rgba[j] = r;
+    rgba[j + 1] = g;
+    rgba[j + 2] = b;
+    rgba[j + 3] = 255;
+  }
+  texture.baseTexture.update();
+}
+
+// ============================================================================
+// INITIALIZATION
+// ============================================================================
+
+function initState() {
+  const params = new URLSearchParams(window.location.search);
+  const urlSeed = params.get('seed');
+
+  if (urlSeed !== null && !isNaN(parseInt(urlSeed))) {
+    currentSeed = parseInt(urlSeed) >>> 0;
+  } else if (CONFIG.SEED !== null) {
+    currentSeed = CONFIG.SEED >>> 0;
+  } else {
+    currentSeed = (Math.random() * 0xFFFFFFFF) >>> 0;
+  }
+
+  initRNG(currentSeed);
+  console.log(`Seed: ${currentSeed}`);
+
+  state.fill(EMPTY);
+
+  // Place R, G, B blocks in 3 randomly chosen corners (seed-dependent)
+  placeBlocksRandomCorners();
+
+  ticks = 0;
+}
+
+function placeBlocksRandomCorners() {
+  // 4 corner positions
+  const corners = [
+    { x: 0, y: 0 },                                              // Top-left
+    { x: CONFIG.COLS - CONFIG.BLOCK_SIZE, y: 0 },                // Top-right
+    { x: 0, y: CONFIG.ROWS - CONFIG.BLOCK_SIZE },                // Bottom-left
+    { x: CONFIG.COLS - CONFIG.BLOCK_SIZE, y: CONFIG.ROWS - CONFIG.BLOCK_SIZE }  // Bottom-right
+  ];
+
+  // Shuffle corners
+  shuffle(corners);
+
+  // Place R, G, B in first 3 shuffled corners (4th stays empty)
+  const states = [R, G, B];
+  for (let i = 0; i < 3; i++) {
+    placeBlock(corners[i].x, corners[i].y, states[i]);
+  }
+
+  console.log(`Corners: R@(${corners[0].x},${corners[0].y}), G@(${corners[1].x},${corners[1].y}), B@(${corners[2].x},${corners[2].y})`);
+}
+
+function placeBlock(startX, startY, cellState) {
+  for (let dy = 0; dy < CONFIG.BLOCK_SIZE; dy++) {
+    for (let dx = 0; dx < CONFIG.BLOCK_SIZE; dx++) {
+      const x = startX + dx;
+      const y = startY + dy;
+      if (x >= 0 && x < CONFIG.COLS && y >= 0 && y < CONFIG.ROWS) {
+        state[toIndex(x, y)] = cellState;
+      }
+    }
+  }
+}
+
+function reset(newRandomSeed = true) {
+  const params = new URLSearchParams(window.location.search);
+  const hasUrlSeed = params.get('seed') !== null;
+
+  if (newRandomSeed && !hasUrlSeed) {
+    currentSeed = (Math.random() * 0xFFFFFFFF) >>> 0;
+  }
+
+  initRNG(currentSeed);
+  state.fill(EMPTY);
+  placeBlocksRandomCorners();
+  ticks = 0;
+
+  render();
+  updateStats();
+  console.log(`Reset with seed: ${currentSeed}`);
+}
+
+// ============================================================================
+// STATS
+// ============================================================================
+
+function getCounts() {
+  let rCount = 0, gCount = 0, bCount = 0;
+  for (let i = 0; i < N; i++) {
+    if (state[i] === R) rCount++;
+    else if (state[i] === G) gCount++;
+    else if (state[i] === B) bCount++;
+  }
+  return { r: rCount, g: gCount, b: bCount, total: rCount + gCount + bCount };
+}
+
+function updateStats() {
+  const counts = getCounts();
+  document.getElementById('stats').innerHTML = `
+    Seed: <span style="color:#ff0">${currentSeed}</span> |
+    Tick: ${ticks} |
+    <span style="color:#f00">R: ${counts.r}</span> |
+    <span style="color:#0f0">G: ${counts.g}</span> |
+    <span style="color:#00f">B: ${counts.b}</span> |
+    Total: ${counts.total} |
+    ${paused ? 'PAUSED' : 'RUNNING'}
+  `;
+}
+
+// ============================================================================
+// CONTROLS
+// ============================================================================
+
+function initControls() {
+  document.addEventListener('keydown', (e) => {
+    if (e.key === ' ') {
+      if (paused) tick();
+      e.preventDefault();
+    }
+    if (e.key === 'p' || e.key === 'P') {
+      paused = !paused;
+      if (!paused) {
+        tickInterval = setInterval(tick, CONFIG.TICK_INTERVAL);
+      } else {
+        clearInterval(tickInterval);
+      }
+      updateStats();
+    }
+    if (e.key === 'r' || e.key === 'R') {
+      paused = true;
+      clearInterval(tickInterval);
+      reset(true);
+    }
+    if (e.key === 's' || e.key === 'S') {
+      paused = true;
+      clearInterval(tickInterval);
+      reset(false);
+    }
+  });
+}
+
+// ============================================================================
+// BOOT
+// ============================================================================
+
+function boot() {
+  initRenderer();
+  initState();
+  initControls();
+  render();
+  updateStats();
+
+  console.log(`RGBcycles Simple v1 initialized: ${CONFIG.COLS}x${CONFIG.ROWS}`);
+  console.log('R, G, B placed in 3 random corners (seed-dependent)');
+  console.log('Press Space to step, P to play/pause');
+}
+
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', boot);
+} else {
+  boot();
+}
+
+  </script>
+</body>
+</html>

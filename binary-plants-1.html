@@ -1,0 +1,754 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Binary Plants</title>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { background: #000000; overflow: hidden; font-family: 'Courier New', monospace; }
+canvas { display: block; }
+
+#status {
+  position: fixed;
+  top: 8px; left: 0; right: 0;
+  text-align: center;
+  color: #555;
+  font-size: 11px;
+  letter-spacing: 1px;
+  pointer-events: none;
+}
+
+#ui {
+  position: fixed;
+  bottom: 0; left: 0; right: 0;
+  height: 72px;
+  display: flex;
+  align-items: stretch;
+  background: rgba(5,5,5,0.92);
+  border-top: 1px solid #1a1a1a;
+}
+
+#btn0 {
+  flex: 1;
+  font-size: 26px; font-weight: bold;
+  border: none; border-right: 1px solid #111;
+  background: #0b1e3a;
+  color: #3a82ff;
+  cursor: pointer;
+  letter-spacing: 4px;
+  transition: background 0.08s;
+}
+#btn1 {
+  flex: 1;
+  font-size: 26px; font-weight: bold;
+  border: none;
+  background: #2a0e0e;
+  color: #ff4422;
+  cursor: pointer;
+  letter-spacing: 4px;
+  transition: background 0.08s;
+}
+#btn0:hover:not(:disabled) { background: #122a52; }
+#btn1:hover:not(:disabled) { background: #3d1414; }
+#btn0:active:not(:disabled) { background: #1a3f7a; }
+#btn1:active:not(:disabled) { background: #501e1e; }
+#btn0:disabled, #btn1:disabled { opacity: 0.12; cursor: default; }
+
+#urn-mid {
+  width: 72px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  flex-shrink: 0;
+  border-right: 1px solid #111;
+  border-left: 1px solid #111;
+}
+#urn-bar {
+  width: 48px; height: 8px;
+  border-radius: 4px;
+  background: #111;
+  overflow: hidden;
+}
+#urn-fill0 { height: 100%; background: #3a82ff; float: left; }
+#urn-fill1 { height: 100%; background: #ff4422; float: left; }
+#urn-label { font-size: 9px; color: #444; letter-spacing: 1px; }
+
+#hint {
+  position: fixed;
+  bottom: 80px; left: 0; right: 0;
+  text-align: center;
+  font-size: 10px; color: #333;
+  letter-spacing: 1px;
+  pointer-events: none;
+}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="status">sculpting...</div>
+<div id="hint">← 0 / 1 →  &nbsp;|&nbsp;  arrow keys work too</div>
+<div id="ui">
+  <button id="btn0">0</button>
+  <div id="urn-mid">
+    <div id="urn-bar"><div id="urn-fill0" style="width:50%"></div><div id="urn-fill1" style="width:50%"></div></div>
+    <div id="urn-label">1:1</div>
+  </div>
+  <button id="btn1">1</button>
+</div>
+
+<script>
+// ═══════════════════════════════════════════════════════
+//  BINARY PLANTS  ·  binary-plants-1.html
+//  Fork of urn-plants. User sculpts one ancestor plant
+//  (0 = don't grow, 1 = grow), then releases it into a
+//  shared world where offspring grow, disperse, and
+//  compete autonomously following inherited urn genes.
+// ═══════════════════════════════════════════════════════
+
+const canvas   = document.getElementById('c');
+const ctx      = canvas.getContext('2d');
+const statusEl = document.getElementById('status');
+const hintEl   = document.getElementById('hint');
+const btn0     = document.getElementById('btn0');
+const btn1     = document.getElementById('btn1');
+const urnFill0 = document.getElementById('urn-fill0');
+const urnFill1 = document.getElementById('urn-fill1');
+const urnLabel = document.getElementById('urn-label');
+
+const UI_H = 72;
+function resize() {
+  canvas.width  = window.innerWidth;
+  canvas.height = window.innerHeight - UI_H;
+}
+resize();
+window.addEventListener('resize', resize);
+
+// ─── CONSTANTS ───────────────────────────────────────
+const MARGIN        = 5;    // viewport padding (cells) around bounding box
+const MIN_VIEW      = 28;   // minimum cell span for viewport
+const CELL_MAX_PX   = 30;
+const CELL_MIN_PX   = 1;
+const LEARNING      = 100;   // urn copies added per decision (reinforcement)
+const MUTATION_RATE = 0.00; // probability each gene value flips on inheritance
+const MAX_DEPTH     = 9;    // maximum growth depth per plant
+const LIFESPAN      = 90;   // ticks a plant lives after reaching maturity
+const DISPERSE_STEPS = 22;  // steps a seed walks before attempting to land
+const SEARCH_STEPS   = 18;  // additional search steps if landing blocked
+const CLEARANCE      = 1;   // cell radius that must be clear for seed to land
+
+
+const TICK_MS        = 10;  // milliseconds per simulation tick
+
+// ─── DIRECTIONS ──────────────────────────────────────
+const DELTA = {
+  up:    { dx:  0, dy: -1 },
+  right: { dx:  1, dy:  0 },
+  down:  { dx:  0, dy:  1 },
+  left:  { dx: -1, dy:  0 },
+};
+const REL_TO_ABS = {
+  up:    { left: 'left',  forward: 'up',    right: 'right' },
+  right: { left: 'up',   forward: 'right', right: 'down'  },
+  down:  { left: 'right', forward: 'down',  right: 'left'  },
+  left:  { left: 'down', forward: 'left',  right: 'up'    },
+};
+const DIRS4 = ['up', 'right', 'down', 'left'];
+const RELS  = ['left', 'forward', 'right'];
+
+// ─── SPATIAL INDEX ───────────────────────────────────
+// Flat map for O(1) point queries; quadtree for range/radius queries.
+class QTNode {
+  constructor(x, y, w, h, depth = 0) {
+    this.x = x; this.y = y; this.w = w; this.h = h; this.depth = depth;
+    this.items = []; // { x, y, data }
+    this.kids  = null;
+  }
+  contains(x, y) {
+    return x >= this.x && x < this.x + this.w && y >= this.y && y < this.y + this.h;
+  }
+  overlaps(x1, y1, x2, y2) {
+    return !(x2 < this.x || x1 >= this.x + this.w || y2 < this.y || y1 >= this.y + this.h);
+  }
+  split() {
+    const hw = this.w / 2, hh = this.h / 2;
+    this.kids = [
+      new QTNode(this.x,      this.y,      hw, hh, this.depth + 1),
+      new QTNode(this.x + hw, this.y,      hw, hh, this.depth + 1),
+      new QTNode(this.x,      this.y + hh, hw, hh, this.depth + 1),
+      new QTNode(this.x + hw, this.y + hh, hw, hh, this.depth + 1),
+    ];
+    for (const p of this.items)
+      for (const k of this.kids)
+        if (k.contains(p.x, p.y)) k.items.push(p);
+    this.items = [];
+  }
+  insert(x, y, data) {
+    if (!this.contains(x, y)) return;
+    if (this.kids) { for (const k of this.kids) k.insert(x, y, data); return; }
+    this.items.push({ x, y, data });
+    if (this.items.length > 10 && this.depth < 12) this.split();
+  }
+  remove(x, y) {
+    if (!this.contains(x, y)) return;
+    if (this.kids) { for (const k of this.kids) k.remove(x, y); return; }
+    this.items = this.items.filter(p => !(p.x === x && p.y === y));
+  }
+  query(x1, y1, x2, y2, out) {
+    if (!this.overlaps(x1, y1, x2, y2)) return;
+    if (this.kids) { for (const k of this.kids) k.query(x1, y1, x2, y2, out); return; }
+    for (const p of this.items)
+      if (p.x >= x1 && p.x <= x2 && p.y >= y1 && p.y <= y2) out.push(p.data);
+  }
+}
+
+class SpatialIndex {
+  constructor() {
+    this.map = new Map();                                 // "x,y" → data
+    this.qt  = new QTNode(-32768, -32768, 65536, 65536); // world-space quadtree
+  }
+  skey(x, y) { return x + ',' + y; }
+  insert(x, y, data) { this.map.set(this.skey(x, y), data); this.qt.insert(x, y, data); }
+  remove(x, y)       { this.map.delete(this.skey(x, y)); this.qt.remove(x, y); }
+  has(x, y)          { return this.map.has(this.skey(x, y)); }
+  get(x, y)          { return this.map.get(this.skey(x, y)); }
+  near(x, y, r)      { const out = []; this.qt.query(x - r, y - r, x + r, y + r, out); return out; }
+  hasNearOther(x, y, r, excludePlantId) {
+    const items = this.near(x, y, r);
+    for (const item of items)
+      if (item.plantId !== excludePlantId) return true;
+    return false;
+  }
+}
+
+const world = new SpatialIndex(); // global occupancy
+
+// ─── GENE BANK ───────────────────────────────────────
+const DEFAULT_URN = [0, 0, 0, 1]; // unexplored junctions are 3:1 against growing
+
+class GeneBank {
+  constructor(src = null) {
+    this.map = new Map();
+    if (src) {
+      // Inherit parent urns with per-value mutation
+      for (const [k, v] of src.map)
+        this.map.set(k, v.map(x => Math.random() < MUTATION_RATE ? 1 - x : x));
+    }
+  }
+  preview(key) { return this.map.has(key) ? this.map.get(key).slice() : DEFAULT_URN.slice(); }
+  sample(key) {
+    const pool = this.map.get(key) || DEFAULT_URN;
+    return pool[Math.floor(Math.random() * pool.length)];
+  }
+  append(key, val) {
+    let arr = this.map.get(key);
+    if (!arr) { arr = DEFAULT_URN.slice(); this.map.set(key, arr); }
+    for (let i = 0; i < LEARNING; i++) arr.push(val);
+  }
+}
+
+// ─── CELL ────────────────────────────────────────────
+class Cell {
+  constructor(plantId, type, x, y, orient, depth, pathKey) {
+    this.plantId = plantId;
+    this.type    = type;      // 'seed' | 'body'
+    this.x = x; this.y = y;
+    this.orient  = orient;    // incoming absolute direction (null for seed)
+    this.depth   = depth;
+    this.pathKey = pathKey;
+    this.sides   = (type === 'body') ? {} : null; // rel → { val, forced }
+  }
+}
+
+// ─── PLANT ───────────────────────────────────────────
+let plantIdSeq = 0;
+
+class Plant {
+  constructor(sx, sy, genes = null) {
+    this.id         = plantIdSeq++;
+    this.genes      = genes instanceof GeneBank ? genes : new GeneBank();
+    this.cells      = [];
+    this.localOcc   = new Map();  // "x,y" → Cell
+    this.frontiers  = new Map();  // depth → tip[]
+    this.mature     = false;
+    this.reproduced = false;
+    this.bornAt     = tick;  // for safety-net timeout
+    this.maturedAt  = -1;
+    this.deadAt     = -1;
+    this.seedX = sx; this.seedY = sy;
+
+    // Place root seed cell
+    const seed = new Cell(this.id, 'seed', sx, sy, null, 0, '');
+    this._place(seed);
+    // Queue first growth attempts from seed in all 4 directions
+    this._enq({ kind: 'seedTry', x: sx, y: sy, tryIdx: 0, dirs: DIRS4, depth: 0, path: '' });
+  }
+
+  _place(cell) {
+    this.cells.push(cell);
+    this.localOcc.set(cell.x + ',' + cell.y, cell);
+    world.insert(cell.x, cell.y, cell);
+    expandBounds(cell.x, cell.y);
+  }
+  _hasLocal(x, y) { return this.localOcc.has(x + ',' + y); }
+  _enq(tip) {
+    if (tip.depth > MAX_DEPTH) return;
+    const d = tip.depth;
+    if (!this.frontiers.has(d)) this.frontiers.set(d, []);
+    this.frontiers.get(d).push(tip);
+  }
+  hasTips() {
+    for (const [, arr] of this.frontiers) if (arr.length) return true;
+    return false;
+  }
+  popTip() {
+    // Depth-first (smallest depth first = breadth across each layer)
+    let minD = Infinity;
+    for (const [d, arr] of this.frontiers) if (arr.length && d < minD) minD = d;
+    if (minD === Infinity) return null;
+    return this.frontiers.get(minD).shift();
+  }
+  die() {
+    for (const c of this.cells) world.remove(c.x, c.y);
+    this.cells = [];
+    this.localOcc.clear();
+  }
+}
+
+// ─── SEED WALKER ─────────────────────────────────────
+class SeedWalker {
+  constructor(parent, x, y) {
+    this.genes        = new GeneBank(parent.genes); // mutated copy
+    this.parentId     = parent.id;
+    this.x = x; this.y = y;
+    this.disperseLeft = DISPERSE_STEPS;
+    this.searchLeft   = SEARCH_STEPS;
+    this.alive        = true;
+    this.createdTick  = tick; // for age-based timeout
+    // Bias walk direction outward from parent's root
+    const dx = x - parent.seedX, dy = y - parent.seedY;
+    this.urn = buildBiasUrn(dx, dy);
+  }
+  step() {
+    const dir = this.urn[Math.floor(Math.random() * this.urn.length)];
+    this.x += DELTA[dir].dx;
+    this.y += DELTA[dir].dy;
+    // Seeds do NOT expand viewport bounds — only rooted plant cells do
+    if (this.disperseLeft > 0) { this.disperseLeft--; return 'walking'; }
+    // Try to land — need CLEARANCE cells of empty space from any plant
+    if (!world.hasNearOther(this.x, this.y, CLEARANCE, -1)) return 'land';
+    if (--this.searchLeft <= 0) return 'die';
+    return 'searching';
+  }
+}
+
+function buildBiasUrn(dx, dy) {
+  const u = [...DIRS4];
+  if (dx > 0) u.push('right', 'right');
+  if (dx < 0) u.push('left',  'left');
+  if (dy > 0) u.push('down',  'down');
+  if (dy < 0) u.push('up',    'up');
+  return u;
+}
+
+// ─── BOUNDING BOX ────────────────────────────────────
+let bMinX = 0, bMinY = 0, bMaxX = 0, bMaxY = 0, bInit = false;
+
+function expandBounds(x, y) {
+  if (!bInit) { bMinX = bMaxX = x; bMinY = bMaxY = y; bInit = true; return; }
+  if (x < bMinX) bMinX = x; if (x > bMaxX) bMaxX = x;
+  if (y < bMinY) bMinY = y; if (y > bMaxY) bMaxY = y;
+}
+
+function recomputeBounds() {
+  bInit = false;
+  for (const pl of plants) for (const c of pl.cells) expandBounds(c.x, c.y);
+  // Seeds deliberately excluded — they don't drive viewport expansion
+}
+
+// ─── VIEWPORT ────────────────────────────────────────
+let vp = { offX: 0, offY: 0, sc: 20 };
+
+function computeVP() {
+  if (!bInit) return { offX: canvas.width / 2, offY: canvas.height / 2, sc: 20 };
+  const minX = bMinX - MARGIN, minY = bMinY - MARGIN;
+  const maxX = bMaxX + MARGIN, maxY = bMaxY + MARGIN;
+  const spanX = Math.max(MIN_VIEW, maxX - minX + 1);
+  const spanY = Math.max(MIN_VIEW, maxY - minY + 1);
+  // Keep actual content centred if span is padded to minimum
+  const cx = (bMinX + bMaxX) / 2, cy = (bMinY + bMaxY) / 2;
+  const vx = cx - spanX / 2,     vy = cy - spanY / 2;
+  let sc = Math.min(canvas.width / spanX, canvas.height / spanY);
+  sc = Math.max(CELL_MIN_PX, Math.min(CELL_MAX_PX, sc));
+  const offX = (canvas.width  - spanX * sc) / 2 - vx * sc;
+  const offY = (canvas.height - spanY * sc) / 2 - vy * sc;
+  return { offX, offY, sc };
+}
+
+// ─── DECISION ENGINE ─────────────────────────────────
+function computeKey(tip) {
+  if (tip.kind === 'seedTry') return `${tip.path}/SLOT:${tip.dirs[tip.tryIdx]}`;
+  if (tip.kind === 'bodyDir') return `${tip.path}/DIR:${tip.rel}`;
+  return 'x';
+}
+
+const OPPOSITE = { up: 'down', down: 'up', left: 'right', right: 'left' };
+
+// A cell can be placed at (nx, ny) only if:
+//   • the spot is unoccupied, AND
+//   • all 3 cardinal neighbors except the producing cell are also unoccupied.
+// This prevents dense packing and self-intersection; those walls also aren't fertile.
+function canPlace(plant, nx, ny, fromDir = null) {
+  if (world.has(nx, ny)) return false;
+  if (fromDir !== null) {
+    const back = OPPOSITE[fromDir]; // direction pointing back at the producing cell
+    for (const dir of DIRS4) {
+      if (dir === back) continue;   // skip the cell we came from
+      const { dx, dy } = DELTA[dir];
+      if (world.has(nx + dx, ny + dy)) return false;
+    }
+  }
+  return true;
+}
+
+// Return the target position and approach direction for a tip, or null.
+function tipTarget(tip) {
+  if (tip.kind === 'seedTry') {
+    const dir = tip.dirs[tip.tryIdx];
+    const { dx, dy } = DELTA[dir];
+    return { nx: tip.x + dx, ny: tip.y + dy, fromDir: dir };
+  }
+  if (tip.kind === 'bodyDir') {
+    const abs = REL_TO_ABS[tip.inDir][tip.rel];
+    const { dx, dy } = DELTA[abs];
+    return { nx: tip.x + dx, ny: tip.y + dy, fromDir: abs };
+  }
+  return null;
+}
+
+// Silently resolve a blocked tip as forced-0 (no urn interaction, not fertile).
+function resolveBlocked(plant, tip) {
+  if (tip.kind === 'seedTry') {
+    tryNextSeedDir(plant, tip); // skip this direction, try next
+  } else if (tip.kind === 'bodyDir') {
+    const parentCell = plant.localOcc.get(tip.x + ',' + tip.y);
+    if (parentCell && parentCell.sides)
+      parentCell.sides[tip.rel] = { val: 0, forced: true }; // blocked = not fertile
+  }
+}
+
+// Apply a gene decision (0 or 1) for a tip whose target is already confirmed valid.
+// Blocked targets must be resolved via resolveBlocked() before calling this.
+function applyDecision(plant, tip, val) {
+  const key = computeKey(tip);
+  plant.genes.append(key, val);
+
+  if (tip.kind === 'seedTry') {
+    if (val === 1) {
+      const dir = tip.dirs[tip.tryIdx];
+      const { nx, ny } = tipTarget(tip);
+      const body = new Cell(plant.id, 'body', nx, ny, dir, tip.depth + 1, `/B:${dir}`);
+      plant._place(body);
+      for (const rel of RELS)
+        plant._enq({ kind: 'bodyDir', x: nx, y: ny, inDir: dir, rel, depth: tip.depth + 1, path: body.pathKey });
+    } else {
+      tryNextSeedDir(plant, tip);
+    }
+    return;
+  }
+
+  if (tip.kind === 'bodyDir') {
+    const { nx, ny } = tipTarget(tip);
+    const abs = REL_TO_ABS[tip.inDir][tip.rel];
+    const parentCell = plant.localOcc.get(tip.x + ',' + tip.y);
+    if (val === 1) {
+      const body = new Cell(plant.id, 'body', nx, ny, abs, tip.depth + 1, `${tip.path}/B:${tip.rel}`);
+      plant._place(body);
+      for (const rel of RELS)
+        plant._enq({ kind: 'bodyDir', x: nx, y: ny, inDir: abs, rel, depth: tip.depth + 1, path: body.pathKey });
+      if (parentCell && parentCell.sides) parentCell.sides[tip.rel] = { val: 1, forced: false };
+    } else {
+      // Freely chose 0 → fertile (may spawn seed)
+      if (parentCell && parentCell.sides) parentCell.sides[tip.rel] = { val: 0, forced: false };
+    }
+    return;
+  }
+}
+
+function tryNextSeedDir(plant, tip) {
+  const next = tip.tryIdx + 1;
+  if (next < tip.dirs.length)
+    plant._enq({ kind: 'seedTry', x: tip.x, y: tip.y, tryIdx: next, dirs: tip.dirs, depth: tip.depth, path: tip.path });
+}
+
+// ─── SEED SPAWNING ───────────────────────────────────
+function spawnSeeds(plant) {
+  for (const cell of plant.cells) {
+    if (cell.type !== 'body' || !cell.sides) continue;
+    for (const rel of RELS) {
+      const s = cell.sides[rel];
+      // Spawn seed from naturally-empty sides (chose 0, not blocked), 25% chance each
+      if (s && s.val === 0 && !s.forced && Math.random() < 0.25) {
+        const abs = REL_TO_ABS[cell.orient][rel];
+        const { dx, dy } = DELTA[abs];
+        const sx = cell.x + dx, sy = cell.y + dy;
+        seeds.push(new SeedWalker(plant, sx, sy));
+      }
+    }
+  }
+}
+
+// ─── GLOBAL STATE ────────────────────────────────────
+const plants = [];
+const seeds  = [];
+let phase       = 'sculpt'; // 'sculpt' | 'sim'
+let sculptPlant = null;
+let pendingTip  = null;
+let tick        = 0;
+
+// ─── SCULPTING PHASE ─────────────────────────────────
+function startSculpt() {
+  sculptPlant = new Plant(0, 0);
+  plants.push(sculptPlant);
+  advanceSculpt();
+}
+
+function advanceSculpt() {
+  // Loop past any tips whose target is already occupied — resolve them silently
+  // so the user is never asked to decide about an impossible placement.
+  while (true) {
+    pendingTip = sculptPlant.popTip();
+    if (!pendingTip) {
+      sculptPlant.mature = true;
+      sculptPlant.maturedAt = 0;
+      enterSim();
+      return;
+    }
+    const t = tipTarget(pendingTip);
+    if (t && !canPlace(sculptPlant, t.nx, t.ny, t.fromDir)) {
+      resolveBlocked(sculptPlant, pendingTip); // auto-resolve, stay in loop
+    } else {
+      updateSculptUI();
+      return;
+    }
+  }
+}
+
+function onChoice(val) {
+  if (phase !== 'sculpt' || !pendingTip) return;
+  applyDecision(sculptPlant, pendingTip, val);
+  advanceSculpt();
+}
+
+function updateSculptUI() {
+  const tip = pendingTip;
+  const key = computeKey(tip);
+  const urn = sculptPlant.genes.preview(key);
+  const c0  = urn.filter(v => v === 0).length;
+  const c1  = urn.filter(v => v === 1).length;
+  const tot = c0 + c1;
+  const pct0 = Math.round(c0 / tot * 100);
+  urnFill0.style.width = pct0 + '%';
+  urnFill1.style.width = (100 - pct0) + '%';
+  urnLabel.textContent = `${c0}:${c1}`;
+
+  let desc = '';
+  if (tip.kind === 'seedTry') desc = `seed → ${tip.dirs[tip.tryIdx]}?`;
+  if (tip.kind === 'bodyDir') desc = `branch → ${tip.rel}?`;
+  statusEl.textContent = desc;
+  btn0.disabled = false;
+  btn1.disabled = false;
+}
+
+// ─── SIMULATION PHASE ────────────────────────────────
+function enterSim() {
+  phase = 'sim';
+  btn0.disabled = true;
+  btn1.disabled = true;
+  urnFill0.style.width = '0%';
+  urnFill1.style.width = '0%';
+  urnLabel.textContent = '';
+  hintEl.style.display = 'none';
+}
+
+function simTick() {
+  tick++;
+
+  // 1. Grow plants — one tip per plant per tick, no cap.
+  // IMPORTANT: no `break` here. New plants land at the END of the array,
+  // so a budget `break` would starve them permanently, leaving ghost white dots.
+  for (const pl of plants) {
+    if (pl.mature || pl.deadAt >= 0) continue;
+    // Safety net: kill any plant still at 1 cell after a few ticks —
+    // catches plants whose tips never got processed due to any edge case.
+    if (pl.cells.length <= 1 && tick - pl.bornAt > 3) {
+      pl.die(); pl.deadAt = tick; continue;
+    }
+    const tip = pl.popTip();
+    if (tip) {
+      const t = tipTarget(tip);
+      if (t && !canPlace(pl, t.nx, t.ny, t.fromDir)) {
+        resolveBlocked(pl, tip); // blocked → silent forced-0, no urn interaction
+      } else {
+        applyDecision(pl, tip, pl.genes.sample(computeKey(tip)));
+      }
+    } else {
+      pl.mature    = true;
+      pl.maturedAt = tick;
+      if (pl.cells.length <= 1) { pl.die(); pl.deadAt = tick; }
+    }
+  }
+
+  // 2. Reproduce — newly matured plants spawn seeds once
+  for (const pl of plants) {
+    if (pl.mature && !pl.reproduced && pl.deadAt < 0) {
+      spawnSeeds(pl);
+      pl.reproduced = true;
+    }
+  }
+
+  // 3. Step all seeds — step each one, kill by max-age (2× plant lifespan)
+  const SEED_MAX_AGE = LIFESPAN * 2;
+  for (let i = seeds.length - 1; i >= 0; i--) {
+    const s = seeds[i];
+    if (!s.alive) { seeds.splice(i, 1); continue; }
+    if (tick - s.createdTick > SEED_MAX_AGE) { seeds.splice(i, 1); continue; }
+    const result = s.step();
+    if (result === 'land') {
+      plants.push(new Plant(s.x, s.y, s.genes));
+      seeds.splice(i, 1);
+    } else if (result === 'die') {
+      seeds.splice(i, 1);
+    }
+  }
+
+  // 4. Kill plants that have outlived their lifespan
+  for (const pl of plants) {
+    if (pl.mature && pl.deadAt < 0 && pl.maturedAt >= 0 && tick - pl.maturedAt > LIFESPAN) {
+      pl.die();
+      pl.deadAt = tick;
+    }
+  }
+
+  // 5. Recompute bounds + prune dead plants periodically
+  if (tick % 20 === 0) recomputeBounds();
+  if (tick % 80 === 0) {
+    for (let i = plants.length - 1; i >= 0; i--)
+      if (plants[i].deadAt >= 0 && tick - plants[i].deadAt > 120) plants.splice(i, 1);
+  }
+
+  // 6. Update status
+  const alive = plants.filter(p => p.deadAt < 0).length;
+  const growing = plants.filter(p => p.deadAt < 0 && !p.mature).length;
+  statusEl.textContent = `t:${tick} · plants:${alive} (${growing} growing) · seeds:${seeds.length}`;
+
+  // Extinction message
+  if (alive === 0 && seeds.length === 0) {
+    statusEl.textContent = 'extinct  — reload to start over';
+  }
+}
+
+// ─── RENDER ──────────────────────────────────────────
+function render() {
+  vp = computeVP();
+  const { offX, offY, sc } = vp;
+
+  ctx.fillStyle = '#000000';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+  // Plant cells — WHITE seed root, GREEN stems, bright GREEN nodes
+  for (const pl of plants) {
+    if (pl.deadAt >= 0) continue;
+    for (const cell of pl.cells) {
+      const px = cell.x * sc + offX;
+      const py = cell.y * sc + offY;
+      if (cell.type === 'seed') {
+        ctx.fillStyle = '#ffffff';  // WHITE — origin point
+      } else {
+        ctx.fillStyle = '#00ff00';  // GREEN — all body cells uniform
+      }
+      ctx.fillRect(px, py, sc, sc);
+    }
+  }
+
+  // Walking seeds — BLUE dots
+  const seedSz = Math.max(1, sc * 0.5);
+  for (const s of seeds) {
+    const px = s.x * sc + offX + (sc - seedSz) / 2;
+    const py = s.y * sc + offY + (sc - seedSz) / 2;
+    ctx.fillStyle = '#ff00ff'; // MAGENTA — R+B, seeds
+    ctx.fillRect(px, py, seedSz, seedSz);
+  }
+
+  // Sculpt-phase highlight: yellow cell indicating where '1' would grow
+  if (phase === 'sculpt' && pendingTip) {
+    const tip = pendingTip;
+    let hx = tip.x, hy = tip.y;
+    if (tip.kind === 'seedTry') {
+      const d = DELTA[tip.dirs[tip.tryIdx]];
+      hx = tip.x + d.dx; hy = tip.y + d.dy;
+    } else if (tip.kind === 'bodyDir') {
+      const abs = REL_TO_ABS[tip.inDir][tip.rel];
+      const d = DELTA[abs];
+      hx = tip.x + d.dx; hy = tip.y + d.dy;
+    }
+    const px = hx * sc + offX, py = hy * sc + offY;
+    ctx.fillStyle = 'rgba(255,255,0,0.18)';
+    ctx.fillRect(px, py, sc, sc);
+    const lw = Math.max(1, sc * 0.1);
+    ctx.strokeStyle = '#ffff00';
+    ctx.lineWidth = lw;
+    ctx.strokeRect(px + lw / 2, py + lw / 2, sc - lw, sc - lw);
+
+    // Also show a faint 0-preview (red X ghost) to show what clicking 0 means
+    if (sc >= 8) {
+      ctx.strokeStyle = 'rgba(255,60,20,0.25)';
+      ctx.lineWidth = Math.max(1, sc * 0.08);
+      ctx.beginPath();
+      ctx.moveTo(px + sc * 0.25, py + sc * 0.25);
+      ctx.lineTo(px + sc * 0.75, py + sc * 0.75);
+      ctx.moveTo(px + sc * 0.75, py + sc * 0.25);
+      ctx.lineTo(px + sc * 0.25, py + sc * 0.75);
+      ctx.stroke();
+    }
+  }
+}
+
+// ─── MAIN LOOP ───────────────────────────────────────
+let lastTs  = 0;
+let simAccum = 0;
+
+function loop(ts) {
+  const dt = Math.min(ts - lastTs, 200); // clamp to avoid spiral-of-death
+  lastTs = ts;
+
+  if (phase === 'sim') {
+    simAccum += dt;
+    while (simAccum >= TICK_MS) {
+      simAccum -= TICK_MS;
+      simTick();
+    }
+  }
+
+  render();
+  requestAnimationFrame(loop);
+}
+
+// ─── INPUT ───────────────────────────────────────────
+btn0.addEventListener('click', () => onChoice(0));
+btn1.addEventListener('click', () => onChoice(1));
+
+document.addEventListener('keydown', e => {
+  if (phase !== 'sculpt') return;
+  if (e.key === '0' || e.key === 'ArrowLeft')  { e.preventDefault(); onChoice(0); }
+  if (e.key === '1' || e.key === 'ArrowRight') { e.preventDefault(); onChoice(1); }
+});
+
+// ─── INIT ────────────────────────────────────────────
+startSculpt();
+requestAnimationFrame(ts => { lastTs = ts; loop(ts); });
+</script>
+</body>
+</html>

@@ -1,0 +1,506 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>Celestial Simulation</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{width:100%;height:100%;overflow:hidden;background:#000;touch-action:none}
+canvas{display:block}
+#loading{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);color:#889;font:16px monospace;z-index:20;text-align:center}
+#ui{position:fixed;bottom:0;left:0;right:0;padding:8px 8px 10px;background:rgba(0,0,10,0.85);
+  color:#aab;font:13px monospace;z-index:10;display:flex;flex-wrap:wrap;align-items:center;
+  justify-content:center;gap:6px;border-top:1px solid #223}
+#ui input,#ui select,#ui button{font:13px monospace;background:#112;color:#aab;
+  border:1px solid #334;padding:4px 8px;border-radius:4px;-webkit-appearance:none}
+#ui button{cursor:pointer;min-width:36px}
+#ui button:active{background:#334}
+#ui button.active{background:#335;border-color:#558}
+#datetime-display{width:100%;text-align:center;font-size:11px;opacity:0.6;margin-bottom:2px}
+#info{position:fixed;top:8px;left:8px;color:#556;font:11px monospace;z-index:10}
+.slider-row{width:100%;display:flex;align-items:center;gap:6px;font-size:11px}
+.slider-row label{flex-shrink:0;width:70px;text-align:right;opacity:0.7}
+.slider-row input[type=range]{flex:1;height:4px;-webkit-appearance:none;appearance:none;
+  background:#223;border:none;border-radius:2px;outline:none;padding:0}
+.slider-row input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:16px;height:16px;
+  border-radius:50%;background:#668;border:none;cursor:pointer}
+.slider-row span{flex-shrink:0;width:40px;font-size:11px;opacity:0.6}
+</style>
+<script src="https://cdn.jsdelivr.net/npm/astronomy-engine@2.1.19/astronomy.browser.min.js"></script>
+<script type="importmap">
+{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.183.2/build/three.module.js","three/addons/":"https://cdn.jsdelivr.net/npm/three@0.183.2/examples/jsm/"}}
+</script>
+</head>
+<body>
+<div id="loading">Loading stars...</div>
+<div id="info">Evanston, IL</div>
+<div id="ui">
+  <span id="datetime-display"></span>
+  <input type="date" id="date-input">
+  <input type="time" id="time-input" step="60">
+  <button id="now-btn">Now</button>
+  <button id="play-btn">&#9654;</button>
+  <select id="speed-select">
+    <option value="1">1m/s</option>
+    <option value="10">10m/s</option>
+    <option value="60" selected>1h/s</option>
+    <option value="1440">1d/s</option>
+  </select>
+  <button id="highlight-btn" class="active" title="Highlight planets">Planets</button>
+  <div class="slider-row">
+    <label>Stars</label>
+    <input type="range" id="star-slider" min="10" max="2800" value="2800" step="10">
+    <span id="star-count">2800</span>
+  </div>
+  <div class="slider-row">
+    <label>Ground</label>
+    <input type="range" id="ground-slider" min="0" max="100" value="25" step="1">
+    <span id="ground-val">25%</span>
+  </div>
+</div>
+
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+// ── Constants ──
+const DEG2RAD = Math.PI / 180;
+const RAD2DEG = 180 / Math.PI;
+const SKY_R = 500;
+const OBJ_R = 490;
+
+// ── Observer: Evanston, IL ──
+const observer = new Astronomy.Observer(41.88, -87.68, 0);
+
+// ── State ──
+let simDate = new Date();
+let playing = false;
+let speedMinPerSec = 60;
+let lastFrameTime = 0;
+let starData = null;       // full catalog (sorted by brightness)
+let maxStarsVisible = 2800;
+let highlightPlanets = true;
+let groundOpacity = 0.25; // 0 = no dimming, 1 = fully hidden below horizon
+
+// ── Renderer ──
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+document.body.appendChild(renderer.domElement);
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x000008);
+
+// ── Camera ──
+const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+camera.position.set(0, -0.001, 0.0001);
+
+// ── Controls ──
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.target.set(0, 0, 0);
+controls.enableZoom = false;
+controls.enablePan = false;
+controls.enableDamping = true;
+controls.dampingFactor = 0.12;
+controls.rotateSpeed = 0.5;
+
+// ── Sky Sphere ──
+scene.add(new THREE.Mesh(
+  new THREE.SphereGeometry(SKY_R, 48, 48),
+  new THREE.MeshBasicMaterial({ color: 0x000010, side: THREE.BackSide })
+));
+
+// ── Ground Hemisphere (lower half of sky, seen from inside) ──
+const groundMat = new THREE.MeshBasicMaterial({
+  color: 0x000008, side: THREE.BackSide, transparent: true, opacity: 0.25, depthTest: false
+});
+const ground = new THREE.Mesh(
+  new THREE.SphereGeometry(OBJ_R + 3, 48, 24, 0, Math.PI * 2, Math.PI / 2, Math.PI / 2),
+  groundMat
+);
+ground.renderOrder = 1;
+scene.add(ground);
+
+// ── Coordinate Helpers ──
+function azAltToXYZ(azDeg, altDeg, r) {
+  const azRad = azDeg * DEG2RAD;
+  const phi = (90 - altDeg) * DEG2RAD;
+  return new THREE.Vector3(
+    r * Math.sin(phi) * Math.sin(azRad),
+    r * Math.cos(phi),
+    -r * Math.sin(phi) * Math.cos(azRad)
+  );
+}
+
+function bvToRGB(bv) {
+  bv = Math.max(-0.4, Math.min(2.0, bv));
+  if (bv < 0) return [0.7 - bv * 0.5, 0.8 - bv * 0.3, 1.0];
+  if (bv < 0.4) { const t = bv / 0.4; return [1.0, 1.0 - 0.12 * t, 1.0 - 0.45 * t]; }
+  const t = Math.min(1, (bv - 0.4) / 1.2);
+  return [1.0, 0.88 - 0.48 * t, 0.55 - 0.4 * t];
+}
+
+// ── Stars ──
+let starPoints, starPositions, starColors, starSizes;
+
+const starVertShader = `
+  attribute float aSize;
+  attribute vec3 aColor;
+  varying vec3 vColor;
+  void main() {
+    vColor = aColor;
+    gl_PointSize = aSize;
+    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+  }
+`;
+const starFragShader = `
+  varying vec3 vColor;
+  void main() {
+    float d = length(gl_PointCoord - 0.5);
+    if (d > 0.5) discard;
+    float a = 1.0 - smoothstep(0.1, 0.5, d);
+    gl_FragColor = vec4(vColor, a);
+  }
+`;
+
+function initStars() {
+  const n = starData.length;
+  starPositions = new Float32Array(n * 3);
+  starColors = new Float32Array(n * 3);
+  starSizes = new Float32Array(n);
+
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(starPositions, 3));
+  geo.setAttribute('aColor', new THREE.BufferAttribute(starColors, 3));
+  geo.setAttribute('aSize', new THREE.BufferAttribute(starSizes, 1));
+
+  const mat = new THREE.ShaderMaterial({
+    vertexShader: starVertShader,
+    fragmentShader: starFragShader,
+    transparent: true,
+    depthTest: false
+  });
+
+  starPoints = new THREE.Points(geo, mat);
+  starPoints.renderOrder = 0;
+  scene.add(starPoints);
+}
+
+function updateStars(date) {
+  if (!starData) return;
+  const gast = Astronomy.SiderealTime(date);
+  const lstDeg = gast * 15 + observer.longitude;
+  const latRad = observer.latitude * DEG2RAD;
+  const sinLat = Math.sin(latRad);
+  const cosLat = Math.cos(latRad);
+  const dpr = window.devicePixelRatio || 1;
+
+  for (let i = 0; i < starData.length; i++) {
+    // Hide stars beyond the visibility cutoff
+    if (i >= maxStarsVisible) {
+      starPositions[i*3] = 0; starPositions[i*3+1] = 0; starPositions[i*3+2] = 0;
+      starSizes[i] = 0;
+      continue;
+    }
+
+    const raDeg = starData[i][2];
+    const decDeg = starData[i][3];
+    const mag = starData[i][1];
+    const bv = starData[i][4];
+
+    const haRad = (lstDeg - raDeg) * DEG2RAD;
+    const decRad = decDeg * DEG2RAD;
+    const sinDec = Math.sin(decRad);
+    const cosDec = Math.cos(decRad);
+    const cosHA = Math.cos(haRad);
+    const sinHA = Math.sin(haRad);
+
+    const sinAlt = sinDec * sinLat + cosDec * cosLat * cosHA;
+    const altRad = Math.asin(sinAlt);
+    const altDeg = altRad * RAD2DEG;
+
+    const azRad = Math.atan2(-cosDec * sinHA, sinDec * cosLat - cosDec * sinLat * cosHA);
+
+    const phi = Math.PI / 2 - altRad;
+    const sinPhi = Math.sin(phi);
+    const j = i * 3;
+    starPositions[j]     = OBJ_R * sinPhi * Math.sin(azRad);
+    starPositions[j + 1] = OBJ_R * Math.cos(phi);
+    starPositions[j + 2] = -OBJ_R * sinPhi * Math.cos(azRad);
+
+    const [cr, cg, cb] = bvToRGB(bv);
+    const dim = altDeg < 0 ? (1.0 - groundOpacity) : 1.0;
+    starColors[j]     = cr * dim;
+    starColors[j + 1] = cg * dim;
+    starColors[j + 2] = cb * dim;
+
+    starSizes[i] = Math.max(1.5, 7 - mag) * dpr;
+  }
+
+  starPoints.geometry.attributes.position.needsUpdate = true;
+  starPoints.geometry.attributes.aColor.needsUpdate = true;
+  starPoints.geometry.attributes.aSize.needsUpdate = true;
+}
+
+// ── Celestial Bodies (Sun + Planets) ──
+const bodyDefs = [
+  { name: 'Sun',     color: 0xffdd33, size: 14, hiSize: 140, label: '☉', textLabel: 'Sun' },
+  { name: 'Moon',    color: 0xddddcc, size: 11, hiSize: 120, label: '☽', textLabel: 'Moon' },
+  { name: 'Mercury', color: 0xaaaaaa, size: 5,  hiSize: 110, label: '☿', textLabel: 'Mercury' },
+  { name: 'Venus',   color: 0xffffcc, size: 7,  hiSize: 120, label: '♀', textLabel: 'Venus' },
+  { name: 'Mars',    color: 0xff5533, size: 6,  hiSize: 120, label: '♂', textLabel: 'Mars' },
+  { name: 'Jupiter', color: 0xddcc88, size: 7,  hiSize: 120, label: '♃', textLabel: 'Jupiter' },
+  { name: 'Saturn',  color: 0xccbb55, size: 6,  hiSize: 120, label: '♄', textLabel: 'Saturn' },
+];
+
+const bodySprites = [];
+
+function makeGlowTexture(hex, symbolLabel, textLabel, highlighted) {
+  const sz = highlighted ? 128 : 64;
+  const c = document.createElement('canvas');
+  c.width = sz; c.height = sz;
+  const ctx = c.getContext('2d');
+  const col = new THREE.Color(hex);
+  const r = Math.floor(col.r * 255), g = Math.floor(col.g * 255), b = Math.floor(col.b * 255);
+  const cx = sz / 2, cy = sz / 2;
+
+  if (highlighted) {
+    // Outer ring
+    ctx.strokeStyle = `rgba(${r},${g},${b},0.6)`;
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(cx, cy, sz * 0.38, 0, Math.PI * 2);
+    ctx.stroke();
+
+    // Big glow
+    const grad = ctx.createRadialGradient(cx, cy, 0, cx, cy, sz * 0.42);
+    grad.addColorStop(0, `rgba(${r},${g},${b},1)`);
+    grad.addColorStop(0.15, `rgba(${r},${g},${b},0.8)`);
+    grad.addColorStop(0.35, `rgba(${r},${g},${b},0.25)`);
+    grad.addColorStop(1, `rgba(${r},${g},${b},0)`);
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, sz, sz);
+
+    // Symbol
+    ctx.fillStyle = '#fff';
+    ctx.font = `bold ${sz * 0.22}px serif`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(symbolLabel, cx, cy);
+
+    // Text label below
+    ctx.fillStyle = `rgba(${r},${g},${b},0.9)`;
+    ctx.font = `bold ${sz * 0.13}px monospace`;
+    ctx.fillText(textLabel, cx, cy + sz * 0.28);
+  } else {
+    const grad = ctx.createRadialGradient(cx, cy, 0, cx, cy, sz * 0.44);
+    grad.addColorStop(0, `rgba(${r},${g},${b},1)`);
+    grad.addColorStop(0.25, `rgba(${r},${g},${b},0.7)`);
+    grad.addColorStop(1, `rgba(${r},${g},${b},0)`);
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, sz, sz);
+
+    ctx.fillStyle = '#fff';
+    ctx.font = `bold ${sz * 0.31}px serif`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(symbolLabel, cx, cy);
+  }
+
+  return new THREE.CanvasTexture(c);
+}
+
+function initBodies() {
+  bodyDefs.forEach(b => {
+    const tex = makeGlowTexture(b.color, b.label, b.textLabel, false);
+    const hiTex = makeGlowTexture(b.color, b.label, b.textLabel, true);
+    const mat = new THREE.SpriteMaterial({ map: tex, transparent: true, depthTest: false });
+    const sprite = new THREE.Sprite(mat);
+    sprite.scale.set(b.size, b.size, 1);
+    sprite.renderOrder = 2;
+    scene.add(sprite);
+    bodySprites.push({ def: b, sprite, normalTex: tex, hiTex });
+  });
+}
+
+function updateBodies(date) {
+  bodySprites.forEach(({ def, sprite, normalTex, hiTex }) => {
+    try {
+      const equ = Astronomy.Equator(def.name, date, observer, true, true);
+      const hor = Astronomy.Horizon(date, observer, equ.ra, equ.dec, 'normal');
+      const pos = azAltToXYZ(hor.azimuth, hor.altitude, OBJ_R);
+      sprite.position.copy(pos);
+      sprite.visible = true;
+
+      // Dim below horizon based on ground slider (0 = no dim, 1 = invisible)
+      sprite.material.opacity = hor.altitude < 0 ? (1.0 - groundOpacity) : 1.0;
+
+      if (highlightPlanets) {
+        sprite.material.map = hiTex;
+        sprite.material.needsUpdate = true;
+        sprite.scale.set(def.hiSize, def.hiSize, 1);
+      } else {
+        sprite.material.map = normalTex;
+        sprite.material.needsUpdate = true;
+        sprite.scale.set(def.size, def.size, 1);
+      }
+    } catch (e) {
+      sprite.visible = false;
+    }
+  });
+}
+
+// ── Cardinal Direction Labels ──
+function initCardinals() {
+  ['N','E','S','W'].forEach((txt, i) => {
+    const c = document.createElement('canvas');
+    c.width = 64; c.height = 64;
+    const ctx = c.getContext('2d');
+    ctx.fillStyle = '#445566';
+    ctx.font = 'bold 44px monospace';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(txt, 32, 32);
+
+    const tex = new THREE.CanvasTexture(c);
+    const mat = new THREE.SpriteMaterial({ map: tex, transparent: true, depthTest: false });
+    const sprite = new THREE.Sprite(mat);
+    sprite.scale.set(18, 18, 1);
+    sprite.position.copy(azAltToXYZ(i * 90, 3, OBJ_R));
+    sprite.renderOrder = 3;
+    scene.add(sprite);
+  });
+}
+
+// ── Load Star Data ──
+async function loadStars() {
+  const loadEl = document.getElementById('loading');
+  try {
+    const resp = await fetch('https://raw.githubusercontent.com/gmiller123456/hip2000/master/hipparcos_5_concise.js');
+    let text = await resp.text();
+    text = text.replace('hipparcos_catalog=', '').trim();
+    if (text.endsWith(';')) text = text.slice(0, -1);
+    text = text.replace(/,\s*]/g, ']').replace(/,\s*}/g, '}');
+    starData = JSON.parse(text);
+    starData = starData.filter(s => s[1] <= 5.5);
+    // Sort by brightness (lowest magnitude = brightest)
+    starData.sort((a, b) => a[1] - b[1]);
+
+    // Update slider max to actual count
+    const slider = document.getElementById('star-slider');
+    slider.max = starData.length;
+    slider.value = starData.length;
+    maxStarsVisible = starData.length;
+    document.getElementById('star-count').textContent = starData.length;
+
+    loadEl.style.display = 'none';
+    initStars();
+    updateAll();
+  } catch (e) {
+    loadEl.textContent = 'Error loading stars. Check connection.';
+    console.error(e);
+    updateBodies(simDate);
+  }
+}
+
+// ── UI ──
+const dateInput = document.getElementById('date-input');
+const timeInput = document.getElementById('time-input');
+const playBtn = document.getElementById('play-btn');
+const speedSelect = document.getElementById('speed-select');
+const dtDisplay = document.getElementById('datetime-display');
+const highlightBtn = document.getElementById('highlight-btn');
+const starSlider = document.getElementById('star-slider');
+const groundSlider = document.getElementById('ground-slider');
+
+function pad(n) { return String(n).padStart(2, '0'); }
+
+function syncUI() {
+  const d = simDate;
+  dateInput.value = `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
+  timeInput.value = `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  dtDisplay.textContent = d.toLocaleString();
+}
+
+function readUI() {
+  if (!dateInput.value || !timeInput.value) return;
+  const [y, m, d] = dateInput.value.split('-').map(Number);
+  const [hh, mm] = timeInput.value.split(':').map(Number);
+  simDate = new Date(y, m - 1, d, hh, mm);
+  updateAll();
+}
+
+document.getElementById('now-btn').addEventListener('click', () => {
+  simDate = new Date(); updateAll();
+});
+playBtn.addEventListener('click', () => {
+  playing = !playing;
+  playBtn.innerHTML = playing ? '&#9646;&#9646;' : '&#9654;';
+});
+speedSelect.addEventListener('change', () => { speedMinPerSec = +speedSelect.value; });
+dateInput.addEventListener('change', readUI);
+timeInput.addEventListener('change', readUI);
+
+// Highlight toggle
+highlightBtn.addEventListener('click', () => {
+  highlightPlanets = !highlightPlanets;
+  highlightBtn.classList.toggle('active', highlightPlanets);
+  updateBodies(simDate);
+});
+
+// Star count slider
+starSlider.addEventListener('input', () => {
+  maxStarsVisible = +starSlider.value;
+  document.getElementById('star-count').textContent = maxStarsVisible;
+  updateStars(simDate);
+});
+
+// Ground opacity slider — controls hemisphere + star/planet dimming together
+groundSlider.addEventListener('input', () => {
+  const val = +groundSlider.value;
+  groundOpacity = val / 100;
+  groundMat.opacity = groundOpacity;
+  document.getElementById('ground-val').textContent = val + '%';
+  updateStars(simDate);
+  updateBodies(simDate);
+});
+
+// ── Update All ──
+function updateAll() {
+  syncUI();
+  updateStars(simDate);
+  updateBodies(simDate);
+}
+
+// ── Resize ──
+window.addEventListener('resize', () => {
+  camera.aspect = window.innerWidth / window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+});
+
+// ── Animation Loop ──
+function animate(t) {
+  requestAnimationFrame(animate);
+
+  if (playing && lastFrameTime > 0) {
+    const dt = (t - lastFrameTime) / 1000;
+    simDate = new Date(simDate.getTime() + dt * speedMinPerSec * 60000);
+    updateAll();
+  }
+  lastFrameTime = t;
+
+  controls.update();
+  renderer.render(scene, camera);
+}
+
+// ── Init ──
+initBodies();
+initCardinals();
+syncUI();
+loadStars();
+animate(0);
+</script>
+</body>
+</html>

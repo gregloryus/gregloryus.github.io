@@ -1,0 +1,857 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>RGBcycles VascuLife v1</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body { height: 100%; overflow: hidden; background: #000; }
+    #canvas { display: block; image-rendering: pixelated; }
+    #ui {
+      position: absolute;
+      top: 10px;
+      left: 10px;
+      color: #fff;
+      font: 11px monospace;
+      background: rgba(0,0,0,0.7);
+      padding: 8px;
+      border-radius: 4px;
+      pointer-events: none;
+    }
+    #ui.hidden { opacity: 0; }
+  </style>
+</head>
+<body>
+<canvas id="canvas"></canvas>
+<div id="ui">
+  <div><b>VascuLife v1</b> | <span id="stats"></span></div>
+  <div style="color:#888;font-size:9px;margin-top:4px;">
+    Space=step | P=play | R=reset | H=hide UI | V=protection view
+  </div>
+</div>
+
+<script>
+// ============================================================================
+// RGBcycles VascuLife v1
+// ============================================================================
+// Protected G networks don't burn. R/B flow through protected G via headings.
+// Flickering render for vascular transport (R or B inside protected G).
+// ============================================================================
+
+console.log("RGBcycles VascuLife v1: Vascular architecture");
+
+// ============================================================================
+// CONFIGURATION
+// ============================================================================
+
+const CONFIG = {
+  cellSize: 8,
+  cols: 0,  // 0 = auto from window
+  rows: 0,
+  tickInterval: 50,
+
+  MOVE: {
+    BURN_UP: 0.40, BURN_DOWN: 0.20, BURN_LEFT: 0.20, BURN_RIGHT: 0.20,
+    BOIL_UP: 0.30, BOIL_DOWN: 0.20, BOIL_LEFT: 0.25, BOIL_RIGHT: 0.25,
+  },
+
+  DECOUPLE: { BURN: 1/8, BOIL: 1/16 },
+  TRANSMUTE: { BURN: 1/64, BOIL: 1/128, FREEZE: 1/128 },
+
+  WRAP_X: true,
+  WRAP_Y: false,
+  CONDENSE_AT_TOP: true,
+  SHOW_PROTECTION: false,
+};
+
+const DIR = { N: 0, E: 1, S: 2, W: 3 };
+
+// ============================================================================
+// STATE
+// ============================================================================
+
+let COLS, ROWS, N;
+let R, G, B;
+let R_next, G_next, B_next;
+let R_claimed, G_claimed, B_claimed;
+let protected_G;
+let neighborTable;
+let processingOrder;
+let rngState, currentSeed;
+let paused = true;
+let ticks = 0;
+let uiHidden = false;
+let lastTickTime = 0;
+let flickerFrame = 0; // For rapid color alternation
+
+const canvas = document.getElementById('canvas');
+const ctx = canvas.getContext('2d');
+
+// ============================================================================
+// HELPERS
+// ============================================================================
+
+function initRNG(seed) {
+  let x = seed;
+  x = Math.imul(x ^ (x >>> 16), 0x7feb352d);
+  x = Math.imul(x ^ (x >>> 15), 0x846ca68b);
+  rngState = (x ^ (x >>> 16)) >>> 0;
+}
+
+function rand() {
+  rngState = (1664525 * rngState + 1013904223) >>> 0;
+  return rngState / 4294967296;
+}
+
+function randInt(max) { return (rand() * max) | 0; }
+
+function shuffleOrder() {
+  for (let i = N - 1; i > 0; i--) {
+    const j = randInt(i + 1);
+    [processingOrder[i], processingOrder[j]] = [processingOrder[j], processingOrder[i]];
+  }
+}
+
+function hasR(i) { return R[i] === 1; }
+function hasG(i) { return (G[i] & 4) !== 0; }
+function hasB(i) { return B[i] > 0; }
+function isProtected(i) { return protected_G[i] === 1; }
+function getGHeading(i) { return G[i] & 3; }
+function getBMomentum(i) { return B[i]; }
+
+function setG(arr, i, exists, heading = DIR.N) {
+  arr[i] = exists ? (4 | (heading & 3)) : 0;
+}
+
+function getState(i) {
+  return (hasR(i) ? 4 : 0) | (hasG(i) ? 2 : 0) | (hasB(i) ? 1 : 0);
+}
+
+function toXY(i) { return { x: i % COLS, y: (i / COLS) | 0 }; }
+function toIndex(x, y) { return y * COLS + x; }
+function getNeighbor(i, dir) { return neighborTable[i * 4 + dir]; }
+function oppositeDir(d) { return (d + 2) % 4; }
+
+function buildNeighborTable() {
+  neighborTable = new Int32Array(N * 4);
+  for (let i = 0; i < N; i++) {
+    const { x, y } = toXY(i);
+    const base = i * 4;
+    neighborTable[base + DIR.N] = y > 0 ? toIndex(x, y-1) : (CONFIG.WRAP_Y ? toIndex(x, ROWS-1) : -1);
+    neighborTable[base + DIR.E] = x < COLS-1 ? toIndex(x+1, y) : (CONFIG.WRAP_X ? toIndex(0, y) : -1);
+    neighborTable[base + DIR.S] = y < ROWS-1 ? toIndex(x, y+1) : (CONFIG.WRAP_Y ? toIndex(x, 0) : -1);
+    neighborTable[base + DIR.W] = x > 0 ? toIndex(x-1, y) : (CONFIG.WRAP_X ? toIndex(COLS-1, y) : -1);
+  }
+}
+
+function pickDirection(up, down, left, right) {
+  const r = rand();
+  if (r < up) return DIR.N;
+  if (r < up + down) return DIR.S;
+  if (r < up + down + left) return DIR.W;
+  return DIR.E;
+}
+
+function randomDirection() { return randInt(4); }
+
+// Check if cell is supported (on bottom row OR has G neighbor below)
+function isSupported(i) {
+  const { y } = toXY(i);
+  if (y === ROWS - 1) return true; // Bottom row
+  const below = getNeighbor(i, DIR.S);
+  return below >= 0 && hasG(below);
+}
+
+// ============================================================================
+// PROTECTION (flood-fill from LIFE)
+// ============================================================================
+
+function computeProtection() {
+  protected_G.fill(0);
+  const stack = [];
+
+  // Find LIFE cells and seed flood fill
+  for (let i = 0; i < N; i++) {
+    if (hasR(i) && hasG(i) && hasB(i)) {
+      protected_G[i] = 1;
+      stack.push(i);
+    }
+  }
+
+  // Flood fill through connected G
+  while (stack.length > 0) {
+    const i = stack.pop();
+    for (let d = 0; d < 4; d++) {
+      const n = getNeighbor(i, d);
+      if (n >= 0 && hasG(n) && protected_G[n] === 0) {
+        protected_G[n] = 1;
+        stack.push(n);
+      }
+    }
+  }
+}
+
+// ============================================================================
+// MOVEMENT
+// ============================================================================
+
+function canClaimR(to) { return to >= 0 && R[to] === 0 && R_claimed[to] === 0; }
+function canClaimG(to) { return to >= 0 && !hasG(to) && G_claimed[to] === 0; }
+function canClaimB(to) { return to >= 0 && !hasB(to) && B_claimed[to] === 0; }
+
+function movePhase() {
+  R_next.fill(0);
+  G_next.fill(0);
+  B_next.fill(0);
+  R_claimed.fill(0);
+  G_claimed.fill(0);
+  B_claimed.fill(0);
+
+  shuffleOrder();
+
+  for (let idx = 0; idx < N; idx++) {
+    const i = processingOrder[idx];
+    const state = getState(i);
+
+    switch (state) {
+      case 0: break;
+      case 1: moveSoloB(i); break;
+      case 2: moveSoloG(i); break;
+      case 3: moveGwithB(i); break; // G+B (could be protected or not)
+      case 4: moveSoloR(i); break;
+      case 5: moveBoil(i); break;    // R+B (no G) - always raw coupling
+      case 6: moveGwithR(i); break;  // G+R (could be protected or not)
+      case 7: moveLife(i); break;    // R+G+B
+    }
+  }
+}
+
+function moveSoloR(i) {
+  // Inside protected G: flow opposite to heading
+  if (isProtected(i) && hasG(i)) {
+    const flowDir = oppositeDir(getGHeading(i));
+    let target = getNeighbor(i, flowDir);
+
+    // Prefer protected G neighbors
+    if (target >= 0 && hasG(target) && isProtected(target) && canClaimR(target)) {
+      R_claimed[target] = 1;
+      R_next[target] = 1;
+      return;
+    }
+    // Try other protected G
+    for (let d = 0; d < 4; d++) {
+      if (d === flowDir) continue;
+      const n = getNeighbor(i, d);
+      if (n >= 0 && hasG(n) && isProtected(n) && canClaimR(n)) {
+        R_claimed[n] = 1;
+        R_next[n] = 1;
+        return;
+      }
+    }
+    // Stay put
+    R_next[i] = 1;
+    R_claimed[i] = 1;
+    return;
+  }
+
+  // Raw R: random brownian
+  const dir = randomDirection();
+  const target = getNeighbor(i, dir);
+  if (canClaimR(target)) {
+    R_claimed[target] = 1;
+    R_next[target] = 1;
+  } else {
+    R_next[i] = 1;
+    R_claimed[i] = 1;
+  }
+}
+
+function moveSoloG(i) {
+  // Protected G: structural, doesn't fall
+  if (isProtected(i)) {
+    G_next[i] = G[i];
+    G_claimed[i] = 1;
+    return;
+  }
+
+  // Unprotected G: falls (no stickiness - simplified)
+  const below = getNeighbor(i, DIR.S);
+  if (canClaimG(below)) {
+    G_claimed[below] = 1;
+    G_next[below] = G[i];
+  } else {
+    G_next[i] = G[i];
+    G_claimed[i] = 1;
+  }
+}
+
+function moveSoloB(i) {
+  // Inside protected G: flow with heading
+  if (isProtected(i) && hasG(i)) {
+    const flowDir = getGHeading(i);
+    let target = getNeighbor(i, flowDir);
+
+    if (target >= 0 && hasG(target) && isProtected(target) && canClaimB(target)) {
+      B_claimed[target] = 1;
+      B_next[target] = B[i];
+      return;
+    }
+    for (let d = 0; d < 4; d++) {
+      if (d === flowDir) continue;
+      const n = getNeighbor(i, d);
+      if (n >= 0 && hasG(n) && isProtected(n) && canClaimB(n)) {
+        B_claimed[n] = 1;
+        B_next[n] = B[i];
+        return;
+      }
+    }
+    B_next[i] = B[i];
+    B_claimed[i] = 1;
+    return;
+  }
+
+  // Raw B: falls with momentum
+  const below = getNeighbor(i, DIR.S);
+  const momentum = getBMomentum(i);
+
+  if (canClaimB(below)) {
+    B_claimed[below] = 1;
+    B_next[below] = momentum;
+    return;
+  }
+
+  // Diagonal
+  const { x, y } = toXY(i);
+  let diagX = (momentum === 1) ? x - 1 : x + 1;
+  if (CONFIG.WRAP_X) diagX = (diagX + COLS) % COLS;
+  if (diagX >= 0 && diagX < COLS && y + 1 < ROWS) {
+    const diagIdx = toIndex(diagX, y + 1);
+    if (canClaimB(diagIdx)) {
+      B_claimed[diagIdx] = 1;
+      B_next[diagIdx] = momentum;
+      return;
+    }
+  }
+
+  // Lateral
+  const lateralDir = (momentum === 1) ? DIR.W : DIR.E;
+  const lateral = getNeighbor(i, lateralDir);
+  if (canClaimB(lateral)) {
+    B_claimed[lateral] = 1;
+    B_next[lateral] = momentum;
+    return;
+  }
+
+  // Flip momentum, stay
+  B_next[i] = (momentum === 1) ? 2 : 1;
+  B_claimed[i] = 1;
+}
+
+function moveGwithB(i) {
+  // G+B: If protected, they are SEPARATE (B flows through G, not coupled FREEZE)
+  if (isProtected(i)) {
+    // G stays, B flows with heading
+    G_next[i] = G[i];
+    G_claimed[i] = 1;
+
+    const flowDir = getGHeading(i);
+    let target = getNeighbor(i, flowDir);
+    if (target >= 0 && hasG(target) && isProtected(target) && canClaimB(target)) {
+      B_claimed[target] = 1;
+      B_next[target] = B[i];
+    } else {
+      // Try other directions or stay
+      let moved = false;
+      for (let d = 0; d < 4; d++) {
+        if (d === flowDir) continue;
+        const n = getNeighbor(i, d);
+        if (n >= 0 && hasG(n) && isProtected(n) && canClaimB(n)) {
+          B_claimed[n] = 1;
+          B_next[n] = B[i];
+          moved = true;
+          break;
+        }
+      }
+      if (!moved) {
+        B_next[i] = B[i];
+        B_claimed[i] = 1;
+      }
+    }
+    return;
+  }
+
+  // Unprotected G+B = FREEZE: falls together, no stickiness
+  const below = getNeighbor(i, DIR.S);
+  if (canClaimG(below) && canClaimB(below)) {
+    G_claimed[below] = 1;
+    B_claimed[below] = 1;
+    G_next[below] = G[i];
+    B_next[below] = B[i];
+  } else {
+    G_next[i] = G[i];
+    B_next[i] = B[i];
+    G_claimed[i] = 1;
+    B_claimed[i] = 1;
+  }
+}
+
+function moveGwithR(i) {
+  // G+R: If protected, they are SEPARATE (R flows through G)
+  if (isProtected(i)) {
+    G_next[i] = G[i];
+    G_claimed[i] = 1;
+
+    const flowDir = oppositeDir(getGHeading(i));
+    let target = getNeighbor(i, flowDir);
+    if (target >= 0 && hasG(target) && isProtected(target) && canClaimR(target)) {
+      R_claimed[target] = 1;
+      R_next[target] = 1;
+    } else {
+      let moved = false;
+      for (let d = 0; d < 4; d++) {
+        if (d === flowDir) continue;
+        const n = getNeighbor(i, d);
+        if (n >= 0 && hasG(n) && isProtected(n) && canClaimR(n)) {
+          R_claimed[n] = 1;
+          R_next[n] = 1;
+          moved = true;
+          break;
+        }
+      }
+      if (!moved) {
+        R_next[i] = 1;
+        R_claimed[i] = 1;
+      }
+    }
+    return;
+  }
+
+  // Unprotected G+R = BURN: chaotic upward movement
+  const dir = pickDirection(CONFIG.MOVE.BURN_UP, CONFIG.MOVE.BURN_DOWN,
+                            CONFIG.MOVE.BURN_LEFT, CONFIG.MOVE.BURN_RIGHT);
+  const target = getNeighbor(i, dir);
+  if (canClaimR(target) && canClaimG(target)) {
+    R_claimed[target] = 1;
+    G_claimed[target] = 1;
+    R_next[target] = 1;
+    G_next[target] = G[i];
+  } else {
+    R_next[i] = 1;
+    G_next[i] = G[i];
+    R_claimed[i] = 1;
+    G_claimed[i] = 1;
+  }
+}
+
+function moveBoil(i) {
+  // R+B (no G): always raw coupling, brownian
+  const dir = pickDirection(CONFIG.MOVE.BOIL_UP, CONFIG.MOVE.BOIL_DOWN,
+                            CONFIG.MOVE.BOIL_LEFT, CONFIG.MOVE.BOIL_RIGHT);
+  const target = getNeighbor(i, dir);
+  if (canClaimR(target) && canClaimB(target)) {
+    R_claimed[target] = 1;
+    B_claimed[target] = 1;
+    R_next[target] = 1;
+    B_next[target] = B[i];
+  } else {
+    R_next[i] = 1;
+    B_next[i] = B[i];
+    R_claimed[i] = 1;
+    B_claimed[i] = 1;
+  }
+}
+
+function moveLife(i) {
+  // R+G+B: stable but obeys gravity if not supported
+  if (!isSupported(i)) {
+    const below = getNeighbor(i, DIR.S);
+    if (canClaimR(below) && canClaimG(below) && canClaimB(below)) {
+      R_claimed[below] = 1;
+      G_claimed[below] = 1;
+      B_claimed[below] = 1;
+      R_next[below] = 1;
+      G_next[below] = G[i];
+      B_next[below] = B[i];
+      return;
+    }
+  }
+
+  // Stay put
+  R_next[i] = 1;
+  G_next[i] = G[i];
+  B_next[i] = B[i];
+  R_claimed[i] = 1;
+  G_claimed[i] = 1;
+  B_claimed[i] = 1;
+}
+
+// ============================================================================
+// DECOUPLING
+// ============================================================================
+
+function decouplePhase() {
+  for (let i = 0; i < N; i++) {
+    const r = R_next[i];
+    const gExists = (G_next[i] & 4) !== 0;
+    const bExists = B_next[i] > 0;
+
+    // BURN decoupling (R+G, no B) - only unprotected
+    if (r && gExists && !bExists && protected_G[i] === 0) {
+      if (rand() < CONFIG.DECOUPLE.BURN) {
+        const dir = randomDirection();
+        const target = getNeighbor(i, dir);
+        if (target >= 0 && R_next[target] === 0) {
+          R_next[i] = 0;
+          R_next[target] = 1;
+        }
+      }
+    }
+
+    // BOIL decoupling (R+B, no G)
+    if (r && !gExists && bExists) {
+      if (rand() < CONFIG.DECOUPLE.BOIL) {
+        const dir = randomDirection();
+        const target = getNeighbor(i, dir);
+        if (target >= 0 && R_next[target] === 0) {
+          R_next[i] = 0;
+          R_next[target] = 1;
+        }
+      }
+    }
+
+    // No FREEZE decoupling for unprotected G+B (they stay coupled until transmutation)
+    // Protected G+B aren't coupled anyway
+  }
+}
+
+// ============================================================================
+// TRANSMUTATION
+// ============================================================================
+
+function transmutePhase() {
+  for (let i = 0; i < N; i++) {
+    const r = R_next[i];
+    const gExists = (G_next[i] & 4) !== 0;
+    const bExists = B_next[i] > 0;
+    const { y } = toXY(i);
+
+    // R→B at top
+    if (r && y === 0 && CONFIG.CONDENSE_AT_TOP && !bExists) {
+      R_next[i] = 0;
+      B_next[i] = rand() < 0.5 ? 1 : 2;
+      continue;
+    }
+
+    // R→B surrounded by B
+    if (r && !bExists && surroundedByB(i)) {
+      R_next[i] = 0;
+      B_next[i] = rand() < 0.5 ? 1 : 2;
+      continue;
+    }
+
+    // BURN transmutation (G→R) - ONLY unprotected G
+    if (r && gExists && !bExists && protected_G[i] === 0) {
+      if (rand() < CONFIG.TRANSMUTE.BURN) {
+        G_next[i] = 0;
+        // Spread to unprotected dry G neighbor
+        let targets = [], dryG = [];
+        for (let d = 0; d < 4; d++) {
+          const n = getNeighbor(i, d);
+          if (n >= 0 && R_next[n] === 0) {
+            targets.push(n);
+            if ((G_next[n] & 4) !== 0 && B_next[n] === 0 && protected_G[n] === 0) {
+              dryG.push(n);
+            }
+          }
+        }
+        const list = dryG.length > 0 ? dryG : targets;
+        if (list.length > 0) R_next[list[randInt(list.length)]] = 1;
+      }
+    }
+
+    // BOIL transmutation (R→B)
+    if (r && !gExists && bExists) {
+      if (rand() < CONFIG.TRANSMUTE.BOIL) {
+        R_next[i] = 0;
+      }
+    }
+
+    // FREEZE transmutation (B→G growth) - only unprotected
+    if (!r && gExists && bExists && protected_G[i] === 0) {
+      if (rand() < CONFIG.TRANSMUTE.FREEZE) {
+        let empty = [];
+        for (let d = 0; d < 4; d++) {
+          const n = getNeighbor(i, d);
+          if (n >= 0 && (G_next[n] & 4) === 0) empty.push({ idx: n, dir: d });
+        }
+        if (empty.length > 0) {
+          B_next[i] = 0;
+          const choice = empty[randInt(empty.length)];
+          // Heading points away from parent
+          const headings = [DIR.S, DIR.W, DIR.N, DIR.E]; // opposite of N,E,S,W
+          setG(G_next, choice.idx, true, headings[choice.dir]);
+        }
+      }
+    }
+  }
+}
+
+function surroundedByB(i) {
+  let bCount = 0, valid = 0;
+  for (let d = 0; d < 4; d++) {
+    const n = getNeighbor(i, d);
+    if (n >= 0) { valid++; if (B_next[n] > 0) bCount++; }
+  }
+  return valid > 0 && bCount === valid;
+}
+
+// ============================================================================
+// MAIN TICK
+// ============================================================================
+
+function tick() {
+  computeProtection();
+  movePhase();
+  decouplePhase();
+  transmutePhase();
+
+  [R, R_next] = [R_next, R];
+  [G, G_next] = [G_next, G];
+  [B, B_next] = [B_next, B];
+
+  ticks++;
+}
+
+// ============================================================================
+// RENDERING (with flicker for vascular transport)
+// ============================================================================
+
+function render() {
+  flickerFrame++;
+
+  ctx.fillStyle = '#000';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+  const imgData = ctx.createImageData(COLS, ROWS);
+  const px = imgData.data;
+
+  for (let i = 0; i < N; i++) {
+    const pi = i * 4;
+    const r = hasR(i), g = hasG(i), b = hasB(i);
+    const prot = isProtected(i);
+
+    let cr = 0, cg = 0, cb = 0;
+
+    if (!r && !g && !b) {
+      // Empty: black
+    } else if (r && g && b) {
+      // LIFE: flicker white/red/green/blue
+      const phase = flickerFrame % 4;
+      if (phase === 0) { cr = 255; cg = 255; cb = 255; }
+      else if (phase === 1) { cr = 255; }
+      else if (phase === 2) { cg = 255; }
+      else { cb = 255; }
+    } else if (g && prot) {
+      // Protected G with possible R or B flowing through
+      if (r && b) {
+        // R+G+B but somehow not LIFE? Shouldn't happen, but flicker all
+        const phase = flickerFrame % 3;
+        if (phase === 0) { cr = 255; }
+        else if (phase === 1) { cg = 255; }
+        else { cb = 255; }
+      } else if (r) {
+        // R flowing through protected G: flicker red/green
+        if (flickerFrame % 2 === 0) { cr = 255; }
+        else { cg = 255; }
+      } else if (b) {
+        // B flowing through protected G: flicker blue/green
+        if (flickerFrame % 2 === 0) { cb = 255; }
+        else { cg = 255; }
+      } else {
+        // Just protected G: dark green
+        cg = CONFIG.SHOW_PROTECTION ? 128 : 255;
+      }
+    } else if (r && g) {
+      // BURN (unprotected): yellow
+      cr = 255; cg = 255;
+    } else if (g && b) {
+      // FREEZE (unprotected): cyan
+      cg = 255; cb = 255;
+    } else if (r && b) {
+      // BOIL: magenta
+      cr = 255; cb = 255;
+    } else if (r) {
+      // Solo R: red
+      cr = 255;
+    } else if (g) {
+      // Solo G (unprotected): bright green
+      cg = 255;
+    } else if (b) {
+      // Solo B: blue
+      cb = 255;
+    }
+
+    px[pi] = cr;
+    px[pi + 1] = cg;
+    px[pi + 2] = cb;
+    px[pi + 3] = 255;
+  }
+
+  // Draw to canvas scaled
+  const tmp = document.createElement('canvas');
+  tmp.width = COLS;
+  tmp.height = ROWS;
+  tmp.getContext('2d').putImageData(imgData, 0, 0);
+  ctx.imageSmoothingEnabled = false;
+  ctx.drawImage(tmp, 0, 0, COLS * CONFIG.cellSize, ROWS * CONFIG.cellSize);
+}
+
+function updateStats() {
+  let rC = 0, gC = 0, bC = 0, protC = 0, lifeC = 0;
+  for (let i = 0; i < N; i++) {
+    if (hasR(i)) rC++;
+    if (hasG(i)) gC++;
+    if (hasB(i)) bC++;
+    if (isProtected(i)) protC++;
+    if (hasR(i) && hasG(i) && hasB(i)) lifeC++;
+  }
+  document.getElementById('stats').innerHTML =
+    `Tick:${ticks} | R:${rC} G:${gC} B:${bC} | Total:${rC+gC+bC} | Prot:${protC} | LIFE:${lifeC} | ${paused ? 'PAUSED' : 'RUN'}`;
+}
+
+// ============================================================================
+// INITIALIZATION
+// ============================================================================
+
+function resize() {
+  canvas.width = innerWidth;
+  canvas.height = innerHeight;
+
+  COLS = CONFIG.cols > 0 ? CONFIG.cols : Math.floor(canvas.width / CONFIG.cellSize);
+  ROWS = CONFIG.rows > 0 ? CONFIG.rows : Math.floor(canvas.height / CONFIG.cellSize);
+  N = COLS * ROWS;
+
+  R = new Uint8Array(N);
+  G = new Uint8Array(N);
+  B = new Uint8Array(N);
+  R_next = new Uint8Array(N);
+  G_next = new Uint8Array(N);
+  B_next = new Uint8Array(N);
+  R_claimed = new Uint8Array(N);
+  G_claimed = new Uint8Array(N);
+  B_claimed = new Uint8Array(N);
+  protected_G = new Uint8Array(N);
+  processingOrder = new Uint32Array(N);
+  for (let i = 0; i < N; i++) processingOrder[i] = i;
+
+  buildNeighborTable();
+
+  if (!currentSeed) currentSeed = (Math.random() * 0xFFFFFFFF) >>> 0;
+  initRNG(currentSeed);
+
+  initState();
+  ticks = 0;
+  console.log(`Grid: ${COLS}x${ROWS}, seed: ${currentSeed}`);
+}
+
+function initState() {
+  R.fill(0);
+  G.fill(0);
+  B.fill(0);
+
+  // Single LIFE cell at bottom center
+  const cx = Math.floor(COLS / 2);
+  const cy = ROWS - 1;
+  const lifeIdx = toIndex(cx, cy);
+  setG(G, lifeIdx, true, DIR.N);
+  R[lifeIdx] = 1;
+  B[lifeIdx] = 1;
+
+  // Scatter some water at top
+  for (let x = 0; x < COLS; x++) {
+    if (rand() < 0.2) {
+      const i = toIndex(x, 0);
+      B[i] = rand() < 0.5 ? 1 : 2;
+    }
+  }
+
+  // Scatter some heat at bottom (not on LIFE cell)
+  for (let x = 0; x < COLS; x++) {
+    if (x !== cx && rand() < 0.15) {
+      const i = toIndex(x, ROWS - 1);
+      R[i] = 1;
+    }
+  }
+
+  // Scatter some unprotected fuel
+  for (let i = 0; i < N; i++) {
+    const { x, y } = toXY(i);
+    if (y > ROWS * 0.5 && y < ROWS - 1 && !hasG(i) && !hasR(i) && !hasB(i) && rand() < 0.04) {
+      setG(G, i, true, DIR.N);
+    }
+  }
+
+  computeProtection();
+}
+
+function reset(newSeed = true) {
+  if (newSeed) currentSeed = (Math.random() * 0xFFFFFFFF) >>> 0;
+  initRNG(currentSeed);
+  initState();
+  ticks = 0;
+}
+
+// ============================================================================
+// MAIN LOOP
+// ============================================================================
+
+function loop(timestamp) {
+  if (!paused) {
+    const elapsed = timestamp - lastTickTime;
+    if (elapsed >= CONFIG.tickInterval) {
+      tick();
+      lastTickTime = timestamp;
+    }
+  }
+  render();
+  updateStats();
+  requestAnimationFrame(loop);
+}
+
+// ============================================================================
+// CONTROLS
+// ============================================================================
+
+addEventListener('keydown', e => {
+  if (e.target.tagName === 'INPUT') return;
+  if (e.code === 'Space') { if (paused) tick(); e.preventDefault(); }
+  if (e.code === 'KeyP') { paused = !paused; }
+  if (e.code === 'KeyR') { paused = true; reset(true); }
+  if (e.code === 'KeyS') { paused = true; reset(false); }
+  if (e.code === 'KeyH') {
+    uiHidden = !uiHidden;
+    document.getElementById('ui').classList.toggle('hidden', uiHidden);
+  }
+  if (e.code === 'KeyV') {
+    CONFIG.SHOW_PROTECTION = !CONFIG.SHOW_PROTECTION;
+  }
+  if (e.code === 'KeyC') {
+    let rC = 0, gC = 0, bC = 0;
+    for (let i = 0; i < N; i++) { if (hasR(i)) rC++; if (hasG(i)) gC++; if (hasB(i)) bC++; }
+    console.log(`Tick ${ticks}: R=${rC}, G=${gC}, B=${bC}, Total=${rC+gC+bC}`);
+  }
+});
+
+addEventListener('resize', () => {
+  currentSeed = (Math.random() * 0xFFFFFFFF) >>> 0;
+  resize();
+});
+
+// Boot
+resize();
+loop();
+console.log('VascuLife v1: Space=step, P=play, R=reset, H=hide UI, V=protection view');
+</script>
+</body>
+</html>
