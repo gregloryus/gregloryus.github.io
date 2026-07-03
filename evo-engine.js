@@ -29,13 +29,14 @@ const EMPTY = 0;
 const SOIL = 1;
 const WATER = 2;
 
-const DISPERSE = 8; // how far surface water looks sideways for a drop
+const SLOSH = 32; // max consecutive sideways steps before water rests (<= 63)
 const RAIN_RATE = 64; // water cells spawned per tick while raining
 const FF_FACTOR = 10;
 
 // --- State (all flat typed arrays, no objects) ---
 const type = new Uint8Array(N);
-const flow = new Uint8Array(N); // lateral persistence: 0 none, 1 left, 2 right
+const flow = new Uint8Array(N); // bits 0-1: direction (0 none, 1 left, 2 right); bits 2-7: sideways streak
+const lastMoved = new Uint32Array(N); // tick stamp: each cell acts at most once per tick
 const shade = new Uint8Array(N); // baked per-cell render jitter
 let activeNow = new Uint8Array(NC);
 let activeNext = new Uint8Array(NC);
@@ -79,83 +80,76 @@ function wakeCell(x, y) {
   }
 }
 
-// --- Water ---
-// Priority: fall; slide diagonally (with direction persistence); flow one
-// step toward the nearest visible drop within DISPERSE cells. If none of
-// those apply the cell settles — no wake, and its chunk can sleep. Water on
-// a flat surface finds no drop and stops, which is what lets pools sleep.
+// --- Water (monochromagic-10 rules + a slosh budget) ---
+// Priority chain per mono: fall straight down (forget direction); else try
+// ONLY the current direction's diagonal; else slide purely sideways in that
+// direction; else flip direction, which costs the whole tick. Direction
+// persistence is what makes water stream and slosh instead of dithering.
+//
+// The one addition: pure-sideways slides spend a per-cell budget (bits 2-7
+// of flow); any fall refills it. In mono, surface water streams forever —
+// here it rests after SLOSH steps so pools can sleep and chunks stay cheap.
+// Falls and diagonal falls are never budget-limited, so pools always drain
+// through openings even when their surface is at rest.
 function updateWater(x, y, i) {
-  if (y + 1 >= H) {
-    flow[i] = 0;
-    return;
-  }
+  if (lastMoved[i] === ticks) return; // already acted this tick
+  const hasBelow = y + 1 < H;
   const b = i + W;
 
-  if (type[b] === EMPTY) {
+  if (hasBelow && type[b] === EMPTY) {
     type[b] = WATER;
     type[i] = EMPTY;
-    flow[b] = 0;
+    flow[b] = 0; // mono: falling straight down resets direction (and streak)
     flow[i] = 0;
+    lastMoved[b] = ticks;
     wakeCell(x, y);
     wakeCell(x, y + 1);
     return;
   }
 
-  let d = flow[i];
-  if (d === 0) d = 1 + randInt(2);
+  let f = flow[i];
+  let dir = f & 3;
+  if (dir === 0) {
+    dir = 1 + randInt(2);
+    f = dir;
+    flow[i] = f;
+  }
+  const step = dir === 1 ? -1 : 1;
+  const nx = x + step;
 
-  for (let k = 0; k < 2; k++) {
-    const dir = k === 0 ? d : 3 - d;
-    const step = dir === 1 ? -1 : 1;
-    const nx = x + step;
-    if (nx < 0 || nx >= W) continue;
-    if (type[i + step] === EMPTY && type[b + step] === EMPTY) {
+  if (nx >= 0 && nx < W) {
+    if (hasBelow && type[b + step] === EMPTY) {
       const j = b + step;
       type[j] = WATER;
       type[i] = EMPTY;
-      flow[j] = dir;
+      flow[j] = dir; // diagonal fall keeps direction, refills streak
       flow[i] = 0;
+      lastMoved[j] = ticks;
       wakeCell(x, y);
       wakeCell(nx, y + 1);
       return;
     }
-  }
-
-  let dl = 0;
-  for (let s = 1; s <= DISPERSE; s++) {
-    if (x - s < 0 || type[i - s] !== EMPTY) break;
-    if (type[i - s + W] === EMPTY) {
-      dl = s;
-      break;
+    if (type[i + step] === EMPTY) {
+      const streak = f >> 2;
+      if (streak < SLOSH) {
+        const j = i + step;
+        type[j] = WATER;
+        type[i] = EMPTY;
+        flow[j] = dir | ((streak + 1) << 2);
+        flow[i] = 0;
+        lastMoved[j] = ticks;
+        wakeCell(x, y);
+        wakeCell(nx, y);
+      }
+      // budget spent: rest in place (keep direction+streak so the chunk
+      // can sleep; only a fall re-energizes this cell)
+      return;
     }
   }
-  let dr = 0;
-  for (let s = 1; s <= DISPERSE; s++) {
-    if (x + s >= W || type[i + s] !== EMPTY) break;
-    if (type[i + s + W] === EMPTY) {
-      dr = s;
-      break;
-    }
-  }
 
-  let dir = 0;
-  if (dl > 0 && dr > 0) dir = dl < dr ? 1 : dr < dl ? 2 : d;
-  else if (dl > 0) dir = 1;
-  else if (dr > 0) dir = 2;
-
-  if (dir !== 0) {
-    const step = dir === 1 ? -1 : 1;
-    const j = i + step;
-    type[j] = WATER;
-    type[i] = EMPTY;
-    flow[j] = dir;
-    flow[i] = 0;
-    wakeCell(x, y);
-    wakeCell(x + step, y);
-    return;
-  }
-
-  flow[i] = 0; // settled
+  // Blocked: switch direction, no move this tick (mono). Keep the streak —
+  // only falling refills the budget, otherwise walled pockets slosh forever.
+  flow[i] = (3 - dir) | (f & 0xfc);
 }
 
 function rain() {
@@ -175,6 +169,7 @@ function rain() {
 // tick), but within each row only the segments belonging to active chunks
 // are touched. X direction serpentines by tick parity to avoid drift bias.
 function tick() {
+  ticks++; // increment first so the tick stamp is never 0
   const tmp = activeNow;
   activeNow = activeNext;
   activeNext = tmp;
@@ -206,7 +201,6 @@ function tick() {
       }
     }
   }
-  ticks++;
 }
 
 function countActive() {
