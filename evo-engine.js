@@ -5,8 +5,8 @@
 // processed on a tick if something moved in or near it last tick. A fully
 // settled world costs ~zero per tick, no matter how large it is.
 //
-// Phase 0 content: static soil terrain + falling/flowing water. That's all.
-// Organisms (Phase 1) will ride on this same substrate.
+// Phase 0 content: soil (falls, piles, sinks through water) + water
+// (monochromagic flow rules). Organisms (Phase 1) ride on this substrate.
 //
 // Runs two ways:
 //   browser: evo-engine.html (PIXI rendering, interactive brushes)
@@ -142,6 +142,70 @@ function updateWater(x, y, i) {
   flow[i] = 3 - dir; // blocked: switch direction, no move this tick (mono)
 }
 
+// --- Soil (classic sand) ---
+// Falls into empty space; sinks through water by swapping (the displaced
+// water rises), at half speed so it reads as heavier-than-liquid; slides
+// down diagonals; never slides purely sideways, so it piles into slopes.
+// A failed sink roll wakes its own cell — intent to move must keep the
+// chunk awake, or the grain would freeze mid-water when the chunk sleeps.
+function updateSoil(x, y, i) {
+  if (lastMoved[i] === ticks) return;
+  if (y + 1 >= H) return;
+  const b = i + W;
+  const tb = type[b];
+
+  if (tb === EMPTY) {
+    type[b] = SOIL;
+    type[i] = EMPTY;
+    lastMoved[b] = ticks;
+    wakeCell(x, y);
+    wakeCell(x, y + 1);
+    return;
+  }
+  if (tb === WATER) {
+    if (rand() < 0.5) {
+      type[b] = SOIL;
+      type[i] = WATER;
+      flow[i] = 0;
+      lastMoved[b] = ticks;
+      lastMoved[i] = ticks;
+      wakeCell(x, y);
+      wakeCell(x, y + 1);
+    } else {
+      wakeCell(x, y); // still wants to sink: stay awake for next tick
+    }
+    return;
+  }
+
+  // Fast path: settled soil (solid below, solid diagonals) exits with no
+  // rand() — awake chunks are dense with settled grains, so this dominates.
+  const canL = x > 0 && (type[b - 1] === EMPTY || type[b - 1] === WATER);
+  const canR = x < W - 1 && (type[b + 1] === EMPTY || type[b + 1] === WATER);
+  if (!canL && !canR) return;
+
+  const s = canL && canR ? (rand() < 0.5 ? -1 : 1) : canL ? -1 : 1;
+  const j = b + s;
+  if (type[j] === EMPTY) {
+    type[j] = SOIL;
+    type[i] = EMPTY;
+    lastMoved[j] = ticks;
+    wakeCell(x, y);
+    wakeCell(x + s, y + 1);
+    return;
+  }
+  if (rand() < 0.5) {
+    type[j] = SOIL;
+    type[i] = WATER;
+    flow[i] = 0;
+    lastMoved[j] = ticks;
+    lastMoved[i] = ticks;
+    wakeCell(x, y);
+    wakeCell(x + s, y + 1);
+  } else {
+    wakeCell(x, y);
+  }
+}
+
 function rain() {
   for (let k = 0; k < RAIN_RATE; k++) {
     const x = randInt(W);
@@ -177,7 +241,9 @@ function tick() {
         const x1 = (cx << SHIFT) + CHUNK;
         for (let x = cx << SHIFT; x < x1; x++) {
           const i = rowBase + x;
-          if (type[i] === WATER) updateWater(x, y, i);
+          const t = type[i];
+          if (t === WATER) updateWater(x, y, i);
+          else if (t === SOIL) updateSoil(x, y, i);
         }
       }
     } else {
@@ -186,7 +252,9 @@ function tick() {
         const x0 = cx << SHIFT;
         for (let x = x0 + CHUNK - 1; x >= x0; x--) {
           const i = rowBase + x;
-          if (type[i] === WATER) updateWater(x, y, i);
+          const t = type[i];
+          if (t === WATER) updateWater(x, y, i);
+          else if (t === SOIL) updateSoil(x, y, i);
         }
       }
     }
@@ -267,11 +335,57 @@ function headlessTest() {
     }`
   );
 
-  const ok = conserved && activeSteady < NC * 0.25 && steadyMs < rainMs / 2;
+  // Soil drop: dump a 20x20 soil block over the deepest pool. It must sink,
+  // displace the water upward, and the world must return to quiet.
+  let bestX = 0;
+  let bestC = 0;
+  for (let x = 0; x < W; x++) {
+    let c = 0;
+    for (let y = 0; y < H; y++) if (type[y * W + x] === WATER) c++;
+    if (c > bestC) {
+      bestC = c;
+      bestX = x;
+    }
+  }
+  let soilBefore = 0;
+  for (let i = 0; i < N; i++) if (type[i] === SOIL) soilBefore++;
+  let placed = 0;
+  for (let dy = 0; dy < 20; dy++) {
+    for (let dx = 0; dx < 20; dx++) {
+      const cx = Math.min(W - 1, Math.max(0, bestX - 10 + dx));
+      const cy = 10 + dy;
+      const ii = cy * W + cx;
+      if (type[ii] === EMPTY) {
+        type[ii] = SOIL;
+        placed++;
+        wakeCell(cx, cy);
+      }
+    }
+  }
+  for (let k = 0; k < 5000; k++) tick();
+  let soilAfter = 0;
+  for (let i = 0; i < N; i++) if (type[i] === SOIL) soilAfter++;
+  const recount2 = recountWater();
+  const active2 = countActive();
+  const soilOk =
+    soilAfter === soilBefore + placed && recount2 === waterCount;
+  console.log(
+    `soil drop: ${placed} cells over deepest pool (col ${bestX}, depth ${bestC}) — ` +
+      `soil ${soilOk ? "conserved" : "LEAK"}, water ${
+        recount2 === waterCount ? "conserved" : "LEAK"
+      }, ${active2}/${NC} chunks awake after`
+  );
+
+  // Steady cost must stay well below the fully-active rain cost. It won't
+  // be near zero: awake surface chunks still type-check all their cells,
+  // and pool chunks are dense with settled interior water and soil.
+  const ok =
+    conserved && activeSteady < NC * 0.25 && steadyMs < rainMs * 0.75 &&
+    soilOk && active2 < NC * 0.25;
   console.log(
     ok
       ? "PASS: interior asleep, steady cost scales with surface runners"
-      : "FAIL: steady state too active or water leaked"
+      : "FAIL: steady state too active or matter leaked"
   );
   process.exit(ok ? 0 : 1);
 }
@@ -362,9 +476,8 @@ function boot() {
         if (tool === WATER && type[i] === EMPTY) {
           type[i] = WATER;
           waterCount++;
-        } else if (tool === SOIL && type[i] !== SOIL) {
-          if (type[i] === WATER) waterCount--;
-          type[i] = SOIL;
+        } else if (tool === SOIL && type[i] === EMPTY) {
+          type[i] = SOIL; // only into empty: soil displaces water by sinking
         } else if (tool === EMPTY && type[i] !== EMPTY) {
           if (type[i] === WATER) waterCount--;
           type[i] = EMPTY;
