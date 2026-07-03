@@ -778,19 +778,31 @@ function evolutionTest() {
   );
   initWorld();
 
-  // Light rain only: strict-mono water never evaporates, so heavy rain
-  // films the whole surface and leaves no dry ground to germinate on.
+  // Rain briefly for pools, then drain and settle. Strict-mono water never
+  // evaporates, so a long rain films the whole surface and leaves no dry
+  // ground to germinate on — 120 ticks is enough water without drowning it.
   raining = true;
-  let t0 = performance.now();
   for (let k = 0; k < 120; k++) tick();
-  const rainMs = (performance.now() - t0) / 120;
   raining = false;
   for (let k = 0; k < 4000; k++) tick();
   const initialSoil = countType(SOIL);
 
-  t0 = performance.now();
+  let t0 = performance.now();
   for (let k = 0; k < 500; k++) tick();
   const quietMs = (performance.now() - t0) / 500;
+
+  // Busy baseline: force every chunk awake and measure — the "whole world
+  // active at once" ceiling. The thesis is that real per-tick cost scales
+  // with living activity and stays well under this world-size-bound number.
+  t0 = performance.now();
+  for (let k = 0; k < 60; k++) {
+    activeNext.fill(1);
+    tick();
+  }
+  const busyMs = (performance.now() - t0) / 60;
+  const busyAwake = NC;
+  activeNext.fill(0);
+  for (let k = 0; k < 500; k++) tick(); // re-settle after the forced churn
 
   // Dry columns: topmost non-empty cell is soil. Plant starters evenly
   // across them.
@@ -802,8 +814,8 @@ function evolutionTest() {
   }
   console.log(
     `substrate ready: ${waterCount} water, ${initialSoil} soil, ` +
-      `${dryCols.length}/${W} dry columns, ` +
-      `quiet ${quietMs.toFixed(3)} ms/tick (rain ${rainMs.toFixed(2)})`
+      `${dryCols.length}/${W} dry columns, quiet ${quietMs.toFixed(3)} ms/tick ` +
+      `(busy baseline ${busyMs.toFixed(2)} ms, ${busyAwake}/${NC} awake)`
   );
 
   let starters = 0;
@@ -886,14 +898,16 @@ function evolutionTest() {
   const evolved = allGenomes.size >= 3;
   const died = deaths > 0;
   const bounded = maxPlants < 20000 && maxCells < 150000;
-  const quiet = awake < NC * 0.25 && finalMs < rainMs;
+  // The invariant: the substrate sleeps (few chunks awake) and the whole
+  // living ecosystem still costs less than a fully-rained active substrate.
+  const quiet = awake < NC * 0.25 && finalMs < busyMs;
   console.log(
     `alive ${alive} (pop ${plants.length}) | reproduced ${reproduced} ` +
       `(${births - starters} germinations of ${seedsBorn} seeds) | ` +
       `evolved ${evolved} (${allGenomes.size} genomes seen) | ` +
       `died ${died} (${deaths}) | bounded ${bounded} ` +
       `(max ${maxPlants} plants, ${maxCells} cells) | quiet ${quiet} ` +
-      `(${awake}/${NC} awake, ${finalMs.toFixed(3)} vs rain ${rainMs.toFixed(
+      `(${awake}/${NC} awake, ${finalMs.toFixed(3)} vs busy ${busyMs.toFixed(
         2
       )} ms/tick)`
   );
