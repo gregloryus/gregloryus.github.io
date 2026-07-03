@@ -1,0 +1,23 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Evo Engine — Phase 0</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #000; overflow: hidden; }
+  #canvas-div { height: 100%; display: flex; align-items: center; justify-content: center; }
+  #hud {
+    position: fixed; top: 8px; left: 8px; z-index: 10;
+    color: #8fa08f; font: 12px monospace; white-space: pre;
+    text-shadow: 0 1px 2px #000;
+  }
+</style>
+<script src="https://pixijs.download/v7.2.4/pixi.min.js"></script>
+</head>
+<body>
+<div id="hud">loading…</div>
+<div id="canvas-div"></div>
+<script src="evo-engine.js"></script>
+</body>
+</html>
