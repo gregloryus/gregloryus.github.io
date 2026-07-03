@@ -48,6 +48,13 @@ canvas{display:block}
     <option value="1440">1d/s</option>
   </select>
   <button id="highlight-btn" class="active" title="Highlight planets">Planets</button>
+  <button id="ecliptic-btn" class="active" title="Toggle ecliptic/zodiac">Zodiac</button>
+  <button id="trails-btn" class="active" title="Toggle planet trails">Trails</button>
+  <div class="slider-row">
+    <label>Trail</label>
+    <input type="range" id="trail-slider" min="1" max="72" value="24" step="1">
+    <span id="trail-val">24h</span>
+  </div>
   <div class="slider-row">
     <label>Stars</label>
     <input type="range" id="star-slider" min="10" max="2800" value="100" step="10">
@@ -93,6 +100,10 @@ let starData = null;       // full catalog (sorted by brightness)
 let maxStarsVisible = 100;
 let highlightPlanets = true;
 let groundOpacity = 0.25; // 0 = no dimming, 1 = fully hidden below horizon
+let showEcliptic = true;
+let showTrails = true;
+let trailHours = 24; // hours each direction (past + future)
+const OBLIQUITY = 23.4393 * DEG2RAD; // ecliptic obliquity (J2000)
 
 // ── Renderer ──
 const renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -399,6 +410,128 @@ function initCardinals() {
   });
 }
 
+// ── Ecliptic / Zodiac ──
+const eclipticGroup = new THREE.Group();
+eclipticGroup.renderOrder = 0;
+scene.add(eclipticGroup);
+
+const ZODIAC_NAMES = ['Ari','Tau','Gem','Cnc','Leo','Vir','Lib','Sco','Sgr','Cap','Aqr','Psc'];
+const ECLIPTIC_R = OBJ_R - 2; // slightly inside star sphere
+const BAND_HALF = 8; // ±8° ecliptic latitude
+
+function eclToEquatorial(lonDeg, latDeg) {
+  // Ecliptic (λ, β) → Equatorial (RA hours, Dec degrees)
+  const lon = lonDeg * DEG2RAD;
+  const lat = latDeg * DEG2RAD;
+  const sinLon = Math.sin(lon), cosLon = Math.cos(lon);
+  const sinLat = Math.sin(lat), cosLat = Math.cos(lat);
+  const sinE = Math.sin(OBLIQUITY), cosE = Math.cos(OBLIQUITY);
+
+  const dec = Math.asin(sinLat * cosE + cosLat * sinE * sinLon);
+  const ra = Math.atan2(sinLon * cosE - Math.tan(lat) * sinE, cosLon);
+  return { raHours: ((ra * RAD2DEG / 15) + 24) % 24, decDeg: dec * RAD2DEG };
+}
+
+function eclToXYZ(lonDeg, latDeg, date) {
+  const eq = eclToEquatorial(lonDeg, latDeg);
+  const hor = Astronomy.Horizon(date, observer, eq.raHours, eq.decDeg, 'normal');
+  return azAltToXYZ(hor.azimuth, hor.altitude, ECLIPTIC_R);
+}
+
+function buildEclipticLines(date) {
+  // Clear previous
+  while (eclipticGroup.children.length) eclipticGroup.remove(eclipticGroup.children[0]);
+
+  const lineMat = new THREE.LineBasicMaterial({ color: 0x334455, transparent: true, opacity: 0.35, depthTest: false });
+  const divMat = new THREE.LineBasicMaterial({ color: 0x334455, transparent: true, opacity: 0.25, depthTest: false });
+  const STEPS = 120;
+
+  // Upper and lower band edges
+  for (const lat of [BAND_HALF, -BAND_HALF]) {
+    const pts = [];
+    for (let i = 0; i <= STEPS; i++) {
+      pts.push(eclToXYZ(i * 360 / STEPS, lat, date));
+    }
+    const geo = new THREE.BufferGeometry().setFromPoints(pts);
+    eclipticGroup.add(new THREE.Line(geo, lineMat));
+  }
+
+  // Center ecliptic line (very faint)
+  const centerMat = new THREE.LineBasicMaterial({ color: 0x445566, transparent: true, opacity: 0.15, depthTest: false });
+  const cPts = [];
+  for (let i = 0; i <= STEPS; i++) {
+    cPts.push(eclToXYZ(i * 360 / STEPS, 0, date));
+  }
+  eclipticGroup.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(cPts), centerMat));
+
+  // 12 zodiac boundary lines + labels
+  const tickMat = new THREE.LineBasicMaterial({ color: 0x445566, transparent: true, opacity: 0.4, depthTest: false });
+
+  for (let z = 0; z < 12; z++) {
+    const lon = z * 30;
+    // Long tick extending well past the band
+    const p1 = eclToXYZ(lon, -(BAND_HALF + 12), date);
+    const p2 = eclToXYZ(lon, BAND_HALF + 12, date);
+    eclipticGroup.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints([p1, p2]), tickMat));
+
+    // Label at midpoint of each segment
+    const labelPos = eclToXYZ(lon + 15, BAND_HALF + 16, date);
+    const c = document.createElement('canvas');
+    c.width = 128; c.height = 64;
+    const ctx = c.getContext('2d');
+    ctx.fillStyle = '#667788';
+    ctx.font = 'bold 40px monospace';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(ZODIAC_NAMES[z], 64, 32);
+    const tex = new THREE.CanvasTexture(c);
+    const mat = new THREE.SpriteMaterial({ map: tex, transparent: true, depthTest: false, opacity: 0.55 });
+    const sprite = new THREE.Sprite(mat);
+    sprite.scale.set(28, 14, 1);
+    sprite.position.copy(labelPos);
+    eclipticGroup.add(sprite);
+  }
+}
+
+// ── Planet Trails ──
+const trailGroup = new THREE.Group();
+trailGroup.renderOrder = 0;
+scene.add(trailGroup);
+
+// Planet trail colors (match body colors but dimmer)
+const trailColors = {
+  Sun: 0x665511, Moon: 0x555550, Mercury: 0x555555,
+  Venus: 0x666650, Mars: 0x662211, Jupiter: 0x665533, Saturn: 0x555522
+};
+
+function buildTrails(date) {
+  while (trailGroup.children.length) trailGroup.remove(trailGroup.children[0]);
+
+  const steps = Math.max(20, Math.min(96, trailHours * 4)); // ~15 min intervals, cap at 96
+  const msRange = trailHours * 3600000;
+
+  bodyDefs.forEach(def => {
+    const pts = [];
+    for (let i = 0; i <= steps * 2; i++) {
+      const t = -msRange + (i / (steps * 2)) * msRange * 2;
+      const d = new Date(date.getTime() + t);
+      try {
+        const equ = Astronomy.Equator(def.name, d, observer, true, true);
+        const hor = Astronomy.Horizon(d, observer, equ.ra, equ.dec, 'normal');
+        pts.push(azAltToXYZ(hor.azimuth, hor.altitude, OBJ_R - 1));
+      } catch (e) { /* skip */ }
+    }
+    if (pts.length > 1) {
+      const geo = new THREE.BufferGeometry().setFromPoints(pts);
+      const mat = new THREE.LineBasicMaterial({
+        color: trailColors[def.name] || 0x444444,
+        transparent: true, opacity: 0.5, depthTest: false
+      });
+      trailGroup.add(new THREE.Line(geo, mat));
+    }
+  });
+}
+
 // ── Load Star Data ──
 async function loadStars() {
   const loadEl = document.getElementById('loading');
@@ -441,6 +574,7 @@ function pad(n) { return String(n).padStart(2, '0'); }
 
 function syncUI() {
   const d = simDate;
+  // Don't overwrite inputs the user is actively editing
   if (document.activeElement !== dateInput)
     dateInput.value = `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
   if (document.activeElement !== timeInput)
@@ -505,11 +639,41 @@ groundSlider.addEventListener('input', () => {
   updateBodies(simDate);
 });
 
+// Ecliptic toggle
+document.getElementById('ecliptic-btn').addEventListener('click', () => {
+  showEcliptic = !showEcliptic;
+  document.getElementById('ecliptic-btn').classList.toggle('active', showEcliptic);
+  eclipticGroup.visible = showEcliptic;
+});
+
+// Trails toggle
+document.getElementById('trails-btn').addEventListener('click', () => {
+  showTrails = !showTrails;
+  document.getElementById('trails-btn').classList.toggle('active', showTrails);
+  trailGroup.visible = showTrails;
+});
+
+// Trail hours slider
+document.getElementById('trail-slider').addEventListener('input', (e) => {
+  trailHours = +e.target.value;
+  document.getElementById('trail-val').textContent = trailHours + 'h';
+  if (showTrails) buildTrails(simDate);
+});
+
 // ── Update All ──
+let lastEclipticUpdate = 0;
 function updateAll() {
   syncUI();
   updateStars(simDate);
   updateBodies(simDate);
+
+  // Rebuild ecliptic/trails less frequently (they're expensive)
+  const now = performance.now();
+  if (now - lastEclipticUpdate > 2000 || !playing) {
+    if (showEcliptic) buildEclipticLines(simDate);
+    if (showTrails) buildTrails(simDate);
+    lastEclipticUpdate = now;
+  }
 }
 
 // ── Resize ──
@@ -538,6 +702,8 @@ function animate(t) {
 initBodies();
 applyHighlightState();
 initCardinals();
+buildEclipticLines(simDate);
+buildTrails(simDate);
 syncUI();
 loadStars();
 animate(0);
