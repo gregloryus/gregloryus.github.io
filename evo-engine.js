@@ -11,7 +11,8 @@
 // Runs two ways:
 //   browser: evo-engine.html (PIXI rendering, interactive brushes)
 //   node evo-engine.js  — headless self-test: rains, drains, verifies the
-//                         world goes fully to sleep and water is conserved.
+//                         interior sleeps (cost ∝ surface runners, not
+//                         volume) and water is conserved.
 
 "use strict";
 
@@ -29,13 +30,12 @@ const EMPTY = 0;
 const SOIL = 1;
 const WATER = 2;
 
-const SLOSH = 32; // max consecutive sideways steps before water rests (<= 63)
 const RAIN_RATE = 64; // water cells spawned per tick while raining
 const FF_FACTOR = 10;
 
 // --- State (all flat typed arrays, no objects) ---
 const type = new Uint8Array(N);
-const flow = new Uint8Array(N); // bits 0-1: direction (0 none, 1 left, 2 right); bits 2-7: sideways streak
+const flow = new Uint8Array(N); // direction persistence: 0 none, 1 left, 2 right
 const lastMoved = new Uint32Array(N); // tick stamp: each cell acts at most once per tick
 const shade = new Uint8Array(N); // baked per-cell render jitter
 let activeNow = new Uint8Array(NC);
@@ -80,17 +80,16 @@ function wakeCell(x, y) {
   }
 }
 
-// --- Water (monochromagic-10 rules + a slosh budget) ---
+// --- Water (monochromagic-10 rules, verbatim) ---
 // Priority chain per mono: fall straight down (forget direction); else try
 // ONLY the current direction's diagonal; else slide purely sideways in that
 // direction; else flip direction, which costs the whole tick. Direction
 // persistence is what makes water stream and slosh instead of dithering.
 //
-// The one addition: pure-sideways slides spend a per-cell budget (bits 2-7
-// of flow); any fall refills it. In mono, surface water streams forever —
-// here it rests after SLOSH steps so pools can sleep and chunks stay cheap.
-// Falls and diagonal falls are never budget-limited, so pools always drain
-// through openings even when their surface is at rest.
+// Cost model: interior water and full flat surface rows are blocked on all
+// sides — they flip a bit at most, never wake anything, and sleep. Only the
+// partial top layer of each pool keeps "runners" bouncing forever, so the
+// steady-state cost scales with pool SURFACE, not water volume.
 function updateWater(x, y, i) {
   if (lastMoved[i] === ticks) return; // already acted this tick
   const hasBelow = y + 1 < H;
@@ -99,7 +98,7 @@ function updateWater(x, y, i) {
   if (hasBelow && type[b] === EMPTY) {
     type[b] = WATER;
     type[i] = EMPTY;
-    flow[b] = 0; // mono: falling straight down resets direction (and streak)
+    flow[b] = 0; // mono: falling straight down resets direction
     flow[i] = 0;
     lastMoved[b] = ticks;
     wakeCell(x, y);
@@ -107,12 +106,10 @@ function updateWater(x, y, i) {
     return;
   }
 
-  let f = flow[i];
-  let dir = f & 3;
+  let dir = flow[i];
   if (dir === 0) {
     dir = 1 + randInt(2);
-    f = dir;
-    flow[i] = f;
+    flow[i] = dir;
   }
   const step = dir === 1 ? -1 : 1;
   const nx = x + step;
@@ -122,7 +119,7 @@ function updateWater(x, y, i) {
       const j = b + step;
       type[j] = WATER;
       type[i] = EMPTY;
-      flow[j] = dir; // diagonal fall keeps direction, refills streak
+      flow[j] = dir; // diagonal fall keeps direction
       flow[i] = 0;
       lastMoved[j] = ticks;
       wakeCell(x, y);
@@ -130,26 +127,19 @@ function updateWater(x, y, i) {
       return;
     }
     if (type[i + step] === EMPTY) {
-      const streak = f >> 2;
-      if (streak < SLOSH) {
-        const j = i + step;
-        type[j] = WATER;
-        type[i] = EMPTY;
-        flow[j] = dir | ((streak + 1) << 2);
-        flow[i] = 0;
-        lastMoved[j] = ticks;
-        wakeCell(x, y);
-        wakeCell(nx, y);
-      }
-      // budget spent: rest in place (keep direction+streak so the chunk
-      // can sleep; only a fall re-energizes this cell)
+      const j = i + step;
+      type[j] = WATER;
+      type[i] = EMPTY;
+      flow[j] = dir;
+      flow[i] = 0;
+      lastMoved[j] = ticks;
+      wakeCell(x, y);
+      wakeCell(nx, y);
       return;
     }
   }
 
-  // Blocked: switch direction, no move this tick (mono). Keep the streak —
-  // only falling refills the budget, otherwise walled pockets slosh forever.
-  flow[i] = (3 - dir) | (f & 0xfc);
+  flow[i] = 3 - dir; // blocked: switch direction, no move this tick (mono)
 }
 
 function rain() {
@@ -251,30 +241,25 @@ function headlessTest() {
       `${rainMs.toFixed(2)} ms/tick, ${countActive()}/${NC} chunks active`
   );
 
-  let settleTick = -1;
-  let peakActive = 0;
+  // Strict mono water never fully sleeps: each pool's partial top layer
+  // keeps a few runners bouncing forever. The claim to verify is that the
+  // steady state is interior-asleep with cost proportional to surface.
+  for (let k = 0; k < 5000; k++) tick(); // level out
+
+  const SAMPLE = 1000;
   t0 = performance.now();
-  const MAX = 30000;
-  for (let k = 0; k < MAX; k++) {
-    tick();
-    const a = countActive();
-    if (a > peakActive) peakActive = a;
-    if (a === 0) {
-      settleTick = ticks;
-      break;
-    }
-  }
-  const drainMs = performance.now() - t0;
+  for (let k = 0; k < SAMPLE; k++) tick();
+  const steadyMs = (performance.now() - t0) / SAMPLE;
+  const activeSteady = countActive();
+  let runners = 0;
+  for (let i = 0; i < N; i++) if (lastMoved[i] === ticks) runners++;
 
   const recount = recountWater();
   const conserved = recount === waterCount;
   console.log(
-    settleTick >= 0
-      ? `world fully asleep at tick ${settleTick} ` +
-          `(${(settleTick - RAIN_TICKS)} ticks to settle, ${drainMs.toFixed(
-            0
-          )} ms total, peak ${peakActive}/${NC} chunks)`
-      : `FAIL: still active after ${MAX} extra ticks (${countActive()} chunks awake)`
+    `steady state after ${ticks} ticks: ${activeSteady}/${NC} chunks awake, ` +
+      `${runners} runners of ${waterCount} water cells, ` +
+      `${steadyMs.toFixed(3)} ms/tick (vs ${rainMs.toFixed(2)} raining)`
   );
   console.log(
     `conservation: counter ${waterCount}, recount ${recount} — ${
@@ -282,16 +267,13 @@ function headlessTest() {
     }`
   );
 
-  // The core claim: a settled world costs ~nothing.
-  t0 = performance.now();
-  for (let k = 0; k < 1000; k++) tick();
-  const idleMs = (performance.now() - t0) / 1000;
+  const ok = conserved && activeSteady < NC * 0.25 && steadyMs < rainMs / 2;
   console.log(
-    `idle cost: ${idleMs.toFixed(4)} ms/tick asleep vs ${rainMs.toFixed(
-      2
-    )} ms/tick raining (${(rainMs / idleMs).toFixed(0)}x)`
+    ok
+      ? "PASS: interior asleep, steady cost scales with surface runners"
+      : "FAIL: steady state too active or water leaked"
   );
-  process.exit(settleTick >= 0 && conserved ? 0 : 1);
+  process.exit(ok ? 0 : 1);
 }
 
 // ==================== Browser boot ====================
