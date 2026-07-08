@@ -1,5 +1,13 @@
 # millefleur — HANDOFF 2 (fresh-start index, 2026-07-08)
 
+> **STOP — first-session instructions from Greg: READ ONLY.** Read this doc
+> and the files it points to, and nothing else. Do **NOT** run Bash, `node`,
+> the headless harnesses, git, or any command; do **NOT** edit or create
+> files. We keep tripping tooling safeguards, so every action needs Greg's
+> explicit go-ahead first. When you've finished reading, come back and talk
+> to Greg — wait for direction before doing anything. (The "FAST START" and
+> run commands below are reference for LATER, only once Greg approves.)
+
 Read this first. It's the map: current state of the live project, the exact
 files that matter, and a directory of every older handoff/design doc so you
 don't have to rediscover them. **This is a falling-sand / cellular-automaton
@@ -104,9 +112,13 @@ Unrelated side projects (ignore unless asked):
 
 ---
 
-## FAST START for the next session
-1. `node evo-engine-millefleur-2.js` (defaults) — should end COMPLETE, PASS.
-2. Open `evo-engine-millefleur-2.html` to watch it; grab the seed from the
-   status bar if you see something worth replaying (`?seed=N`).
-3. Read `millefleur-HANDOFF.md` for the full rule rationale before changing
-   rules. Fork to `-3` for the next big experiment.
+## FAST START — ONLY after Greg says go (do not run these unprompted)
+1. Read `millefleur-HANDOFF.md` for the full rule rationale before touching
+   any rules.
+2. (with approval) `node evo-engine-millefleur-2.js` (defaults) — should end
+   COMPLETE, PASS.
+3. (with approval) Open `evo-engine-millefleur-2.html` to watch it; grab the
+   seed from the status bar to replay (`?seed=N`). Fork to `-3` for the next
+   big experiment.
+
+Until then: read everything, then return to Greg and wait.
