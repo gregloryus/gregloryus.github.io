@@ -103,6 +103,27 @@ Open decision #3: whether this is rendering-only (draw order by y, lower
 plants painted in front) or also affects mechanics. There is no gravity
 either way.
 
+## Fork: evo-engine-millefleur-2 (experiment branch, same date)
+
+`evo-engine-millefleur-2.js/.html` — the -1 files stay frozen as baseline.
+Changes: (a) **local uniqueness** — identical genomes conflict only within
+`UNIQUENESS_RADIUS` (default 64, root-to-root), checked at germination, so
+motifs can repeat at large intervals; (b) **P_CLONE = 0.35** — that fraction
+of seeds are exact parent copies (only viable beyond the radius; set 0 for
+mutants-only); (c) **random run seed each load**, shown in the status bar
+and console; reset (key 0) rolls a new one. URL params:
+`?seed=N&radius=64&clone=0.35` — a pinned seed replays exactly.
+Headless takes them positionally: `node ... [seed] [ticks] [cols] [rows]
+[radius] [pClone]`.
+
+**Key empirical finding: repetition ∝ dispersal/radius ratio.** A 64-step
+random walk nets only ~8–16 cells of displacement, so with radius 64 clones
+almost never escape the parent's exclusion zone (16 repeats/921 flowers);
+radius 16 gives 209/1070. To see repeating motifs, lower `?radius=` or
+raise AIRBORNE_STEPS. Even with clone=0, ~33 repeats arise from identical
+siblings/convergent mutations. All configs verified: zero same-genome pairs
+within radius.
+
 ## Open decisions
 
 1. **Fate of blocked plants** — a plant that can't fully unfold never
