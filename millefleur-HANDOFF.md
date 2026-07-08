@@ -120,9 +120,20 @@ Headless takes them positionally: `node ... [seed] [ticks] [cols] [rows]
 random walk nets only ~8–16 cells of displacement, so with radius 64 clones
 almost never escape the parent's exclusion zone (16 repeats/921 flowers);
 radius 16 gives 209/1070. To see repeating motifs, lower `?radius=` or
-raise AIRBORNE_STEPS. Even with clone=0, ~33 repeats arise from identical
-siblings/convergent mutations. All configs verified: zero same-genome pairs
-within radius.
+raise AIRBORNE_STEPS. All configs verified: zero same-genome pairs within
+radius.
+
+**Update — P_CLONE now defaults to 0 (Greg's call):** repeats must be
+CONVERGENT — the same canonical genome re-derived by mutation, never a
+copied clone. Still happens naturally: 33 convergent repeats/1002 flowers
+at radius 64, 82/1077 at radius 24 (clone=0). ?clone= can re-enable copies.
+
+**Color is deterministic per canonical geneform (was already; hash now
+strengthened).** `plantColorFromGenome` = FNV-1a over the genome bytes →
+hue+sat+val. Identical forms ALWAYS share the exact color, so convergent
+evolution is spottable by eye; distinct forms almost never collide. Cost:
+the old similar-genome-similar-color lineage gradient is gone (a strong
+hash deliberately scatters neighbors). -1 keeps the old soft-hash gradient.
 
 ## Open decisions
 

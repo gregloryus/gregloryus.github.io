@@ -34,7 +34,7 @@ const CONSTANTS = {
   AIRBORNE_STEPS: 64,
   SEEDS_PER_TICK: 4,
   UNIQUENESS_RADIUS: 64, // same genome allowed if roots farther than this
-  P_CLONE: 0.35, // P(seed is an exact copy of the parent)
+  P_CLONE: 0, // P(seed is exact copy). 0 => repeats are convergent only.
   EXTRA_MUTATION_PROB: 0.35, // P(one more mutation) — geometric tail
   COMPLETION_STREAK: 12000, // min consecutive failures that pause emission
   COMPLETION_STREAK_PER_CELL: 0.5, // scales the threshold with world area
@@ -122,10 +122,22 @@ function lerpColor(c1, c2, t) {
   );
 }
 
+// Deterministic color per canonical geneform: identical forms (i.e.
+// convergent evolution) always get the identical color; distinct forms
+// almost never collide (FNV-1a spread across hue + a little sat/val). This
+// intentionally drops the old similar-genome-similar-color gradient in favor
+// of making convergence spottable by eye.
 function plantColorFromGenome(genome) {
-  let sum = 0;
-  for (let i = 0; i < genome.length; i++) sum += genome[i] + (i % 7);
-  return hsvToRgbInt((sum * 0.013) % 1, 0.8, 0.95);
+  let h = 0x811c9dc5;
+  for (let i = 0; i < genome.length; i++) {
+    h ^= genome[i] + 1; // +1 so trailing all-zero genes still perturb
+    h = Math.imul(h, 0x01000193);
+  }
+  h = h >>> 0;
+  const hue = (h % 3600) / 3600;
+  const sat = 0.6 + (((h >>> 12) & 0xff) / 255) * 0.4;
+  const val = 0.78 + (((h >>> 20) & 0xff) / 255) * 0.22;
+  return hsvToRgbInt(hue, sat, val);
 }
 
 // ---------------------------------------------------------------- Genetics
