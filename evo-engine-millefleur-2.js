@@ -382,6 +382,14 @@ class Plant {
       this.fail();
       return;
     }
+    // Self-avoidance: the new cell may touch (8-way) only same-plant cells
+    // that are topologically NEAR it — its parent, its grandparent (inside
+    // of a turn), or a sibling (crotch of a fork). Contact with any farther
+    // same-plant cell means a branch has looped back or is running alongside
+    // itself: that is the "blob" and it aborts the plant. Any other-plant
+    // contact aborts too (the inter-flower outline gap).
+    const parentCell = cell;
+    const grandCell = cell.parent;
     for (let ddx = -1; ddx <= 1; ddx++) {
       for (let ddy = -1; ddy <= 1; ddy++) {
         if (ddx === 0 && ddy === 0) continue;
@@ -389,7 +397,12 @@ class Plant {
           my = ny + ddy;
         if (mx < 0 || mx >= cols || my < 0 || my >= rows) continue;
         const nb = grid[my * cols + mx];
-        if (nb && nb.plant !== this) {
+        if (!nb) continue;
+        if (nb.plant !== this) {
+          this.fail();
+          return;
+        }
+        if (nb !== parentCell && nb !== grandCell && nb.parent !== parentCell) {
           this.fail();
           return;
         }

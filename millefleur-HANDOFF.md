@@ -135,6 +135,28 @@ evolution is spottable by eye; distinct forms almost never collide. Cost:
 the old similar-genome-similar-color lineage gradient is gone (a strong
 hash deliberately scatters neighbors). -1 keeps the old soft-hash gradient.
 
+## Strict self-avoidance (millefleur-2, Greg's request)
+
+Old rule let a plant's own branches bundle together into filled BLOBS (the
+only self-constraint was "target cell empty"). New rule in
+`growOneStep`: a new cell may touch (8-way) only same-plant cells that are
+topologically NEAR — its **parent, grandparent (inside of a turn), or a
+sibling (crotch of a fork)**. Contact with any farther same-plant cell =
+a branch looping back or running alongside itself = aborts the plant.
+O(1) check: `nb === parentCell || nb === grandCell || nb.parent === parentCell`.
+
+IMPORTANT nuance for future sessions: a LITERAL "no diagonal self-touch"
+rule is degenerate — every turn's corner touches the grandparent diagonally
+and every Y-fork's arms touch each other diagonally, so forbidding all
+diagonal self-contact collapses plants to straight lines. The parent/
+grandparent/sibling allowance is the minimal set that keeps turns + forks
+while forbidding real self-intersection (2x2 blob needs a distance-3 tree
+contact → caught). Plants are now provably self-avoiding trees.
+
+Impact (radius 64, clone 0): fill 30.2%→26.3% (240x135), flowers
+1002→814; big world 480x270 ~27% fill, 3011 flowers. Self-colliding
+genomes now abort (plantFails up) instead of blobbing. Not degenerate.
+
 ## Open decisions
 
 1. **Fate of blocked plants** — a plant that can't fully unfold never
