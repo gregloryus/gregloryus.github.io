@@ -123,7 +123,17 @@ radius 16 gives 209/1070. To see repeating motifs, lower `?radius=` or
 raise AIRBORNE_STEPS. All configs verified: zero same-genome pairs within
 radius.
 
-**Update — P_CLONE now defaults to 0 (Greg's call):** repeats must be
+**Update — defaults now: single founder dead-center, GLOBAL uniqueness.**
+NUM_STARTER_SEEDS=1 placed at (cols/2, rows/2); everything descends from it
+by mutation. UNIQUENESS_RADIUS default raised to 99999 (>= any canvas) so
+uniqueness is global again — every flower a distinct genome, repeats=0.
+`?radius=64` (or headless radius arg) restores local uniqueness for repeat
+experiments; status bar shows "global" when radius spans the canvas.
+Coloring reverted to the soft additive hash (similar genomes similar
+colors, lineage neighborhoods). Global single-founder completes at ~25%
+fill (842 distinct flowers, 240x135).
+
+**Earlier note — P_CLONE defaults to 0 (Greg's call):** repeats must be
 CONVERGENT — the same canonical genome re-derived by mutation, never a
 copied clone. Still happens naturally: 33 convergent repeats/1002 flowers
 at radius 64, 82/1077 at radius 24 (clone=0). ?clone= can re-enable copies.

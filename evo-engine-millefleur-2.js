@@ -33,7 +33,8 @@ const CONSTANTS = {
   NUM_STARTER_SEEDS: 1, // always a single founder; everything descends by mutation
   AIRBORNE_STEPS: 64,
   SEEDS_PER_TICK: 4,
-  UNIQUENESS_RADIUS: 64, // same genome allowed if roots farther than this
+  UNIQUENESS_RADIUS: 99999, // >= any canvas => GLOBAL uniqueness. Lower it
+  // (e.g. ?radius=64) for local uniqueness where forms may repeat at distance.
   P_CLONE: 0, // P(seed is exact copy). 0 => repeats are convergent only.
   EXTRA_MUTATION_PROB: 0.35, // P(one more mutation) — geometric tail
   COMPLETION_STREAK: 12000, // min consecutive failures that pause emission
@@ -547,29 +548,39 @@ function stepSeed(ts) {
 }
 
 // ---------------------------------------------------------------- Setup
+function germSpotClear(x, y) {
+  if (grid[y * cols + x]) return false;
+  for (let ddx = -1; ddx <= 1; ddx++) {
+    for (let ddy = -1; ddy <= 1; ddy++) {
+      if (ddx === 0 && ddy === 0) continue;
+      const nx = x + ddx,
+        ny = y + ddy;
+      if (nx < 0 || nx >= cols || ny < 0 || ny >= rows) continue;
+      if (grid[ny * cols + nx]) return false;
+    }
+  }
+  return true;
+}
+
 function initializeStarters() {
   let base = canonical(DEFAULT_GENOME);
   for (let i = 0; i < CONSTANTS.NUM_STARTER_SEEDS; i++) {
     let genome = base;
     for (let m = 0; m < i; m++) genome = mutateGenome(genome);
     let placed = false;
+    // the first founder always germinates dead center; any extras scatter
+    if (i === 0) {
+      const cx = (cols / 2) | 0,
+        cy = (rows / 2) | 0;
+      if (germSpotClear(cx, cy) && !keyConflictNear(genomeKey(genome), cx, cy)) {
+        growing.push(new Plant(genome, cx, cy));
+        placed = true;
+      }
+    }
     for (let attempt = 0; attempt < 500 && !placed; attempt++) {
       const x = randInt(cols),
         y = randInt(rows);
-      if (grid[y * cols + x]) continue;
-      let clear = true;
-      outer: for (let ddx = -1; ddx <= 1; ddx++) {
-        for (let ddy = -1; ddy <= 1; ddy++) {
-          const nx = x + ddx,
-            ny = y + ddy;
-          if (nx < 0 || nx >= cols || ny < 0 || ny >= rows) continue;
-          if (grid[ny * cols + nx]) {
-            clear = false;
-            break outer;
-          }
-        }
-      }
-      if (!clear) continue;
+      if (!germSpotClear(x, y)) continue;
       if (keyConflictNear(genomeKey(genome), x, y)) {
         genome = mutateGenome(genome);
         continue;
@@ -901,8 +912,9 @@ function syncVisuals() {
 function updateUI() {
   const fill = ((occupiedCells() / (cols * rows)) * 100).toFixed(1);
   const repeats = immortals.length - immortalByKey.size;
+  const rLabel = uniqRadius >= cols + rows ? "global" : uniqRadius;
   statusText.text =
-    `Seed: ${runSeed} | R: ${uniqRadius} | Flowers: ${immortals.length} ` +
+    `Seed: ${runSeed} | R: ${rLabel} | Flowers: ${immortals.length} ` +
     `(${repeats} repeats) | Growing: ${growing.length} | ` +
     `Seeds: ${travelingSeeds.length} | Fill: ${fill}% | ` +
     `Streak: ${failStreak} | Ticks: ${frame}` +
