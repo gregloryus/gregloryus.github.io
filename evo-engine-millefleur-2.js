@@ -30,7 +30,7 @@ const IS_BROWSER = typeof window !== "undefined";
 const CONSTANTS = {
   SCALE_SIZE: 4,
   RNG_SEED: 14, // headless default; browser randomizes unless ?seed=
-  NUM_STARTER_SEEDS: 7,
+  NUM_STARTER_SEEDS: 1, // always a single founder; everything descends by mutation
   AIRBORNE_STEPS: 64,
   SEEDS_PER_TICK: 4,
   UNIQUENESS_RADIUS: 64, // same genome allowed if roots farther than this
@@ -122,22 +122,14 @@ function lerpColor(c1, c2, t) {
   );
 }
 
-// Deterministic color per canonical geneform: identical forms (i.e.
-// convergent evolution) always get the identical color; distinct forms
-// almost never collide (FNV-1a spread across hue + a little sat/val). This
-// intentionally drops the old similar-genome-similar-color gradient in favor
-// of making convergence spottable by eye.
+// Soft additive hash: deterministic per genome (convergent twins share a
+// color) AND similar genomes get similar colors, so lineages read as
+// family-colored neighborhoods. Trade-off vs a strong hash: distinct forms
+// can collide onto the same hue.
 function plantColorFromGenome(genome) {
-  let h = 0x811c9dc5;
-  for (let i = 0; i < genome.length; i++) {
-    h ^= genome[i] + 1; // +1 so trailing all-zero genes still perturb
-    h = Math.imul(h, 0x01000193);
-  }
-  h = h >>> 0;
-  const hue = (h % 3600) / 3600;
-  const sat = 0.6 + (((h >>> 12) & 0xff) / 255) * 0.4;
-  const val = 0.78 + (((h >>> 20) & 0xff) / 255) * 0.22;
-  return hsvToRgbInt(hue, sat, val);
+  let sum = 0;
+  for (let i = 0; i < genome.length; i++) sum += genome[i] + (i % 7);
+  return hsvToRgbInt((sum * 0.013) % 1, 0.8, 0.95);
 }
 
 // ---------------------------------------------------------------- Genetics
