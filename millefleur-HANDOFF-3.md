@@ -86,44 +86,75 @@ The ROLE/ORGAN system below replaces the topology-role + REQUIRE_BLOOM design.
    - **Seeds emit only from flowers**, paid for with energy — the most
      energetic (well-leafed, well-placed) plants reproduce fastest, and
      multiple flowers = more emission points. This REPLACES the artificial
-     REQUIRE_BLOOM: a flowerless plant may immortalize but is sterile — a
-     natural evolutionary dead end. Likewise leafless plants starve into
-     sterility. The economy does the selecting.
+     REQUIRE_BLOOM: a flowerless plant is sterile — a natural evolutionary
+     dead end. Likewise leafless plants can't power reproduction. The
+     economy does the selecting.
    - Seeds launch FROM their flower (the crawl-to-tip phase becomes
      redundant — flowers are the extremities; drop or keep TBD).
    - Greg: "the way simplant evolves right now is pretty dang cool" — the
      evolution FEEL of simplant is the target; millefleur adds the
      immortal-tapestry frame around it.
 
-## OPEN — decide with Greg before/while implementing v2
+5. **GENRE = endless ecology (for now).** Plants can starve/age out; the
+   piece never "completes." This supersedes the tapestry-that-terminates
+   framing for v2 — completion detection can be shelved (keep the code, but
+   it need not trigger). Decay-of-the-fruitless and energy-death now both
+   live in an ongoing ecology; decide how they compose (candidate: energy
+   is the pacing/fitness signal, an idle-lineage or starvation clock is the
+   death). Greg: "let's make it an endless ecology for now."
 
-a. **Genre: do immortals metabolize but never die (artwork), or can they
-   starve/age out (ecology)?** Frozen-in-form + metabolizing (absorb, bank,
-   emit) preserves the tapestry-that-completes; starvation death makes it
-   an endless ecology and overlaps with decay-of-the-fruitless. Also decide
-   how the decay mode composes with energy (e.g. decay window as the only
-   death, energy only as pacing).
-b. **Energy model granularity.** Simplant's per-cell absorption + light
-   particles crawling the parent chain (visualizable, heavier) vs an
-   austere abstraction (per-leaf exposure count × rate, no particles).
-   Also: does GROWTH cost energy (simplant: 1/cell, first free) or is
-   unfolding free and energy only paces emission? Leaning: unfolding free
-   (keeps fully-unfold-or-vanish pure), energy paces emission only.
-c. **Global emission scheduler goes away?** Per-flower energy-paced
-   emission replaces `SEEDS_PER_TICK` + weighted parent pick. The
-   descendant-success weighting may become redundant (energy already
-   selects) — keep the bookkeeping, maybe drop the sampling. Completion
-   detection via failure streak should still work; verify emission decays
-   to ~zero in a packed world so completion can trigger.
-d. **Flower petal geometry** (ring vs X) and **hard vs soft organs**
-   (leaning hard: one law, fully unfold or vanish — organs included).
-e. **Flower colors / palette.** Current: soft additive hash → full-spectrum
-   hue (similar genomes = similar hues = lineage neighborhoods), fixed
-   cream centers. Candidates: keep; or quantize hash into a curated
-   tapestry palette (whites/reds/blues/golds); or constrain sat/value only.
-   Greg hasn't picked yet.
-f. **Do bare terminals (gene 0) still exist in v2?** Presumably yes — bare
+6. **ENERGY stays AUSTERE.** No light particles. Per-leaf exposure count ×
+   rate, banked on the plant — bookkeeping only. **Unfolding is FREE**
+   (keeps fully-unfold pure); energy matters ONLY for FITNESS, expressed as
+   **seeding rate and/or longevity** (higher energy → emits seeds more
+   often and/or lives longer). Greg: "keep it austere for now, unfolding is
+   free, the energy calculation might only matter for fitness which we'd
+   translate into the seeding rates or maybe longevity."
+
+7. **MATURITY GATE for reproduction.** A plant may only flower once FULLY
+   mature (skeleton fully unfolded AND all leaves fully unfolded), and may
+   not emit any seed until it has flowered. Order: unfold everything →
+   flower(s) bloom → only then can energy pay for seeds. Greg: "flowering
+   should only happen upon full maturity otherwise (all leaves unfolded,
+   etc), and it shouldn't be able to start seeding until it has flowered."
+
+8. **ORGANS ARE HARD (all-or-nothing) on the body plan** — one law, fully
+   unfold or vanish, organs included. Petal geometry: **full 8-ring for
+   now.** FUTURE knob Greg flagged: petals could be exempted from the
+   all-or-nothing test (a flower that can't fit its full ring still counts)
+   — not for v2, but keep the petal-placement code factored so it's a
+   one-flag change later.
+
+## FIRST TASK for the next instance (before coding v2)
+
+Run the latest simplant headless to ~1,000,000 ticks and LOOK at how the
+forms evolve — Greg wants to confirm they adapt toward maximizing open
+sides + compactness (the selection pressure v2 inherits). `simplant.html`
+loads `simplant-20.js`; it is browser-oriented (PIXI, `window`), so a
+headless run may need a small shim (stub `window`/PIXI, or extract the
+Plant/tick logic). Report the form trend, mean genome length drift, and
+whether compact high-exposure shapes dominate. THEN discuss v2 with Greg.
+
+## OPEN — smaller items to decide while implementing v2
+
+a. **Energy → fitness mapping specifics.** Seeding-rate function (energy
+   threshold like simplant's `energy ≥ G` conceive / `≥ G+childG` launch?
+   or a smoother rate) and/or a longevity/starvation clock. Pick during
+   implementation; keep it austere.
+b. **Global emission scheduler goes away.** Per-flower energy-paced
+   emission replaces `SEEDS_PER_TICK` + weighted parent pick. Keep the
+   descendant-success bookkeeping (cheap), likely drop the rejection
+   sampling (energy already selects).
+c. **Flower colors / palette — STILL UNDECIDED.** Current: soft additive
+   hash → full-spectrum hue (similar genomes = similar hues = lineage
+   neighborhoods), fixed cream centers. Candidates: keep; quantize into a
+   curated tapestry palette (whites/reds/blues/golds); or constrain
+   sat/value only. Ask Greg.
+d. **Do bare terminals (gene 0) still exist in v2?** Presumably yes — bare
    twig tips are fine and are the mutation stepping-stone to organs.
+e. **Organ mutation operators** — exact mix of insert-organ / flip-type /
+   remove-organ, and whether `FORCE_SEED_STALK`-style protection extends to
+   anything besides gene 0.
 
 ## Reference notes (so next session needn't re-read the sources)
 
@@ -158,5 +189,9 @@ one mutation nudges the hue — lineages form color families. Leaves:
 same idea confined to a green band. Centers fixed cream `0xf7ecc8`.
 
 **Fresh-start instructions for a next session:** read HANDOFF-2 (map),
-this doc, then skim `evo-engine-millefleur-3.js`. Don't code until the
-OPEN items above are settled with Greg. Small checkpoints, always.
+this doc, then skim `evo-engine-millefleur-3.js` and the reference files
+(`simplant-20.js`, `aestheedlings-8.js`). Do the FIRST TASK (headless
+simplant to ~1M ticks, look at the forms) and report back. The big design
+(items 1–8) is DECIDED — build against it; only the smaller OPEN items
+(a–e) and any surprises need a check-in first. Small checkpoints, always;
+talk before big code.
