@@ -125,15 +125,47 @@ The ROLE/ORGAN system below replaces the topology-role + REQUIRE_BLOOM design.
    — not for v2, but keep the petal-placement code factored so it's a
    one-flag change later.
 
-## FIRST TASK for the next instance (before coding v2)
+## FIRST TASK — DONE (2026-07-11): simplant 1M-tick headless results
 
-Run the latest simplant headless to ~1,000,000 ticks and LOOK at how the
-forms evolve — Greg wants to confirm they adapt toward maximizing open
-sides + compactness (the selection pressure v2 inherits). `simplant.html`
-loads `simplant-20.js`; it is browser-oriented (PIXI, `window`), so a
-headless run may need a small shim (stub `window`/PIXI, or extract the
-Plant/tick logic). Report the form trend, mean genome length drift, and
-whether compact high-exposure shapes dominate. THEN discuss v2 with Greg.
+Ran `simplant-20.js` unmodified under a Node vm shim (stubbed
+`window`/`document`/PIXI), 160×90 torus grid, 1M ticks × 5 runs: seeds
+14/42/777 at default absorption, seeds 14/42 with GRADUATED_ABSORPTION.
+Zero extinctions in all five. Findings (Greg reviewed; confirms the v2
+selection pressure):
+
+- **Default rule (cell needs ≥3 open cardinal sides to absorb):** the
+  population holds fraction-of-cells-with-≥3-open at 0.32–0.40 all run.
+  Winning forms are open airy lattices — crosses, spread arms, sparse
+  candelabra — bbox fill ~0.4–0.5. Buried cells earn nothing, so bodies
+  stay exposed.
+- **Graduated rule (3 sides→1.5, 2→1.0, 1→0.5) evolves the OPPOSITE body
+  plan:** ≥3-open fraction collapses to 0.15–0.21, mean open sides ~1.6,
+  fill rises to 0.44–0.56 — compact branchy bushes/blobs. Partial exposure
+  paying makes shoulder-to-shoulder packing worth it. Same code, one flag,
+  different morphology: the economy selects the shape.
+- **Stochastic diversity, not one optimum:** each run found a DIFFERENT
+  good answer at similar fitness — 73–92 coexisting genomes per run, top
+  genome only 3–8% share. Seed 14 → wide horizontal arms; 42 → tidy
+  T/plus motifs; 777 → denser clumps.
+- **Genome-length ratchet:** mean length climbs monotonically, never
+  plateaus — 8→~22 (default), ~10→~26 (graduated) over 1M ticks. Driver:
+  lifespan = MAX_PLANT_AGE × genome length → unbounded pressure toward
+  size, checked only by exposure geometry. Plant count drifts down
+  (~320→~220) as individuals enlarge.
+- **⚠ Champions self-collide:** several top genomes can't fully unfold
+  even in open space (up to 6 of 26 genes abandoned) — simplant tolerates
+  partial growth and such genomes still win. v2's decided
+  fully-unfold-or-vanish law (item 8) would PENALIZE these; expect v2 to
+  select more conservative, reliably-fitting forms. Not a problem — a
+  knob whose effect is now visible.
+
+Conclusion: nothing contradicts the v2 design; ≥3-open default is a sound
+austere ancestor pressure, and graduated absorption is the lever if v2
+wants compactness instead of sprawl. Harness + per-run JSON (drift series,
+genome census, ASCII ideal-forms) were session-scratchpad only; the shim
+is ~150 lines (stub window/document/PIXI, eval source in vm, drive
+`advanceTick(false)`, reseed on extinction like `updateUI` does) — easy to
+recreate if needed.
 
 ## OPEN — smaller items to decide while implementing v2
 
@@ -190,8 +222,8 @@ same idea confined to a green band. Centers fixed cream `0xf7ecc8`.
 
 **Fresh-start instructions for a next session:** read HANDOFF-2 (map),
 this doc, then skim `evo-engine-millefleur-3.js` and the reference files
-(`simplant-20.js`, `aestheedlings-8.js`). Do the FIRST TASK (headless
-simplant to ~1M ticks, look at the forms) and report back. The big design
+(`simplant-20.js`, `aestheedlings-8.js`). The FIRST TASK (headless simplant
+to 1M ticks) is DONE — results above. Next step is building v2. The big design
 (items 1–8) is DECIDED — build against it; only the smaller OPEN items
 (a–e) and any surprises need a check-in first. Small checkpoints, always;
 talk before big code.
