@@ -146,13 +146,69 @@ perspective means light should fall equally on every pixel — the two
 framings conflict, unresolved. Explicitly weakly-held options, not
 directives; nothing to build yet.
 
+## ORGAN OVERLAP ROUND (2026-07-11, same session as the knob sweep)
+
+Greg picked the structural lever himself, from the aesthetic side: let
+leaves and petals overlap at ~50% opacity while the stem rule keeps things
+coherent. This is candidate (3) from the sweep section — relaxing the
+spatial penalty — aimed at exactly the term the sweep proved dominant:
+P(offspring fully unfolds). Built in `-4` in place (toggleable, so no fork):
+
+- **ORGAN_OVERLAP (default ON, hotkey `x`):** leaf blades + petals are now
+  "overlay tissue" — never written to the grid, exempt from the empty-cell
+  and outline-gap checks (only out-of-bounds still fails the plant), drawn
+  at ORGAN_ALPHA 0.5 so overlaps read as layering. The SKELETON (stems,
+  leaf anchors, flower centers) keeps the one law unchanged: exclusive
+  cells, strict self-avoidance, inter-plant outline gap.
+- Accepted side effects: blades don't shade each other (exposure income
+  reads only the skeleton grid, so leaf income roughly tripled); seeds can
+  germinate under foliage; fill% counts overlay tissue so it reads high.
+- Seed cell now visible: the root cell keeps the seed's cream (SEED_DOT)
+  tint in the mature plant instead of stem olive (Greg noticed the seed a
+  plant grew from vanished visually).
+- New knob hotkey `s`/`S`: AIRBORNE_STEPS ÷2/×2 (clamp 4–4096) — seed
+  flight length as a dispersal/sparseness lever alongside g/G.
+- removePlantMatter now only clears a grid slot if that cell owns it
+  (overlay tissue never claimed one); fade + immortalize alphas respect
+  per-cell baseAlpha.
+
+**Headless results (240×135, 400k ticks, seeds 14/42/777, all PASS):**
+regime shift, complexity UP across the board — flowers/plant 1.25–1.35
+(was ~1.0; multi-flower forms now hold real share), leaves/plant
+1.42–1.58 (was 1.26–1.42), standing plants ~1040–1180 (was ~330–370),
+fill ~88% (counts overlay), mean energyRate ~0.28 (was ~0.08), emission
+~27 seeds/tick (was ~1.7), wall ~40s (was ~5s — 10× more plants doing
+reproduction math; browser fast-forward 1000× may chug). Genome-length
+gradient now ~8.2 → 7.7 (slightly SHRINKING — overlap made organs cheap,
+so forms pack more organs into shorter genomes). Verified: overlap OFF
+(`x`) reproduces the old baseline bit-for-bit on seed 14 (330 plants,
+28.9% fill, flowers/plant 0.80). Completion mode (`decay=0`) still works,
+now COMPLETEs at ~18k ticks (was 230k) since organs stop competing for
+space.
+
+**Deliberately deferred (Greg's other ideas, discussed this session):**
+leaf-value/seeding-sparseness retune. Straight leaf-value increases can't
+flip the ranking (linear economy — ratios between plants are unchanged by
+scaling ABSORB_COEFF or seed cost); the promising version is a THRESHOLD:
+scarce energy + tight decay window so 1-leaf plants can't bank a seed
+inside the window but 2–3-leaf plants can. That combination was never
+swept (knobs went one at a time, coeff only upward). Superlinear leaf
+income (rate ∝ leaves^1.5) is the backup structural option. Both wait
+until Greg has SEEN the overlap regime — it moved the ground under all
+old sweep numbers, so any re-sweep must be from the new baseline.
+
 ## Open / next
 
-- Greg's visual review of `evo-engine-millefleur-4.html` (fresh eyes on
-  leaf shape, bloom clearance, decay churn, palette).
-- Aesthetic knobs if wanted after viewing: sterile-plant share (~21%),
-  P_ORGANIFY, ABSORB_COEFF pacing, decay window, 4-cell single-stage leaf
-  fallback, diagonal-X petal variant.
+- Greg's visual review of `evo-engine-millefleur-4.html` in the NEW overlap
+  regime (translucent layering, ~88% density, seed-dot roots, decay churn).
+  Key aesthetic question: is near-solid overlapping foliage the millefleur
+  look, or does it want thinning (e/E energy down, g/G germ radius up, s/S
+  longer flights all push sparser)?
+- If overlap regime holds: re-sweep economy from the new baseline —
+  threshold play (scarce energy × tight decay window) or superlinear leaf
+  income, per the deferred section above.
+- Aesthetic knobs if wanted after viewing: P_ORGANIFY, decay window,
+  4-cell single-stage leaf fallback, diagonal-X petal variant.
 - The one-off vm inspector (organ census + ASCII champion renders) lives in
   the session scratchpad only; ~80 lines, trivial to recreate (eval the
   source in `vm` with fake `process.argv`, then query `immortals`).

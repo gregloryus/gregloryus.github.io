@@ -30,6 +30,18 @@
 // - Global emission scheduler (SEEDS_PER_TICK + weighted parent pick) is
 //   gone; per-flower energy pacing replaces it. Descendant-success
 //   bookkeeping stays (it feeds the decay clock).
+// - ORGAN OVERLAP (structural, default ON — hotkey x toggles): leaf blades
+//   and petals are overlay tissue — off the grid, exempt from the
+//   empty-cell and outline-gap checks (bounds still fail the plant), drawn
+//   at 50% alpha so overlaps layer. This attacks the term that the knob
+//   sweep showed dominates fitness — P(offspring fully unfolds) — for
+//   organs specifically, so rich multi-organ forms stop dying to blocked
+//   teardrops and rings. The skeleton keeps the one law: stems stay
+//   exclusive and keep the outline gap, which holds the tapestry coherent.
+//   Side effects, accepted: blades don't shade each other (exposure income
+//   reads only the skeleton grid), seeds can germinate under foliage, and
+//   fill% counts overlay tissue.
+// - The root cell keeps the seed's cream color in the mature plant.
 //
 // Carried over from -3: upward germination, camera (?cols=&rows=&scale=,
 // wheel zoom, drag pan, c refits), palette (olive stems, hashed-green
@@ -53,7 +65,13 @@ const CONSTANTS = {
   SCALE_SIZE: 4,
   RNG_SEED: 14, // headless default; browser randomizes unless ?seed=
   NUM_STARTER_SEEDS: 1, // always a single founder; everything descends by mutation
-  AIRBORNE_STEPS: 64,
+  AIRBORNE_STEPS: 64, // seed flight length — longer = farther dispersal (hotkeys s/S)
+  ORGAN_OVERLAP: true, // leaves/petals are non-blocking overlay tissue: they
+  // skip the empty-cell and outline-gap checks (bounds still fail), never
+  // sit on the grid, and render translucent so overlaps read as layering.
+  // The skeleton (stems, anchors, flower centers) keeps the one law — that
+  // is what holds the tapestry coherent. Toggle with hotkey x.
+  ORGAN_ALPHA: 0.5, // mature organ-tissue opacity when ORGAN_OVERLAP is on
   UNIQUENESS_RADIUS: 99999, // >= any canvas => GLOBAL uniqueness. Lower it
   // (e.g. ?radius=64) for local uniqueness where forms may repeat at distance.
   P_CLONE: 0, // P(seed is exact copy). 0 => repeats are convergent only.
@@ -403,6 +421,7 @@ class Cell {
         ? ROLE_LEAF
         : ROLE_STEM;
     this.sprite = null;
+    this.baseAlpha = 1;
     node.cell = this;
     grid[y * cols + x] = this;
     plant.cells.push(this);
@@ -418,19 +437,24 @@ class Cell {
       }
     }
     if (IS_BROWSER && cellPool) {
-      const tint =
-        this.role === ROLE_FLOWER
-          ? CONSTANTS.COLORS.FLOWER_CENTER
-          : this.role === ROLE_LEAF
-          ? plant.leafColor
-          : CONSTANTS.COLORS.STEM;
+      // the root keeps the seed's cream so the cell each plant grew from
+      // stays visible in the mature form
+      const tint = isRoot
+        ? CONSTANTS.COLORS.SEED_DOT
+        : this.role === ROLE_FLOWER
+        ? CONSTANTS.COLORS.FLOWER_CENTER
+        : this.role === ROLE_LEAF
+        ? plant.leafColor
+        : CONSTANTS.COLORS.STEM;
       this.sprite = cellPool.acquire(x, y, tint, CONSTANTS.GROWING_ALPHA);
     }
   }
 }
 
-// Organ tissue (petals, leaf blades): grid-blocking plant matter, but not
-// part of the genome tree — no node, never on the frontier, no children.
+// Organ tissue (petals, leaf blades): plant matter outside the genome tree —
+// no node, never on the frontier, no children. With ORGAN_OVERLAP it is
+// overlay tissue: off the grid (blocks nothing, shades nothing) and
+// translucent; without it, grid-blocking like any cell.
 class OrganCell {
   constructor(x, y, plant, tint, isLeaf) {
     this.x = x;
@@ -439,7 +463,8 @@ class OrganCell {
     this.node = null;
     this.parent = null;
     this.sprite = null;
-    grid[y * cols + x] = this;
+    this.baseAlpha = CONSTANTS.ORGAN_OVERLAP ? CONSTANTS.ORGAN_ALPHA : 1;
+    if (!CONSTANTS.ORGAN_OVERLAP) grid[y * cols + x] = this;
     plant.cells.push(this);
     if (isLeaf) plant.leafSurface.push(this);
     if (IS_BROWSER && cellPool)
@@ -546,10 +571,11 @@ class Plant {
 
   // Aestheedlings teardrop: anchor L plus two 3-cell stages along U+D,
   // where U = the stem's forward and D = the slot direction (a forward-slot
-  // leaf leans deterministically left). Stage cells must be in bounds,
-  // empty, and clear of OTHER plants' 8-way halo (the outline gap); they
-  // may nestle against their own plant. All-or-nothing per stage — one law,
-  // fully unfold or vanish, organs included.
+  // leaf leans deterministically left). Stage cells must be in bounds;
+  // with ORGAN_OVERLAP that is the ONLY requirement (blades lay over
+  // anything as translucent tissue). Otherwise they must also be empty and
+  // clear of OTHER plants' 8-way halo (the outline gap), though they may
+  // nestle against their own plant. All-or-nothing per stage.
   unfoldLeafStage() {
     const L = this.leafAnchors[this.leafIndex];
     const P = L.parent;
@@ -571,6 +597,7 @@ class Plant {
         this.fail();
         return;
       }
+      if (CONSTANTS.ORGAN_OVERLAP) continue;
       if (grid[py * cols + px]) {
         this.fail();
         return;
@@ -597,10 +624,12 @@ class Plant {
   }
 
   // All-or-nothing petal ring: every 8-neighbor slot around the flower cell
-  // (minus the stem attachment) must be claimable — in bounds, empty, and
-  // clear of OTHER plants' 8-way halo (the tapestry outline gap). Petals
-  // may nestle against their own plant. Any blocked petal fails the WHOLE
-  // plant: the bloom is part of the body plan.
+  // (minus the stem attachment) must be claimable — in bounds always; with
+  // ORGAN_OVERLAP that's all (petals lay over anything as translucent
+  // tissue), otherwise also empty and clear of OTHER plants' 8-way halo
+  // (the tapestry outline gap; petals may nestle against their own plant).
+  // Any blocked petal fails the WHOLE plant: the bloom is part of the body
+  // plan.
   bloomOne() {
     const F = this.flowerCells[this.bloomIndex];
     const P = F.parent;
@@ -615,25 +644,27 @@ class Plant {
           this.fail();
           return;
         }
-        if (grid[py * cols + px]) {
+        if (!CONSTANTS.ORGAN_OVERLAP && grid[py * cols + px]) {
           this.fail();
           return;
         }
         targets.push(px, py);
       }
     }
-    for (let i = 0; i < targets.length; i += 2) {
-      const px = targets[i],
-        py = targets[i + 1];
-      for (let ddx = -1; ddx <= 1; ddx++) {
-        for (let ddy = -1; ddy <= 1; ddy++) {
-          const mx = px + ddx,
-            my = py + ddy;
-          if (mx < 0 || mx >= cols || my < 0 || my >= rows) continue;
-          const nb = grid[my * cols + mx];
-          if (nb && nb.plant !== this) {
-            this.fail();
-            return;
+    if (!CONSTANTS.ORGAN_OVERLAP) {
+      for (let i = 0; i < targets.length; i += 2) {
+        const px = targets[i],
+          py = targets[i + 1];
+        for (let ddx = -1; ddx <= 1; ddx++) {
+          for (let ddy = -1; ddy <= 1; ddy++) {
+            const mx = px + ddx,
+              my = py + ddy;
+            if (mx < 0 || mx >= cols || my < 0 || my >= rows) continue;
+            const nb = grid[my * cols + mx];
+            if (nb && nb.plant !== this) {
+              this.fail();
+              return;
+            }
           }
         }
       }
@@ -697,7 +728,7 @@ class Plant {
     stats.genomeLens.push(this.genome.length);
     if (IS_BROWSER) {
       for (let i = 0; i < this.cells.length; i++)
-        this.cells[i].sprite.alpha = 1;
+        this.cells[i].sprite.alpha = this.cells[i].baseAlpha;
     }
   }
 }
@@ -707,7 +738,9 @@ function removePlantMatter(plant) {
   const cells = plant.cells;
   for (let i = 0; i < cells.length; i++) {
     const cell = cells[i];
-    grid[cell.y * cols + cell.x] = null;
+    // overlay organ tissue never claimed its grid slot — don't wipe whoever did
+    const gi = cell.y * cols + cell.x;
+    if (grid[gi] === cell) grid[gi] = null;
     if (cell.node) cell.node.cell = null;
     if (cell.sprite) cellPool.release(cell.sprite);
   }
@@ -935,7 +968,7 @@ function advanceTick() {
         const a = 1 - t;
         const cells = pl.cells;
         for (let j = 0; j < cells.length; j++)
-          if (cells[j].sprite) cells[j].sprite.alpha = a;
+          if (cells[j].sprite) cells[j].sprite.alpha = a * cells[j].baseAlpha;
       }
     }
   }
@@ -1354,7 +1387,7 @@ function updateUI() {
     (decayWindow > 0
       ? `Decay: ${decayWindow} (${stats.decayed})`
       : `Streak: ${failStreak}`);
-  knobText.text = knobLine() + "  [e/E g/G o/O  [ ]]";
+  knobText.text = knobLine() + "  [e/E g/G o/O s/S x  [ ]]";
   if (complete && !completeText.text) {
     completeText.text = `❀ complete — ${immortals.length} plants, seed ${runSeed} ❀`;
     completeText.x = ((app.renderer.width - completeText.width) / 2) | 0;
@@ -1420,6 +1453,8 @@ function knobLine() {
   return (
     `E(nergy):${CONSTANTS.ABSORB_COEFF} | G(erm):${CONSTANTS.GERM_CLEAR_RADIUS} | ` +
     `O(rganify):${CONSTANTS.P_ORGANIFY.toFixed(2)} | ` +
+    `S(teps):${CONSTANTS.AIRBORNE_STEPS} | ` +
+    `X-overlap:${CONSTANTS.ORGAN_OVERLAP ? "on" : "off"} | ` +
     `Decay:${decayWindow > 0 ? decayWindow : "off"}`
   );
 }
@@ -1462,6 +1497,26 @@ function onKeyDown(e) {
     );
   if (e.key === "G")
     bumpKnob(`GERM_CLEAR_RADIUS -> ${++CONSTANTS.GERM_CLEAR_RADIUS}`);
+  // seed flight length: geometric ×/÷ 2, clamp [4, 4096]
+  if (e.key === "s")
+    bumpKnob(
+      `AIRBORNE_STEPS -> ${(CONSTANTS.AIRBORNE_STEPS = Math.max(
+        4,
+        CONSTANTS.AIRBORNE_STEPS >> 1
+      ))}`
+    );
+  if (e.key === "S")
+    bumpKnob(
+      `AIRBORNE_STEPS -> ${(CONSTANTS.AIRBORNE_STEPS = Math.min(
+        4096,
+        CONSTANTS.AIRBORNE_STEPS * 2
+      ))}`
+    );
+  // organ overlap: toggle overlay-tissue mode
+  if (e.key === "x" || e.key === "X")
+    bumpKnob(
+      `ORGAN_OVERLAP -> ${(CONSTANTS.ORGAN_OVERLAP = !CONSTANTS.ORGAN_OVERLAP)}`
+    );
   // organify probability: ±0.1, clamp [0, 1]
   if (e.key === "o")
     bumpKnob(
