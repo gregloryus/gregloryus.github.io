@@ -1225,7 +1225,7 @@ function initBrowser() {
   app.stage.addChild(statusText);
   knobText = new PIXI.Text("", style);
   knobText.x = 10;
-  knobText.y = 30;
+  knobText.y = 78;
   knobText.zIndex = 1000;
   app.stage.addChild(knobText);
   const completeStyle = new PIXI.TextStyle({
@@ -1335,19 +1335,25 @@ function syncVisuals() {
   }
 }
 
+function abbrev(n) {
+  if (n >= 1e6) return (n / 1e6).toFixed(1) + "M";
+  if (n >= 1e3) return (n / 1e3).toFixed(1) + "k";
+  return "" + n;
+}
+
 function updateUI() {
   const fill = ((occupiedCells() / (cols * rows)) * 100).toFixed(1);
   const repeats = immortals.length + fading.length - immortalByKey.size;
   const rLabel = uniqRadius >= cols + rows ? "global" : uniqRadius;
   statusText.text =
-    `Seed: ${runSeed} | R: ${rLabel} | Plants: ${immortals.length} ` +
-    `(${repeats} repeats) | Growing: ${growing.length} | ` +
-    `Seeds: ${travelingSeeds.length} | Emitted: ${stats.emitted} | ` +
-    `Fill: ${fill}% | Ticks: ${frame}` +
+    `Frame: ${abbrev(frame)}  Seed: ${runSeed}  R: ${rLabel}` +
+    (paused ? "  PAUSED" : "") +
+    `\nPlants: ${immortals.length} (${repeats} rep)  Growing: ${growing.length}` +
+    `  Seeds: ${travelingSeeds.length}` +
+    `\nEmitted: ${abbrev(stats.emitted)}  Fill: ${fill}%  ` +
     (decayWindow > 0
-      ? ` | Decay: ${decayWindow} (${stats.decayed})`
-      : ` | Streak: ${failStreak}`) +
-    (paused ? " | PAUSED" : "");
+      ? `Decay: ${decayWindow} (${stats.decayed})`
+      : `Streak: ${failStreak}`);
   knobText.text = knobLine() + "  [e/E g/G o/O  [ ]]";
   if (complete && !completeText.text) {
     completeText.text = `❀ complete — ${immortals.length} plants, seed ${runSeed} ❀`;
