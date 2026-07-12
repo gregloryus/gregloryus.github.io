@@ -83,6 +83,57 @@ footprint/genome gradients run bigger-later (22 → 30 cells) as in v1.
 
 Browser is NOT yet visually reviewed by Greg — that's the next step.
 
+## KNOB SWEEP — can tuning encourage complexity? (2026-07-11)
+
+Greg asked for knob values that reward more leaves/flowers. Swept headless
+(240×135, 250–300k ticks, seeds 14/42/777; complexity = leaves/plant, %
+plants with ≥2 leaves, % "rich" 4+-organ plants, % sterile). **Finding: no
+knob robustly raises complexity — seed-to-seed variance (±0.2 leaves/plant)
+is as large as any knob's effect, and the deeper attractor wins.**
+
+- **ABSORB_COEFF up = WORSE.** Abundant energy lets minimal plants
+  reproduce freely, which fragments space harder and strengthens the pull
+  toward small (coeff 2.0: n 329→510, fill 29%→36%, leaves/pl 1.42→1.04).
+  The apparent win at coeff 0.1 was a seed-14 artifact — on seeds 42/777 it
+  DROPPED leaves/pl to 1.03–1.11 (below baseline 1.26–1.35). Keep 0.02.
+- **Shorter decay window / table shape / P_ORGANIFY:** all within seed noise.
+- **Germination clearance radius** (force a bigger empty box to germinate so
+  tiny forms can't tile tiny gaps — the one lever that attacks minimalism
+  DIRECTLY rather than via energy): R=2 nets slightly positive on average
+  (leaves/pl 1.34→1.41, rich 5%→7%, sterile 21%→20%, fill flat) but is
+  still seed-dependent (seed 14 regresses, seed 42 jumps to 1.65). It
+  spaces plants out — a real aesthetic change, sparser tapestry — which
+  Greg is happy to treat as a knob. (NOTE: the "GERMINATION_CLEAR_RADIUS=3
+  is anti-millefleur" line in millefleur-HANDOFF.md was a PRIOR SESSION's
+  note, not Greg's; Greg likes more germination space aesthetically.)
+
+**Root cause (confirms the HANDOFF-3 economics analysis):** fitness ≈
+P(offspring fits AND fully unfolds) × emission rate. The P term is binary
+(immortalize or vanish) and dominates the slow emission multiplier, so
+small reliably beats rich. Energy tuning only changes how fast minimal
+plants flood; it doesn't flip the ranking. The economy is a GATE (must have
+≥1 leaf + ≥1 flower), not a gradient. **Robustly rewarding complexity needs
+a STRUCTURAL change, not a knob** — candidates on the table, awaiting Greg's
+aesthetic call: (1) size/richness-gated immortalization (must reach ≥N
+organs to freeze); (2) germination clearance as an owned knob (done — see
+below); (3) relax the spatial penalty on size (softer outline gap) so big
+forms' emission edge can win. Each trades against the sparse-minimal look
+differently — a visual judgment, so review `-4` in-browser before deciding.
+
+## KNOB HOTKEYS (browser, added 2026-07-11)
+
+Each adjusts a magic number by a discrete step and RESTARTS on the SAME seed
+(so you see the knob's effect, not a fresh run). Live values + the key map
+show on the second status line. Values read live from CONSTANTS, so a reset
+is all that's needed.
+- `e` / `E` — ABSORB_COEFF ÷2 / ×2 (clamp 0.0025–4)
+- `g` / `G` — GERM_CLEAR_RADIUS −1 / +1 (clamp 1–6; 1 = dense, higher = sparser)
+- `o` / `O` — P_ORGANIFY −0.1 / +0.1 (clamp 0–1)
+- `[` / `]` — decayWindow ÷1.5 / ×1.5 (clamp 1000 – 20×area)
+(Unchanged: space step, p pause, f fast-forward, 0 reset [new seed], c fit,
+d decay on/off, r report.) New CONSTANT: `GERM_CLEAR_RADIUS` (default 1,
+prior behavior); headless still PASS at the default.
+
 ## FUTURE — Greg's weakly-held thoughts (recorded 2026-07-11, NOT decisions)
 
 Goal stays: softly encourage more complex plant forms. The only

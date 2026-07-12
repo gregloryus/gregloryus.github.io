@@ -62,6 +62,10 @@ const CONSTANTS = {
   ABSORB_COEFF: 0.02, // energy/tick per graduated exposure point
   // (≈ simplant's expected income: P=0.6 per 30-tick cooldown)
   ABSORB_TABLE: [0, 0.5, 1.0, 1.5, 1.5], // energy value by open cardinal sides
+  GERM_CLEAR_RADIUS: 1, // a seed needs an empty (2R+1)² box to germinate;
+  // 1 = cell + 8 neighbors (dense). Higher spaces plants out, which favors
+  // bigger forms (tiny plants can no longer tile tiny gaps) at the cost of
+  // fill — an aesthetic/complexity lever (hotkeys g/G).
   COMPLETION_STREAK: 12000, // min consecutive failures that pause emission
   COMPLETION_STREAK_PER_CELL: 0.5, // scales the threshold with world area
   ENABLE_RANDOM_FACING: false, // every plant germinates facing UP
@@ -761,8 +765,9 @@ function stepSeed(ts) {
       ty = ts.y;
     let clear = !grid[ty * cols + tx];
     if (clear) {
-      outer: for (let ddx = -1; ddx <= 1; ddx++) {
-        for (let ddy = -1; ddy <= 1; ddy++) {
+      const R = CONSTANTS.GERM_CLEAR_RADIUS;
+      outer: for (let ddx = -R; ddx <= R; ddx++) {
+        for (let ddy = -R; ddy <= R; ddy++) {
           if (ddx === 0 && ddy === 0) continue;
           const nx = tx + ddx,
             ny = ty + ddy;
@@ -1091,7 +1096,7 @@ let paused = false,
 let fastForwardLevels = [1, 10, 100, 1000],
   fastForwardIndex = 1,
   lastTickTime = 0;
-let statusText, completeText;
+let statusText, knobText, completeText;
 let uiUpdateCounter = 0;
 const UI_UPDATE_INTERVAL = 15;
 let urlSeed = null; // ?seed= pins the run; reset replays it
@@ -1218,6 +1223,11 @@ function initBrowser() {
   statusText.y = 10;
   statusText.zIndex = 1000;
   app.stage.addChild(statusText);
+  knobText = new PIXI.Text("", style);
+  knobText.x = 10;
+  knobText.y = 30;
+  knobText.zIndex = 1000;
+  app.stage.addChild(knobText);
   const completeStyle = new PIXI.TextStyle({
     fontFamily: "Georgia",
     fontSize: 28,
@@ -1338,6 +1348,7 @@ function updateUI() {
       ? ` | Decay: ${decayWindow} (${stats.decayed})`
       : ` | Streak: ${failStreak}`) +
     (paused ? " | PAUSED" : "");
+  knobText.text = knobLine() + "  [e/E g/G o/O  [ ]]";
   if (complete && !completeText.text) {
     completeText.text = `❀ complete — ${immortals.length} plants, seed ${runSeed} ❀`;
     completeText.x = ((app.renderer.width - completeText.width) / 2) | 0;
@@ -1345,7 +1356,7 @@ function updateUI() {
   }
 }
 
-function resetSimulation() {
+function resetSimulation(keepSeed) {
   for (let i = 0; i < immortals.length; i++) {
     const cells = immortals[i].cells;
     for (let j = 0; j < cells.length; j++)
@@ -1385,10 +1396,26 @@ function resetSimulation() {
   stats.footprints = [];
   stats.genomeLens = [];
   completeText.text = "";
-  runSeed = newRunSeed();
+  if (!keepSeed) runSeed = newRunSeed();
   rngState = runSeed >>> 0;
   console.log(`millefleur-4 reset: seed=${runSeed} (replay with ?seed=${runSeed})`);
   initializeStarters();
+}
+
+// Knob hotkeys: adjust a magic number by a sensible discrete step, then
+// restart on the SAME seed so the change is what you're seeing, not a new
+// run. Values are read live from CONSTANTS (immortalize / mutateGenome /
+// stepSeed all consult it each time), so a reset is all that's needed.
+function bumpKnob(msg) {
+  console.log(`knob: ${msg} — restarting seed ${runSeed}`);
+  resetSimulation(true);
+}
+function knobLine() {
+  return (
+    `E(nergy):${CONSTANTS.ABSORB_COEFF} | G(erm):${CONSTANTS.GERM_CLEAR_RADIUS} | ` +
+    `O(rganify):${CONSTANTS.P_ORGANIFY.toFixed(2)} | ` +
+    `Decay:${decayWindow > 0 ? decayWindow : "off"}`
+  );
 }
 
 function onKeyDown(e) {
@@ -1403,6 +1430,63 @@ function onKeyDown(e) {
   if (e.key === "f" || e.key === "F") fastForward = !fastForward;
   if (e.key === "0") resetSimulation();
   if (e.key === "c" || e.key === "C") fitView();
+  // --- knob hotkeys (lowercase down, uppercase up; each restarts on seed) ---
+  // energy income: geometric ×/÷ 2, clamp [0.0025, 4]
+  if (e.key === "e")
+    bumpKnob(
+      `ABSORB_COEFF -> ${(CONSTANTS.ABSORB_COEFF = Math.max(
+        0.0025,
+        CONSTANTS.ABSORB_COEFF / 2
+      ))}`
+    );
+  if (e.key === "E")
+    bumpKnob(
+      `ABSORB_COEFF -> ${(CONSTANTS.ABSORB_COEFF = Math.min(
+        4,
+        CONSTANTS.ABSORB_COEFF * 2
+      ))}`
+    );
+  // germination clearance radius: integer ±1, clamp [1, 6]
+  if (e.key === "g")
+    bumpKnob(
+      `GERM_CLEAR_RADIUS -> ${(CONSTANTS.GERM_CLEAR_RADIUS = Math.max(
+        1,
+        CONSTANTS.GERM_CLEAR_RADIUS - 1
+      ))}`
+    );
+  if (e.key === "G")
+    bumpKnob(
+      `GERM_CLEAR_RADIUS -> ${(CONSTANTS.GERM_CLEAR_RADIUS = Math.min(
+        6,
+        CONSTANTS.GERM_CLEAR_RADIUS + 1
+      ))}`
+    );
+  // organify probability: ±0.1, clamp [0, 1]
+  if (e.key === "o")
+    bumpKnob(
+      `P_ORGANIFY -> ${(CONSTANTS.P_ORGANIFY = Math.max(
+        0,
+        +(CONSTANTS.P_ORGANIFY - 0.1).toFixed(2)
+      ))}`
+    );
+  if (e.key === "O")
+    bumpKnob(
+      `P_ORGANIFY -> ${(CONSTANTS.P_ORGANIFY = Math.min(
+        1,
+        +(CONSTANTS.P_ORGANIFY + 0.1).toFixed(2)
+      ))}`
+    );
+  // decay window: geometric ×/÷ 1.5, clamp [1000, 20×area]; [ shorter, ] longer
+  if (e.key === "[") {
+    if (decayWindow <= 0) decayWindow = (cols * rows) | 0;
+    decayWindow = Math.max(1000, (decayWindow / 1.5) | 0);
+    bumpKnob(`decayWindow -> ${decayWindow}`);
+  }
+  if (e.key === "]") {
+    if (decayWindow <= 0) decayWindow = (cols * rows) | 0;
+    decayWindow = Math.min((cols * rows * 20) | 0, (decayWindow * 1.5) | 0);
+    bumpKnob(`decayWindow -> ${decayWindow}`);
+  }
   if (e.key === "d" || e.key === "D") {
     // toggle decay of the fruitless mid-run (auto window when turning on)
     decayWindow =
