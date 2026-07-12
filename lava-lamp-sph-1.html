@@ -1,0 +1,351 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Lava Lamp SPH v1 — Particle Wax</title>
+<style>
+  body { margin:0; background:#000; overflow:hidden; display:flex; justify-content:center; }
+  canvas { display:block; }
+  #panel { position:fixed; top:8px; left:8px; background:rgba(8,8,18,.88); color:#cbd;
+           font:11px monospace; padding:8px 10px; border-radius:6px; max-height:94vh; overflow:auto; }
+  #panel label { display:flex; justify-content:space-between; gap:10px; margin:2px 0; }
+  #panel input { width:100px; }
+  #panel .val { width:52px; text-align:right; color:#8fc; }
+  #status { position:fixed; bottom:8px; left:8px; color:#8ac; font:11px monospace; white-space:pre; }
+  #help { position:fixed; bottom:8px; right:8px; color:#556; font:10px monospace; text-align:right; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="panel"></div>
+<div id="status"></div>
+<div id="help">space pause · [ ] speed · p panel · r reset</div>
+<script>
+"use strict";
+
+// ---------------- Parameters ----------------
+// Clavet et al. 2005 double-density-relaxation SPH.
+// Wax = particles; water = implicit medium (buoyancy + drag).
+const P = {
+  gravity:   0.045,   // net sink force of cold wax (already relative to water)
+  buoy:      0.110,   // lift at full thermal gate
+  buoyT:     0.62,    // gum-in-soda threshold
+  buoySharp: 14,
+  heatRate:  0.0045,
+  coolRate:  0.0045,
+  tempDiff:  0.05,    // conductive diffusion between touching particles
+  viscCold:  0.55,    // linear viscosity when T=0 (near-rigid)
+  viscHot:   0.03,    // when T=1 (runny)
+  stiff:     0.35,    // pressure k  (negative pressure below restDens = cohesion)
+  nearStiff: 3.5,     // anti-clump near-pressure
+  restDens:  4.2,
+  drag:      0.006,   // ambient water drag
+  heaterFrac:0.34,    // center fraction of bottom that heats
+  coolZone:  0.12,    // top fraction that cools
+};
+const SLIDERS = [
+  ["gravity",0,0.15,0.001],["buoy",0,0.3,0.001],["buoyT",0,1,0.01],["buoySharp",1,40,1],
+  ["heatRate",0,0.02,0.0005],["coolRate",0,0.02,0.0005],["tempDiff",0,0.2,0.005],
+  ["viscCold",0,1,0.01],["viscHot",0,0.5,0.01],
+  ["stiff",0,1,0.01],["nearStiff",0,10,0.1],["restDens",1,10,0.1],
+  ["drag",0,0.05,0.001],["heaterFrac",0.05,1,0.01],["coolZone",0,0.4,0.01],
+];
+
+// ---------------- World ----------------
+const W = 360, H = 640;            // sim units (portrait)
+const RADIUS = 15;                 // interaction radius h
+const SPACING = 6;
+const WAX_FRAC = 0.22;
+const INIT_TEMP = 0.15;
+const MARGIN = 4;
+const HEATER_DEPTH = 16;           // sim-units above floor that receive heat
+
+const canvas = document.getElementById("c");
+const ctx = canvas.getContext("2d");
+let scale = 1;
+function resize() {
+  scale = Math.min(innerHeight / H, innerWidth / W);
+  canvas.width = Math.round(W * scale);
+  canvas.height = Math.round(H * scale);
+}
+resize(); addEventListener("resize", resize);
+
+// offscreen field canvas at sim resolution for metaball pass
+const field = document.createElement("canvas");
+field.width = W; field.height = H;
+const fctx = field.getContext("2d", { willReadFrequently: true });
+
+// ---------------- Particles ----------------
+const MAXN = 6000;
+const px = new Float32Array(MAXN), py = new Float32Array(MAXN);
+const vx = new Float32Array(MAXN), vy = new Float32Array(MAXN);
+const ox = new Float32Array(MAXN), oy = new Float32Array(MAXN);
+const tp = new Float32Array(MAXN);
+const dens = new Float32Array(MAXN), ndens = new Float32Array(MAXN);
+const prs = new Float32Array(MAXN), nprs = new Float32Array(MAXN);
+let N = 0;
+
+function init() {
+  N = 0;
+  const rows = Math.floor((H * WAX_FRAC) / SPACING);
+  const cols = Math.floor((W - 2 * MARGIN) / SPACING);
+  for (let r = 0; r < rows; r++) {
+    for (let c = 0; c < cols; c++) {
+      if (N >= MAXN) break;
+      px[N] = MARGIN + (c + 0.5) * SPACING + (Math.random() - 0.5) * 2;
+      py[N] = H - MARGIN - (r + 0.5) * SPACING + (Math.random() - 0.5) * 2;
+      vx[N] = 0; vy[N] = 0; tp[N] = INIT_TEMP;
+      N++;
+    }
+  }
+}
+
+// ---------------- Spatial hash (counting sort) ----------------
+const CELL = RADIUS;
+const GW = Math.ceil(W / CELL), GH = Math.ceil(H / CELL);
+const NCELLS = GW * GH;
+const cellStart = new Int32Array(NCELLS + 1);
+const cellCount = new Int32Array(NCELLS);
+const sorted = new Int32Array(MAXN);
+
+function cellOf(i) {
+  let cx = (px[i] / CELL) | 0; if (cx < 0) cx = 0; else if (cx >= GW) cx = GW - 1;
+  let cy = (py[i] / CELL) | 0; if (cy < 0) cy = 0; else if (cy >= GH) cy = GH - 1;
+  return cy * GW + cx;
+}
+function buildGrid() {
+  cellCount.fill(0);
+  for (let i = 0; i < N; i++) cellCount[cellOf(i)]++;
+  let s = 0;
+  for (let c = 0; c < NCELLS; c++) { cellStart[c] = s; s += cellCount[c]; }
+  cellStart[NCELLS] = s;
+  cellCount.fill(0);
+  for (let i = 0; i < N; i++) {
+    const c = cellOf(i);
+    sorted[cellStart[c] + cellCount[c]++] = i;
+  }
+}
+// iterate neighbor pairs (i<j) via grid
+function forPairs(fn) {
+  for (let cy = 0; cy < GH; cy++) {
+    for (let cx = 0; cx < GW; cx++) {
+      const c = cy * GW + cx;
+      const a0 = cellStart[c], a1 = cellStart[c + 1];
+      for (let a = a0; a < a1; a++) {
+        const i = sorted[a];
+        // same cell, later entries
+        for (let b = a + 1; b < a1; b++) fn(i, sorted[b]);
+        // forward half of neighbor cells: E, SW, S, SE
+        for (let k = 0; k < 4; k++) {
+          const nx = cx + [1, -1, 0, 1][k], ny = cy + [0, 1, 1, 1][k];
+          if (nx < 0 || nx >= GW || ny >= GH) continue;
+          const d = ny * GW + nx;
+          for (let b = cellStart[d]; b < cellStart[d + 1]; b++) fn(i, sorted[b]);
+        }
+      }
+    }
+  }
+}
+
+// ---------------- Simulation substep ----------------
+const sigmoid = (x) => 1 / (1 + Math.exp(-x));
+
+function substep() {
+  buildGrid();
+
+  // viscosity + heat conduction (pairwise, uses current positions/velocities)
+  forPairs((i, j) => {
+    const dx = px[j] - px[i], dy = py[j] - py[i];
+    const r2 = dx * dx + dy * dy;
+    if (r2 >= RADIUS * RADIUS || r2 < 1e-12) return;
+    const r = Math.sqrt(r2), q = r / RADIUS;
+    const ux = dx / r, uy = dy / r;
+    // heat conduction (symmetric, conserves total heat)
+    const dT = P.tempDiff * (1 - q) * (tp[j] - tp[i]);
+    tp[i] += dT; tp[j] -= dT;
+    // viscosity impulse on approaching pairs; cold wax is thick
+    const u = (vx[i] - vx[j]) * ux + (vy[i] - vy[j]) * uy;
+    if (u > 0) {
+      const tAvg = 0.5 * (tp[i] + tp[j]);
+      const sig = P.viscCold + (P.viscHot - P.viscCold) * tAvg;
+      let imp = (1 - q) * sig * u;
+      if (imp > u) imp = u; // never reverse relative motion
+      const ix = 0.5 * imp * ux, iy = 0.5 * imp * uy;
+      vx[i] -= ix; vy[i] -= iy;
+      vx[j] += ix; vy[j] += iy;
+    }
+  });
+
+  // body forces + integrate
+  for (let i = 0; i < N; i++) {
+    const gate = sigmoid(P.buoySharp * (tp[i] - P.buoyT));
+    vy[i] += P.gravity - P.buoy * gate;
+    vx[i] *= 1 - P.drag; vy[i] *= 1 - P.drag;
+    ox[i] = px[i]; oy[i] = py[i];
+    px[i] += vx[i]; py[i] += vy[i];
+  }
+
+  buildGrid();
+
+  // density
+  dens.fill(0, 0, N); ndens.fill(0, 0, N);
+  forPairs((i, j) => {
+    const dx = px[j] - px[i], dy = py[j] - py[i];
+    const r2 = dx * dx + dy * dy;
+    if (r2 >= RADIUS * RADIUS) return;
+    const q = 1 - Math.sqrt(r2) / RADIUS;
+    const q2 = q * q, q3 = q2 * q;
+    dens[i] += q2; dens[j] += q2;
+    ndens[i] += q3; ndens[j] += q3;
+  });
+  for (let i = 0; i < N; i++) {
+    prs[i] = P.stiff * (dens[i] - P.restDens);
+    nprs[i] = P.nearStiff * ndens[i];
+  }
+
+  // double density relaxation
+  forPairs((i, j) => {
+    const dx = px[j] - px[i], dy = py[j] - py[i];
+    const r2 = dx * dx + dy * dy;
+    if (r2 >= RADIUS * RADIUS || r2 < 1e-12) return;
+    const r = Math.sqrt(r2), q = 1 - r / RADIUS;
+    let D = 0.5 * ((prs[i] + prs[j]) * 0.5 * q + (nprs[i] + nprs[j]) * 0.5 * q * q);
+    if (D > 2) D = 2; else if (D < -2) D = -2; // stability cap
+    const ux = dx / r, uy = dy / r;
+    px[j] += 0.5 * D * ux; py[j] += 0.5 * D * uy;
+    px[i] -= 0.5 * D * ux; py[i] -= 0.5 * D * uy;
+  });
+
+  // walls, heat zones, velocity from positions
+  const heaterHalf = W * P.heaterFrac * 0.5;
+  const coolY = H * P.coolZone;
+  for (let i = 0; i < N; i++) {
+    if (px[i] < MARGIN) px[i] = MARGIN;
+    else if (px[i] > W - MARGIN) px[i] = W - MARGIN;
+    if (py[i] < MARGIN) py[i] = MARGIN;
+    else if (py[i] > H - MARGIN) py[i] = H - MARGIN;
+
+    // heater: bottom strip, center fraction only (NO ambient cooling — lbm-11 lesson)
+    if (py[i] > H - HEATER_DEPTH && Math.abs(px[i] - W / 2) < heaterHalf) {
+      tp[i] += P.heatRate;
+    }
+    if (py[i] < coolY) tp[i] -= P.coolRate * (1 - py[i] / coolY);
+    if (tp[i] > 1) tp[i] = 1; else if (tp[i] < 0) tp[i] = 0;
+
+    vx[i] = px[i] - ox[i];
+    vy[i] = py[i] - oy[i];
+  }
+}
+
+// ---------------- Rendering (metaballs) ----------------
+// pre-rendered temp-tinted sprites
+const NSPR = 32, SPR = 28; // sprite px (diameter), radius = RADIUS*0.95
+const sprites = [];
+function tempColor(t) {
+  const hue = 8 + 40 * t;             // dark red -> orange-yellow
+  const light = 30 + 34 * t;
+  return `hsl(${hue},95%,${light}%)`;
+}
+for (let s = 0; s < NSPR; s++) {
+  const cv = document.createElement("canvas");
+  cv.width = SPR; cv.height = SPR;
+  const g = cv.getContext("2d");
+  const grad = g.createRadialGradient(SPR/2, SPR/2, 0, SPR/2, SPR/2, SPR/2);
+  const col = tempColor(s / (NSPR - 1));
+  grad.addColorStop(0, col);
+  grad.addColorStop(1, "transparent");
+  g.fillStyle = grad;
+  g.fillRect(0, 0, SPR, SPR);
+  sprites.push(cv);
+}
+
+function render() {
+  fctx.globalCompositeOperation = "source-over";
+  fctx.clearRect(0, 0, W, H);
+  fctx.globalCompositeOperation = "lighter";
+  for (let i = 0; i < N; i++) {
+    const s = Math.min(NSPR - 1, (tp[i] * NSPR) | 0);
+    fctx.drawImage(sprites[s], px[i] - SPR / 2, py[i] - SPR / 2);
+  }
+  // threshold pass
+  const img = fctx.getImageData(0, 0, W, H);
+  const d = img.data;
+  const T0 = 90, T1 = 130; // alpha thresholds (0-255)
+  for (let p = 0; p < d.length; p += 4) {
+    const a = d[p + 3];
+    if (a <= T0) { d[p + 3] = 0; continue; }
+    let e = (a - T0) / (T1 - T0); if (e > 1) e = 1;
+    e = e * e * (3 - 2 * e);
+    const boost = 255 / a;
+    d[p]     = Math.min(255, d[p] * boost);
+    d[p + 1] = Math.min(255, d[p + 1] * boost);
+    d[p + 2] = Math.min(255, d[p + 2] * boost);
+    d[p + 3] = 255 * e;
+  }
+  fctx.putImageData(img, 0, 0);
+
+  // composite to display
+  ctx.fillStyle = "#0a0614";
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  // heater glow
+  const hw = W * P.heaterFrac * scale;
+  const g = ctx.createRadialGradient(canvas.width/2, canvas.height, 0, canvas.width/2, canvas.height, hw);
+  g.addColorStop(0, "rgba(255,120,30,0.25)");
+  g.addColorStop(1, "transparent");
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.imageSmoothingEnabled = true;
+  ctx.drawImage(field, 0, 0, canvas.width, canvas.height);
+}
+
+// ---------------- UI ----------------
+const panel = document.getElementById("panel");
+for (const [key, min, max, step] of SLIDERS) {
+  const label = document.createElement("label");
+  const span = document.createElement("span"); span.textContent = key;
+  const input = document.createElement("input");
+  input.type = "range"; input.min = min; input.max = max; input.step = step; input.value = P[key];
+  const val = document.createElement("span"); val.className = "val"; val.textContent = P[key];
+  input.oninput = () => { P[key] = parseFloat(input.value); val.textContent = input.value; };
+  label.append(span, input, val);
+  panel.append(label);
+}
+
+let paused = false, steps = 4, frame = 0;
+let fps = 0, lastT = performance.now(), fpsFrames = 0;
+addEventListener("keydown", (e) => {
+  if (e.key === " ") { paused = !paused; e.preventDefault(); }
+  else if (e.key === "[") steps = Math.max(1, steps >> 1);
+  else if (e.key === "]") steps = Math.min(64, steps << 1);
+  else if (e.key === "p") panel.style.display = panel.style.display === "none" ? "" : "none";
+  else if (e.key === "r") init();
+});
+
+const status = document.getElementById("status");
+function tick() {
+  if (!paused) {
+    for (let s = 0; s < steps; s++) substep();
+    frame++;
+  }
+  render();
+  fpsFrames++;
+  const now = performance.now();
+  if (now - lastT > 500) {
+    fps = Math.round(fpsFrames * 1000 / (now - lastT));
+    fpsFrames = 0; lastT = now;
+    let avgT = 0, maxT = 0;
+    for (let i = 0; i < N; i++) { avgT += tp[i]; if (tp[i] > maxT) maxT = tp[i]; }
+    avgT /= N;
+    status.textContent =
+      `fps ${fps}  x${steps}${paused ? "  PAUSED" : ""}\n` +
+      `n ${N}  frame ${frame}\n` +
+      `avgT ${avgT.toFixed(3)}  maxT ${maxT.toFixed(3)}`;
+  }
+  requestAnimationFrame(tick);
+}
+
+init();
+tick();
+</script>
+</body>
+</html>
