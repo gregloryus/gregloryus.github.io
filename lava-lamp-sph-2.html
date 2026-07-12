@@ -386,6 +386,15 @@ for (const [k, txt] of [["fullw","full width (w)"],["wrap","wrap x edges (e)"],[
   label.append(span, input);
   panel.append(label);
 }
+const speedLabel = document.createElement("label");
+const speedSpan = document.createElement("span"); speedSpan.textContent = "speed [ ]";
+const speedInput = document.createElement("input");
+speedInput.type = "range"; speedInput.min = 1; speedInput.max = 64; speedInput.step = 1; speedInput.value = steps;
+const speedVal = document.createElement("span"); speedVal.className = "val"; speedVal.textContent = "x" + steps;
+speedInput.oninput = () => { steps = parseInt(speedInput.value); speedVal.textContent = "x" + steps; };
+function syncSpeed() { speedInput.value = steps; speedVal.textContent = "x" + steps; }
+speedLabel.append(speedSpan, speedInput, speedVal);
+panel.append(speedLabel);
 function applyKind(kind) {
   if (kind === "grid") { setupGrid(); rebuildSprites(); }
   else if (kind === "init") init();
@@ -427,8 +436,8 @@ let paused = false, frame = 0;
 let fps = 0, lastT = performance.now(), fpsFrames = 0;
 addEventListener("keydown", (e) => {
   if (e.key === " ") { paused = !paused; e.preventDefault(); }
-  else if (e.key === "[") steps = Math.max(1, steps >> 1);
-  else if (e.key === "]") steps = Math.min(64, steps << 1);
+  else if (e.key === "[") { steps = Math.max(1, steps >> 1); syncSpeed(); }
+  else if (e.key === "]") { steps = Math.min(64, steps << 1); syncSpeed(); }
   else if (e.key === "p") panel.style.display = panel.style.display === "none" ? "" : "none";
   else if (e.key === "r") init();
   else if (e.key === "w") { T.fullw ^= 1; toggleInputs.fullw.checked = !!T.fullw; applyWidth(); }
