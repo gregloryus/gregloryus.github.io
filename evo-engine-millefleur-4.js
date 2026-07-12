@@ -1455,12 +1455,7 @@ function onKeyDown(e) {
       ))}`
     );
   if (e.key === "G")
-    bumpKnob(
-      `GERM_CLEAR_RADIUS -> ${(CONSTANTS.GERM_CLEAR_RADIUS = Math.min(
-        6,
-        CONSTANTS.GERM_CLEAR_RADIUS + 1
-      ))}`
-    );
+    bumpKnob(`GERM_CLEAR_RADIUS -> ${++CONSTANTS.GERM_CLEAR_RADIUS}`);
   // organify probability: ±0.1, clamp [0, 1]
   if (e.key === "o")
     bumpKnob(

@@ -127,7 +127,7 @@ Each adjusts a magic number by a discrete step and RESTARTS on the SAME seed
 show on the second status line. Values read live from CONSTANTS, so a reset
 is all that's needed.
 - `e` / `E` — ABSORB_COEFF ÷2 / ×2 (clamp 0.0025–4)
-- `g` / `G` — GERM_CLEAR_RADIUS −1 / +1 (clamp 1–6; 1 = dense, higher = sparser)
+- `g` / `G` — GERM_CLEAR_RADIUS −1 / +1 (min 1, no upper cap; 1 = dense, higher = sparser)
 - `o` / `O` — P_ORGANIFY −0.1 / +0.1 (clamp 0–1)
 - `[` / `]` — decayWindow ÷1.5 / ×1.5 (clamp 1000 – 20×area)
 (Unchanged: space step, p pause, f fast-forward, 0 reset [new seed], c fit,
