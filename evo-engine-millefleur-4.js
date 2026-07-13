@@ -27,12 +27,22 @@
 //   dropped). Flowerless plants are sterile; leafless ones merely slow.
 // - MATURITY GATE: skeleton unfolds fully → leaves unfold → flowers bloom →
 //   immortalize; only then does seeding begin.
-// - FIXED LIFESPAN: every mature plant lives exactly `lifespan` ticks after
-//   immortalizing (default MATURE_LIFESPAN; ?life=N overrides), then fades
-//   and frees its space + genome. One clock, one death — the old
-//   decay-of-the-fruitless lineage clock is gone. Total lifetime output =
-//   flowers × rate × lifespan / cost: fitness is legible. ?life=0 makes
-//   plants immortal and restores the -3 completion detection.
+// - LIFESPAN ∝ GENOME LENGTH (2026-07-12): a mature plant lives
+//   LIFESPAN_PER_GENE × genome length ticks after immortalizing, then fades
+//   and frees its space + genome — simplant's longevity reward, restored to
+//   encourage complex forms (a longer genome earns a longer emission
+//   window). One clock, one death — the old decay-of-the-fruitless lineage
+//   clock is gone. ?life=N sets the per-gene value; ?life=0 makes plants
+//   immortal and restores the -3 completion detection.
+// - UNIQUENESS OFF BY DEFAULT (2026-07-12): the standing-genome uniqueness
+//   check is toggleable and starts disabled (identical forms may coexist
+//   anywhere). ?radius=N or hotkey u restore it. P_CLONE = 0.5: half of
+//   seeds are exact copies, half carry ≥1 mutation.
+// - SYMMETRIC MUTATION (2026-07-12): a bit-clear now amputates the whole
+//   subtree beneath it (the old no-op guard is gone). Growth adds one gene
+//   at a time; shedding drops a branch at a time — the length ratchet
+//   (easy to add, nearly impossible to remove) is fixed. Root-adjacent
+//   amputations stay rare via the newer-genes-mutate-more bias.
 // - Organs are SOLID grid-blocking tissue (the overlap experiment was
 //   reverted 2026-07-12 — it read as illegible): blades and petals claim
 //   cells and keep the inter-plant outline gap.
@@ -54,8 +64,8 @@
 //
 // Run modes:
 //   browser:  evo-engine-millefleur-4.html
-//   headless: node evo-engine-millefleur-4.js [seed] [maxTicks] [cols] [rows] [radius] [pClone] [lifespan]
-//             (lifespan: omitted = MATURE_LIFESPAN, 0 = immortal/completion mode, N = N ticks)
+//   headless: node evo-engine-millefleur-4.js [seed] [maxTicks] [cols] [rows] [radius] [pClone] [lifePerGene]
+//             (lifePerGene: omitted = LIFESPAN_PER_GENE, 0 = immortal/completion mode)
 
 const IS_BROWSER = typeof window !== "undefined";
 
@@ -67,9 +77,10 @@ const CONSTANTS = {
   RNG_SEED: 14, // headless default; browser randomizes unless ?seed=
   NUM_STARTER_SEEDS: 1, // always a single founder; everything descends by mutation
   AIRBORNE_STEPS: 64, // seed flight length — longer = farther dispersal (hotkeys s/S)
-  UNIQUENESS_RADIUS: 99999, // >= any canvas => GLOBAL uniqueness. Lower it
-  // (e.g. ?radius=64) for local uniqueness where forms may repeat at distance.
-  P_CLONE: 0, // P(seed is exact copy). 0 => repeats are convergent only.
+  UNIQUENESS_RADIUS: 99999, // the "on" value for the uniqueness toggle
+  // (hotkey u / ?radius=N). Runtime default is OFF (uniqRadius = 0):
+  // identical genomes may coexist anywhere.
+  P_CLONE: 0.5, // P(seed is exact copy); the rest carry >= 1 mutation.
   EXTRA_MUTATION_PROB: 0.35, // P(one more mutation) — geometric tail
   P_ORGANIFY: 0.5, // P(a mutation landing on a bare twig makes it an organ)
   ABSORB_COEFF: 0.02, // energy rate per graduated exposure point (hotkeys e/E)
@@ -83,9 +94,9 @@ const CONSTANTS = {
   // Stems become scaffolding — worth building only to mount organs.
   SEED_ENERGY_COST: 10, // emission pacing: each flower emits a seed every
   // SEED_ENERGY_COST / energyRate ticks. No banking — rate sets the interval.
-  MATURE_LIFESPAN: 8000, // ticks every mature plant lives after
-  // immortalizing, identical for all (0 = immortal → completion mode).
-  // Fitness = flowers × rate × lifespan / cost. Hotkeys [ ] and d.
+  LIFESPAN_PER_GENE: 600, // a mature plant lives this × genome length
+  // ticks (simplant's longevity reward: longer genomes earn longer
+  // emission windows; 0 = immortal → completion mode). Hotkeys [ ] and d.
   GERM_CLEAR_RADIUS: 1, // a seed needs an empty (2R+1)² box to germinate;
   // 1 = cell + 8 neighbors (dense). Higher spaces plants out, which favors
   // bigger forms (tiny plants can no longer tile tiny gaps) at the cost of
@@ -242,8 +253,11 @@ function canonical(genome) {
 // - on an organ gene: flip type (leaf<->flower) or demote to a bare twig;
 // - on a bare twig (gene 0): P_ORGANIFY makes it a leaf/flower, else the
 //   normal slot-bit mutation (twigs are the stepping-stone to organs);
-// - on a stem: the classic slot-bit flip. A bit-clear that would amputate
-//   a non-empty subtree (organs included, geneBits > 0) is a no-op.
+// - on a stem: the classic slot-bit flip. A bit-clear AMPUTATES the whole
+//   subtree beneath it — growth adds one gene at a time, shedding drops a
+//   branch at a time. (The old rule made a loaded bit-clear a no-op, which
+//   ratcheted genomes longer: easy to add, nearly impossible to remove.
+//   Deep amputations stay rare via the newer-genes-mutate-more bias.)
 function mutateGenome(genome) {
   const newGenome = new Uint8Array(genome);
   const len = newGenome.length;
@@ -277,12 +291,6 @@ function mutateGenome(genome) {
   const bitIdx = randInt(3);
   const bitMask = 1 << bitIdx;
   const wasBitSet = (targetNode.geneBits & bitMask) !== 0;
-  if (
-    wasBitSet &&
-    targetNode.children[bitIdx] &&
-    targetNode.children[bitIdx].geneBits > 0
-  )
-    return newGenome;
   targetNode.geneBits ^= bitMask;
   if (wasBitSet) targetNode.children[bitIdx] = null;
   else {
@@ -315,9 +323,9 @@ let growing = [], // plants still unfolding
 // local uniqueness: key -> positions/plants, checked within uniqRadius
 let immortalByKey = new Map(), // key -> [{x, y}] root positions
   growingByKey = new Map(); // key -> [Plant]
-let uniqRadius = CONSTANTS.UNIQUENESS_RADIUS;
+let uniqRadius = 0; // uniqueness OFF by default; ?radius=N / hotkey u enable
 let pClone = CONSTANTS.P_CLONE;
-let lifespan = CONSTANTS.MATURE_LIFESPAN; // ticks a mature plant lives; 0 = immortal (completion mode)
+let lifespan = CONSTANTS.LIFESPAN_PER_GENE; // per-GENE lifespan; 0 = immortal (completion mode)
 let fading = []; // plants at end of life, mid-fade; they still block space
 let frame = 0,
   failStreak = 0,
@@ -362,8 +370,10 @@ const DEFAULT_GENOME = new Uint8Array([
   GENE_LEAF,
 ]);
 
-// true if an identical genome is rooted (or unfolding) within uniqRadius
+// true if an identical genome is rooted (or unfolding) within uniqRadius;
+// uniqRadius 0 = uniqueness disabled, identical forms may coexist anywhere
 function keyConflictNear(key, x, y) {
+  if (uniqRadius === 0) return false;
   const r2 = uniqRadius * uniqRadius;
   const imm = immortalByKey.get(key);
   if (imm) {
@@ -506,7 +516,7 @@ class Plant {
     this.energyRate = 0;
     this.emitInterval = 0; // ticks between seeds per flower (0 = sterile)
     this.flowerNextEmit = null; // next emission tick, per flower
-    this.matureTick = 0; // death comes at matureTick + lifespan
+    this.matureTick = 0; // death comes at matureTick + lifespan × genome length
     // facing 0 = forward is UP: the seed is the bottom of the form
     const facing = CONSTANTS.ENABLE_RANDOM_FACING ? randInt(4) : 0;
     this.root = new Cell(x, y, this, this.rootNode, null, facing, true);
@@ -948,13 +958,14 @@ function advanceTick() {
     }
   }
 
-  // 3.5 end of life: every mature plant dies exactly `lifespan` ticks after
-  // immortalizing — it fades for FADE_TICKS, then its space AND its genome
-  // are freed. One clock, one death.
+  // 3.5 end of life: a mature plant dies lifespan × genome-length ticks
+  // after immortalizing (longer genomes live longer — the longevity
+  // reward) — it fades for FADE_TICKS, then its space AND its genome are
+  // freed. One clock, one death.
   if (lifespan > 0) {
     for (let i = immortals.length - 1; i >= 0; i--) {
       const pl = immortals[i];
-      if (frame - pl.matureTick >= lifespan) {
+      if (frame - pl.matureTick >= lifespan * pl.genome.length) {
         pl.fadeStart = frame;
         fading.push(pl);
         immortals[i] = immortals[immortals.length - 1];
@@ -1036,8 +1047,8 @@ if (!IS_BROWSER) {
 
   console.log(
     `millefleur-4 headless: seed=${seed} maxTicks=${maxTicks} ` +
-      `world=${cols}x${rows} radius=${uniqRadius} pClone=${pClone} ` +
-      `life=${lifespan || "immortal"}`
+      `world=${cols}x${rows} radius=${uniqRadius || "off"} pClone=${pClone} ` +
+      `lifePerGene=${lifespan || "immortal"}`
   );
   const t0 = Date.now();
   initializeStarters();
@@ -1199,7 +1210,7 @@ function initBrowser() {
   }
   if (params.has("life")) {
     // ?life=0 makes plants immortal (completion mode), ?life=N sets the
-    // fixed lifespan in ticks
+    // PER-GENE lifespan (total = N × genome length)
     const d = parseInt(params.get("life"), 10);
     if (isFinite(d) && d >= 0) lifespan = d;
   }
@@ -1231,8 +1242,8 @@ function initBrowser() {
   computeCompletionStreak();
   console.log(
     `millefleur-4: seed=${runSeed} world=${cols}x${rows} ` +
-      `scale=${CONSTANTS.SCALE_SIZE} radius=${uniqRadius} pClone=${pClone} ` +
-      `life=${lifespan || "immortal"} (replay with ?seed=${runSeed})`
+      `scale=${CONSTANTS.SCALE_SIZE} radius=${uniqRadius || "off"} pClone=${pClone} ` +
+      `lifePerGene=${lifespan || "immortal"} (replay with ?seed=${runSeed})`
   );
 
   worldContainer = new PIXI.Container();
@@ -1379,7 +1390,8 @@ function abbrev(n) {
 function updateUI() {
   const fill = ((occupiedCells() / (cols * rows)) * 100).toFixed(1);
   const repeats = immortals.length + fading.length - immortalByKey.size;
-  const rLabel = uniqRadius >= cols + rows ? "global" : uniqRadius;
+  const rLabel =
+    uniqRadius === 0 ? "off" : uniqRadius >= cols + rows ? "global" : uniqRadius;
   statusText.text =
     `Frame: ${abbrev(frame)}  Seed: ${runSeed}  R: ${rLabel}` +
     (paused ? "  PAUSED" : "") +
@@ -1387,9 +1399,9 @@ function updateUI() {
     `  Seeds: ${travelingSeeds.length}` +
     `\nEmitted: ${abbrev(stats.emitted)}  Fill: ${fill}%  ` +
     (lifespan > 0
-      ? `Life: ${lifespan} (${stats.died} died)`
+      ? `Life: ${lifespan}/gene (${stats.died} died)`
       : `Streak: ${failStreak}`);
-  knobText.text = knobLine() + "  [e/E g/G o/O s/S d  [ ]]";
+  knobText.text = knobLine() + "  [e/E g/G o/O s/S u d  [ ]]";
   if (complete && !completeText.text) {
     completeText.text = `❀ complete — ${immortals.length} plants, seed ${runSeed} ❀`;
     completeText.x = ((app.renderer.width - completeText.width) / 2) | 0;
@@ -1456,7 +1468,8 @@ function knobLine() {
     `E(nergy):${CONSTANTS.ABSORB_COEFF} | G(erm):${CONSTANTS.GERM_CLEAR_RADIUS} | ` +
     `O(rganify):${CONSTANTS.P_ORGANIFY.toFixed(2)} | ` +
     `S(teps):${CONSTANTS.AIRBORNE_STEPS} | ` +
-    `Life:${lifespan > 0 ? lifespan : "immortal"}`
+    `U(niq):${uniqRadius === 0 ? "off" : "on"} | ` +
+    `Life:${lifespan > 0 ? lifespan + "/gene" : "immortal"}`
   );
 }
 
@@ -1528,25 +1541,33 @@ function onKeyDown(e) {
         +(CONSTANTS.P_ORGANIFY + 0.1).toFixed(2)
       ))}`
     );
-  // lifespan: geometric ×/÷ 1.5, clamp [500, 500000]; [ shorter, ] longer
+  // uniqueness: toggle the standing-genome registry check on/off
+  if (e.key === "u" || e.key === "U")
+    bumpKnob(
+      `uniqueness -> ${(uniqRadius =
+        uniqRadius === 0 ? CONSTANTS.UNIQUENESS_RADIUS : 0) || "off"}`
+    );
+  // per-gene lifespan: geometric ×/÷ 1.5, clamp [50, 20000]; [ shorter, ] longer
   if (e.key === "[") {
-    if (lifespan <= 0) lifespan = CONSTANTS.MATURE_LIFESPAN;
-    lifespan = Math.max(500, (lifespan / 1.5) | 0);
-    bumpKnob(`lifespan -> ${lifespan}`);
+    if (lifespan <= 0) lifespan = CONSTANTS.LIFESPAN_PER_GENE;
+    lifespan = Math.max(50, (lifespan / 1.5) | 0);
+    bumpKnob(`lifespan/gene -> ${lifespan}`);
   }
   if (e.key === "]") {
-    if (lifespan <= 0) lifespan = CONSTANTS.MATURE_LIFESPAN;
-    lifespan = Math.min(500000, (lifespan * 1.5) | 0);
-    bumpKnob(`lifespan -> ${lifespan}`);
+    if (lifespan <= 0) lifespan = CONSTANTS.LIFESPAN_PER_GENE;
+    lifespan = Math.min(20000, (lifespan * 1.5) | 0);
+    bumpKnob(`lifespan/gene -> ${lifespan}`);
   }
   if (e.key === "d" || e.key === "D") {
-    // toggle mortality mid-run (default lifespan when turning on)
-    lifespan = lifespan > 0 ? 0 : CONSTANTS.MATURE_LIFESPAN;
+    // toggle mortality mid-run (default per-gene lifespan when turning on)
+    lifespan = lifespan > 0 ? 0 : CONSTANTS.LIFESPAN_PER_GENE;
     if (complete && lifespan > 0) {
       complete = false; // wake a finished piece into the mortal ecology
       completeText.text = "";
     }
-    console.log(`lifespan: ${lifespan > 0 ? lifespan + " ticks" : "immortal"}`);
+    console.log(
+      `lifespan: ${lifespan > 0 ? lifespan + "/gene" : "immortal"}`
+    );
   }
   if (e.key === "r" || e.key === "R") {
     const fp = quartileMeans(stats.footprints);
