@@ -35,8 +35,13 @@
 //   plants immortal and restores the -3 completion detection.
 // - Organs are SOLID grid-blocking tissue (the overlap experiment was
 //   reverted 2026-07-12 — it read as illegible): blades and petals claim
-//   cells, keep the inter-plant outline gap, and may nestle only against
-//   their own plant.
+//   cells and keep the inter-plant outline gap.
+// - ORGAN HALOS (legibility, 2026-07-12): organs keep empty outer edges
+//   even within their own plant. Petals may touch only their flower's
+//   center, its stem, and that stem's parent; leaf blades may hug their
+//   own SKELETON (the aestheedlings blade runs alongside its stem) and
+//   their own leaf, but never another organ's tissue. No leaf-leaf,
+//   leaf-petal, or ring-ring fusion.
 // - The root cell keeps the seed's cream color in the mature plant.
 //
 // Carried over from -3: upward germination, camera (?cols=&rows=&scale=,
@@ -76,7 +81,7 @@ const CONSTANTS = {
   // earns a token fraction: leaves are 20× more valuable per exposure
   // point, so leaf count dominates the fecundity ratio between body plans.
   // Stems become scaffolding — worth building only to mount organs.
-  SEED_ENERGY_COST: 20, // emission pacing: each flower emits a seed every
+  SEED_ENERGY_COST: 10, // emission pacing: each flower emits a seed every
   // SEED_ENERGY_COST / energyRate ticks. No banking — rate sets the interval.
   MATURE_LIFESPAN: 8000, // ticks every mature plant lives after
   // immortalizing, identical for all (0 = immortal → completion mode).
@@ -341,13 +346,16 @@ const stats = {
 };
 
 // Founder: seed stalk, two side leaves, a flower on top. Pre-order:
-// root(010) -> stem(111){ left=LEAF, fwd=stem(010){ fwd=stem(010){
-// fwd=FLOWER } }, right=LEAF }. Tall enough that the petal ring clears
-// the leaf teardrops.
+// root(010) -> stem(111){ left=LEAF, fwd=stem chain(010 ×4){ fwd=FLOWER },
+// right=LEAF }. Four stems between the branch point and the flower so the
+// petal ring's halo clears the teardrop blades (the organ-halo legibility
+// rule needs 2 empty cells between ring and blade tops). 29 cells mature.
 const DEFAULT_GENOME = new Uint8Array([
   0b010,
   0b111,
   GENE_LEAF,
+  0b010,
+  0b010,
   0b010,
   0b010,
   GENE_FLOWER,
@@ -452,14 +460,17 @@ class Cell {
 
 // Organ tissue (petals, leaf blades): plant matter outside the genome tree —
 // no node, never on the frontier, no children. Solid, grid-blocking tissue
-// like any cell.
+// like any cell. `organOwner` is the anchor/center cell the tissue belongs
+// to — the organ-halo rule uses it to tell same-organ contact (fine) from
+// organ-organ fusion (illegible, forbidden).
 class OrganCell {
-  constructor(x, y, plant, tint, isLeaf) {
+  constructor(x, y, plant, tint, isLeaf, owner) {
     this.x = x;
     this.y = y;
     this.plant = plant;
     this.node = null;
     this.parent = null;
+    this.organOwner = owner;
     this.sprite = null;
     this.baseAlpha = 1;
     grid[y * cols + x] = this;
@@ -569,8 +580,12 @@ class Plant {
   // Aestheedlings teardrop: anchor L plus two 3-cell stages along U+D,
   // where U = the stem's forward and D = the slot direction (a forward-slot
   // leaf leans deterministically left). Stage cells must be in bounds,
-  // empty, and clear of OTHER plants' 8-way halo (the outline gap), though
-  // they may nestle against their own plant. All-or-nothing per stage.
+  // empty, and clear of OTHER plants' 8-way halo (the outline gap). Within
+  // the plant, blades may hug the SKELETON (the aestheedlings blade runs up
+  // alongside its stem by design) and their own leaf's tissue, but never
+  // another organ's tissue — leaf-leaf and leaf-petal fusion read as mush,
+  // so the outer edges of every teardrop stay clear. All-or-nothing per
+  // stage.
   unfoldLeafStage() {
     const L = this.leafAnchors[this.leafIndex];
     const P = L.parent;
@@ -602,7 +617,11 @@ class Plant {
             my = py + ddy;
           if (mx < 0 || mx >= cols || my < 0 || my >= rows) continue;
           const nb = grid[my * cols + mx];
-          if (nb && nb.plant !== this) {
+          if (!nb) continue;
+          if (
+            nb.plant !== this ||
+            (nb.organOwner !== undefined && nb.organOwner !== L)
+          ) {
             this.fail();
             return;
           }
@@ -610,7 +629,7 @@ class Plant {
       }
     }
     for (let i = 0; i < 6; i += 2)
-      new OrganCell(targets[i], targets[i + 1], this, this.leafColor, true);
+      new OrganCell(targets[i], targets[i + 1], this, this.leafColor, true, L);
     if (++this.leafStage === 2) {
       this.leafStage = 0;
       this.leafIndex++;
@@ -619,12 +638,16 @@ class Plant {
 
   // All-or-nothing petal ring: every 8-neighbor slot around the flower cell
   // (minus the stem attachment) must be claimable — in bounds, empty, and
-  // clear of OTHER plants' 8-way halo (the tapestry outline gap; petals may
-  // nestle against their own plant). Any blocked petal fails the WHOLE
-  // plant: the bloom is part of the body plan.
+  // with an empty 8-way halo. The ONLY permitted halo contacts are the
+  // geometrically necessary ones: the flower center, its stem, and that
+  // stem's parent (the ring's bottom corners graze it diagonally). Anything
+  // else — other plants, own branches, leaf blades, other rings — fails
+  // the plant: a bloom keeps clear outer edges so every flower reads as a
+  // distinct medallion.
   bloomOne() {
     const F = this.flowerCells[this.bloomIndex];
     const P = F.parent;
+    const G = P ? P.parent : null;
     const targets = [];
     for (let ddx = -1; ddx <= 1; ddx++) {
       for (let ddy = -1; ddy <= 1; ddy++) {
@@ -652,7 +675,7 @@ class Plant {
             my = py + ddy;
           if (mx < 0 || mx >= cols || my < 0 || my >= rows) continue;
           const nb = grid[my * cols + mx];
-          if (nb && nb.plant !== this) {
+          if (nb && nb !== F && nb !== P && nb !== G) {
             this.fail();
             return;
           }
@@ -660,7 +683,7 @@ class Plant {
       }
     }
     for (let i = 0; i < targets.length; i += 2)
-      new OrganCell(targets[i], targets[i + 1], this, this.color, false);
+      new OrganCell(targets[i], targets[i + 1], this, this.color, false, F);
     this.bloomIndex++;
     stats.blooms++;
   }
