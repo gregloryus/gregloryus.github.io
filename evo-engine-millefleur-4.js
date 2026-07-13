@@ -13,34 +13,29 @@
 // - FLOWER: unchanged full 8-ring petal bloom, all-or-nothing.
 // - FORCE_SEED_STALK: gene 0 is pinned to 0b010 (forward-only) and exempt
 //   from mutation — the first cell above the seed always grows straight up.
-// - ECONOMY (austere): unfolding is free; energy exists only as fitness.
-//   At immortalization each leaf cell's open cardinal sides set a static
-//   income rate (graduated table); banked energy = rate × age − spent, pure
-//   arithmetic, no per-tick accumulation. Each flower runs simplant's
-//   two-phase cycle against the shared bank: conceive a child genome at
-//   energy ≥ G, launch it (paying childG) at energy ≥ G + childG. Seeds
-//   launch airborne straight from their flower (crawl-to-tip dropped).
-//   Leafless or flowerless plants are simply sterile — the economy selects.
+// - ECONOMY (static rate → emission interval; simplified 2026-07-12):
+//   unfolding is free; energy exists only as fecundity. At immortalization
+//   EVERY cell's open cardinal sides are scored by the graduated table
+//   (uniform, simplant-style), with leaf tissue worth LEAF_ENERGY_MULT× —
+//   the enforced aestheedlings teardrop is the designed form, so it pays a
+//   deliberate bonus. The result is a STATIC energy rate: never spent,
+//   never recomputed, never multiplied by age. Each flower emits a seed
+//   every SEED_ENERGY_COST / rate ticks — energy sets the pace, flowers
+//   multiply it (2 flowers = 2× the seeds). No banking, no spend-down.
+//   Seeds launch airborne straight from their flower (crawl-to-tip
+//   dropped). Flowerless plants are sterile; leafless ones merely slow.
 // - MATURITY GATE: skeleton unfolds fully → leaves unfold → flowers bloom →
-//   immortalize; only then does energy accrue and seeding begin.
-// - ENDLESS ECOLOGY: decay of the fruitless is ON by default (auto window =
-//   2 × world area; ?decay=0 disables and restores completion detection).
-//   One clock, one death: a lineage that goes a window without a descendant
-//   success fades out; energy only paces reproduction.
-// - Global emission scheduler (SEEDS_PER_TICK + weighted parent pick) is
-//   gone; per-flower energy pacing replaces it. Descendant-success
-//   bookkeeping stays (it feeds the decay clock).
-// - ORGAN OVERLAP (structural, default ON — hotkey x toggles): leaf blades
-//   and petals are overlay tissue — off the grid, exempt from the
-//   empty-cell and outline-gap checks (bounds still fail the plant), drawn
-//   at 50% alpha so overlaps layer. This attacks the term that the knob
-//   sweep showed dominates fitness — P(offspring fully unfolds) — for
-//   organs specifically, so rich multi-organ forms stop dying to blocked
-//   teardrops and rings. The skeleton keeps the one law: stems stay
-//   exclusive and keep the outline gap, which holds the tapestry coherent.
-//   Side effects, accepted: blades don't shade each other (exposure income
-//   reads only the skeleton grid), seeds can germinate under foliage, and
-//   fill% counts overlay tissue.
+//   immortalize; only then does seeding begin.
+// - FIXED LIFESPAN: every mature plant lives exactly `lifespan` ticks after
+//   immortalizing (default MATURE_LIFESPAN; ?life=N overrides), then fades
+//   and frees its space + genome. One clock, one death — the old
+//   decay-of-the-fruitless lineage clock is gone. Total lifetime output =
+//   flowers × rate × lifespan / cost: fitness is legible. ?life=0 makes
+//   plants immortal and restores the -3 completion detection.
+// - Organs are SOLID grid-blocking tissue (the overlap experiment was
+//   reverted 2026-07-12 — it read as illegible): blades and petals claim
+//   cells, keep the inter-plant outline gap, and may nestle only against
+//   their own plant.
 // - The root cell keeps the seed's cream color in the mature plant.
 //
 // Carried over from -3: upward germination, camera (?cols=&rows=&scale=,
@@ -53,8 +48,8 @@
 //
 // Run modes:
 //   browser:  evo-engine-millefleur-4.html
-//   headless: node evo-engine-millefleur-4.js [seed] [maxTicks] [cols] [rows] [radius] [pClone] [decayWindow]
-//             (decayWindow: omitted = auto 2×area, 0 = off, N = N ticks)
+//   headless: node evo-engine-millefleur-4.js [seed] [maxTicks] [cols] [rows] [radius] [pClone] [lifespan]
+//             (lifespan: omitted = MATURE_LIFESPAN, 0 = immortal/completion mode, N = N ticks)
 
 const IS_BROWSER = typeof window !== "undefined";
 
@@ -66,20 +61,21 @@ const CONSTANTS = {
   RNG_SEED: 14, // headless default; browser randomizes unless ?seed=
   NUM_STARTER_SEEDS: 1, // always a single founder; everything descends by mutation
   AIRBORNE_STEPS: 64, // seed flight length — longer = farther dispersal (hotkeys s/S)
-  ORGAN_OVERLAP: true, // leaves/petals are non-blocking overlay tissue: they
-  // skip the empty-cell and outline-gap checks (bounds still fail), never
-  // sit on the grid, and render translucent so overlaps read as layering.
-  // The skeleton (stems, anchors, flower centers) keeps the one law — that
-  // is what holds the tapestry coherent. Toggle with hotkey x.
-  ORGAN_ALPHA: 0.5, // mature organ-tissue opacity when ORGAN_OVERLAP is on
   UNIQUENESS_RADIUS: 99999, // >= any canvas => GLOBAL uniqueness. Lower it
   // (e.g. ?radius=64) for local uniqueness where forms may repeat at distance.
   P_CLONE: 0, // P(seed is exact copy). 0 => repeats are convergent only.
   EXTRA_MUTATION_PROB: 0.35, // P(one more mutation) — geometric tail
   P_ORGANIFY: 0.5, // P(a mutation landing on a bare twig makes it an organ)
-  ABSORB_COEFF: 0.02, // energy/tick per graduated exposure point
-  // (≈ simplant's expected income: P=0.6 per 30-tick cooldown)
+  ABSORB_COEFF: 0.02, // energy rate per graduated exposure point (hotkeys e/E)
   ABSORB_TABLE: [0, 0.5, 1.0, 1.5, 1.5], // energy value by open cardinal sides
+  LEAF_ENERGY_MULT: 2, // leaf tissue's exposure counts double — the enforced
+  // aestheedlings teardrop is the designed form, so it pays a deliberate
+  // bonus beyond the uniform per-particle rule
+  SEED_ENERGY_COST: 40, // emission pacing: each flower emits a seed every
+  // SEED_ENERGY_COST / energyRate ticks. No banking — rate sets the interval.
+  MATURE_LIFESPAN: 8000, // ticks every mature plant lives after
+  // immortalizing, identical for all (0 = immortal → completion mode).
+  // Fitness = flowers × rate × lifespan / cost. Hotkeys [ ] and d.
   GERM_CLEAR_RADIUS: 1, // a seed needs an empty (2R+1)² box to germinate;
   // 1 = cell + 8 neighbors (dense). Higher spaces plants out, which favors
   // bigger forms (tiny plants can no longer tile tiny gaps) at the cost of
@@ -87,9 +83,7 @@ const CONSTANTS = {
   COMPLETION_STREAK: 12000, // min consecutive failures that pause emission
   COMPLETION_STREAK_PER_CELL: 0.5, // scales the threshold with world area
   ENABLE_RANDOM_FACING: false, // every plant germinates facing UP
-  DECAY_WINDOW_AUTO_FACTOR: 2, // auto decay window = factor × world area
-  DECAY_SCAN_MASK: 31, // decay scan runs when (frame & mask) === 0
-  FADE_TICKS: 300, // fade-out length of a decaying plant
+  FADE_TICKS: 300, // fade-out length of a dying plant
   GROWING_ALPHA: 0.55,
   SHOW_TRAVELING_SEEDS: true,
   TICK_INTERVAL_MS: 1,
@@ -306,15 +300,15 @@ const FACING_DY = new Int8Array([-1, 0, 1, 0]);
 // ---------------------------------------------------------------- World state
 let cols, rows, grid;
 let growing = [], // plants still unfolding
-  immortals = [], // completed, frozen (until decay claims them)
+  immortals = [], // completed, frozen (until their lifespan runs out)
   travelingSeeds = [];
 // local uniqueness: key -> positions/plants, checked within uniqRadius
 let immortalByKey = new Map(), // key -> [{x, y}] root positions
   growingByKey = new Map(); // key -> [Plant]
 let uniqRadius = CONSTANTS.UNIQUENESS_RADIUS;
 let pClone = CONSTANTS.P_CLONE;
-let decayWindow = -1; // -1 = auto (2 × area), 0 = off, N = N ticks
-let fading = []; // immortals mid-fade (decay); they still block space
+let lifespan = CONSTANTS.MATURE_LIFESPAN; // ticks a mature plant lives; 0 = immortal (completion mode)
+let fading = []; // plants at end of life, mid-fade; they still block space
 let frame = 0,
   failStreak = 0,
   complete = false,
@@ -336,7 +330,7 @@ const stats = {
   clones: 0, // seeds emitted as exact copies
   blooms: 0, // petal rings successfully placed
   emitted: 0, // seeds launched from flowers
-  decayed: 0, // plants removed by decay of the fruitless
+  died: 0, // mature plants removed at end of their fixed lifespan
   footprints: [], // cell count of each immortal, in immortalization order
   genomeLens: [],
 };
@@ -452,9 +446,8 @@ class Cell {
 }
 
 // Organ tissue (petals, leaf blades): plant matter outside the genome tree —
-// no node, never on the frontier, no children. With ORGAN_OVERLAP it is
-// overlay tissue: off the grid (blocks nothing, shades nothing) and
-// translucent; without it, grid-blocking like any cell.
+// no node, never on the frontier, no children. Solid, grid-blocking tissue
+// like any cell.
 class OrganCell {
   constructor(x, y, plant, tint, isLeaf) {
     this.x = x;
@@ -463,8 +456,8 @@ class OrganCell {
     this.node = null;
     this.parent = null;
     this.sprite = null;
-    this.baseAlpha = CONSTANTS.ORGAN_OVERLAP ? CONSTANTS.ORGAN_ALPHA : 1;
-    if (!CONSTANTS.ORGAN_OVERLAP) grid[y * cols + x] = this;
+    this.baseAlpha = 1;
+    grid[y * cols + x] = this;
     plant.cells.push(this);
     if (isLeaf) plant.leafSurface.push(this);
     if (IS_BROWSER && cellPool)
@@ -492,13 +485,12 @@ class Plant {
     this.mature = false;
     this.failed = false;
     this.parentPlant = parentPlant || null;
-    this.directSuccesses = 0; // children that immortalized (stats/decay)
-    this.lastLineageSuccessTick = frame; // decay clock
-    // energy economy — set once at immortalization
+    this.directSuccesses = 0; // children that immortalized (stats)
+    // emission pacing — all set once at immortalization
     this.energyRate = 0;
-    this.energySpent = 0;
-    this.matureTick = 0;
-    this.flowerRepro = null; // per-flower two-phase reproduction state
+    this.emitInterval = 0; // ticks between seeds per flower (0 = sterile)
+    this.flowerNextEmit = null; // next emission tick, per flower
+    this.matureTick = 0; // death comes at matureTick + lifespan
     // facing 0 = forward is UP: the seed is the bottom of the form
     const facing = CONSTANTS.ENABLE_RANDOM_FACING ? randInt(4) : 0;
     this.root = new Cell(x, y, this, this.rootNode, null, facing, true);
@@ -571,11 +563,9 @@ class Plant {
 
   // Aestheedlings teardrop: anchor L plus two 3-cell stages along U+D,
   // where U = the stem's forward and D = the slot direction (a forward-slot
-  // leaf leans deterministically left). Stage cells must be in bounds;
-  // with ORGAN_OVERLAP that is the ONLY requirement (blades lay over
-  // anything as translucent tissue). Otherwise they must also be empty and
-  // clear of OTHER plants' 8-way halo (the outline gap), though they may
-  // nestle against their own plant. All-or-nothing per stage.
+  // leaf leans deterministically left). Stage cells must be in bounds,
+  // empty, and clear of OTHER plants' 8-way halo (the outline gap), though
+  // they may nestle against their own plant. All-or-nothing per stage.
   unfoldLeafStage() {
     const L = this.leafAnchors[this.leafIndex];
     const P = L.parent;
@@ -597,7 +587,6 @@ class Plant {
         this.fail();
         return;
       }
-      if (CONSTANTS.ORGAN_OVERLAP) continue;
       if (grid[py * cols + px]) {
         this.fail();
         return;
@@ -624,12 +613,10 @@ class Plant {
   }
 
   // All-or-nothing petal ring: every 8-neighbor slot around the flower cell
-  // (minus the stem attachment) must be claimable — in bounds always; with
-  // ORGAN_OVERLAP that's all (petals lay over anything as translucent
-  // tissue), otherwise also empty and clear of OTHER plants' 8-way halo
-  // (the tapestry outline gap; petals may nestle against their own plant).
-  // Any blocked petal fails the WHOLE plant: the bloom is part of the body
-  // plan.
+  // (minus the stem attachment) must be claimable — in bounds, empty, and
+  // clear of OTHER plants' 8-way halo (the tapestry outline gap; petals may
+  // nestle against their own plant). Any blocked petal fails the WHOLE
+  // plant: the bloom is part of the body plan.
   bloomOne() {
     const F = this.flowerCells[this.bloomIndex];
     const P = F.parent;
@@ -644,27 +631,25 @@ class Plant {
           this.fail();
           return;
         }
-        if (!CONSTANTS.ORGAN_OVERLAP && grid[py * cols + px]) {
+        if (grid[py * cols + px]) {
           this.fail();
           return;
         }
         targets.push(px, py);
       }
     }
-    if (!CONSTANTS.ORGAN_OVERLAP) {
-      for (let i = 0; i < targets.length; i += 2) {
-        const px = targets[i],
-          py = targets[i + 1];
-        for (let ddx = -1; ddx <= 1; ddx++) {
-          for (let ddy = -1; ddy <= 1; ddy++) {
-            const mx = px + ddx,
-              my = py + ddy;
-            if (mx < 0 || mx >= cols || my < 0 || my >= rows) continue;
-            const nb = grid[my * cols + mx];
-            if (nb && nb.plant !== this) {
-              this.fail();
-              return;
-            }
+    for (let i = 0; i < targets.length; i += 2) {
+      const px = targets[i],
+        py = targets[i + 1];
+      for (let ddx = -1; ddx <= 1; ddx++) {
+        for (let ddy = -1; ddy <= 1; ddy++) {
+          const mx = px + ddx,
+            my = py + ddy;
+          if (mx < 0 || mx >= cols || my < 0 || my >= rows) continue;
+          const nb = grid[my * cols + mx];
+          if (nb && nb.plant !== this) {
+            this.fail();
+            return;
           }
         }
       }
@@ -696,34 +681,28 @@ class Plant {
     arr.push(this.keyEntry);
     immortals.push(this);
     failStreak = 0;
-    // lineage credit: the success refreshes the decay clock of the whole
-    // ancestor chain
-    this.lastLineageSuccessTick = frame;
-    const p = this.parentPlant;
-    if (p) {
-      p.directSuccesses++;
-      for (let a = p; a; a = a.parentPlant) a.lastLineageSuccessTick = frame;
-    }
-    // energy: computed ONCE from the mature form. Each leaf cell's open
-    // cardinal sides pay per the graduated table; banked energy thereafter
-    // is rate × age − spent, pure arithmetic.
-    let rate = 0;
-    const table = CONSTANTS.ABSORB_TABLE;
-    for (let i = 0; i < this.leafSurface.length; i++) {
-      const c = this.leafSurface[i];
-      let open = 0;
-      if (c.y > 0 && !grid[(c.y - 1) * cols + c.x]) open++;
-      if (c.y < rows - 1 && !grid[(c.y + 1) * cols + c.x]) open++;
-      if (c.x > 0 && !grid[c.y * cols + c.x - 1]) open++;
-      if (c.x < cols - 1 && !grid[c.y * cols + c.x + 1]) open++;
-      rate += table[open];
-    }
-    this.energyRate = rate * CONSTANTS.ABSORB_COEFF;
+    if (this.parentPlant) this.parentPlant.directSuccesses++;
+    // energy: computed ONCE from the mature form, then static forever.
+    // Every cell's open cardinal sides pay per the graduated table
+    // (uniform, simplant-style); leaf tissue counts LEAF_ENERGY_MULT× —
+    // the designed teardrop form pays a deliberate bonus. Energy is never
+    // spent or recomputed: it only sets each flower's emission interval.
+    let sum = 0;
+    for (let i = 0; i < this.cells.length; i++)
+      sum += exposureScore(this.cells[i]);
+    for (let i = 0; i < this.leafSurface.length; i++)
+      sum += (CONSTANTS.LEAF_ENERGY_MULT - 1) * exposureScore(this.leafSurface[i]);
+    this.energyRate = sum * CONSTANTS.ABSORB_COEFF;
     this.matureTick = frame;
-    this.energySpent = 0;
-    this.flowerRepro = [];
-    for (let i = 0; i < this.flowerCells.length; i++)
-      this.flowerRepro.push({ phase: 0, childGenome: null });
+    if (this.flowerCells.length > 0 && this.energyRate > 0) {
+      this.emitInterval = Math.max(
+        1,
+        Math.ceil(CONSTANTS.SEED_ENERGY_COST / this.energyRate)
+      );
+      this.flowerNextEmit = [];
+      for (let i = 0; i < this.flowerCells.length; i++)
+        this.flowerNextEmit.push(frame + this.emitInterval);
+    }
     stats.footprints.push(this.cells.length);
     stats.genomeLens.push(this.genome.length);
     if (IS_BROWSER) {
@@ -733,7 +712,17 @@ class Plant {
   }
 }
 
-// Free every grid cell / sprite a plant occupies (fail or decay removal).
+// Graduated exposure value of one cell: open cardinal sides → table value.
+function exposureScore(c) {
+  let open = 0;
+  if (c.y > 0 && !grid[(c.y - 1) * cols + c.x]) open++;
+  if (c.y < rows - 1 && !grid[(c.y + 1) * cols + c.x]) open++;
+  if (c.x > 0 && !grid[c.y * cols + c.x - 1]) open++;
+  if (c.x < cols - 1 && !grid[c.y * cols + c.x + 1]) open++;
+  return CONSTANTS.ABSORB_TABLE[open];
+}
+
+// Free every grid cell / sprite a plant occupies (fail or end-of-life removal).
 function removePlantMatter(plant) {
   const cells = plant.cells;
   for (let i = 0; i < cells.length; i++) {
@@ -778,7 +767,7 @@ function emitSeed(parent, flowerCell, genome) {
     x: flowerCell.x,
     y: flowerCell.y,
     steps: 0,
-    parentPlant: parent, // lineage link for the decay clock
+    parentPlant: parent, // lineage link (directSuccesses stats)
     genome: genome,
     key: genomeKey(genome),
     sprite: null,
@@ -908,75 +897,61 @@ function advanceTick() {
     }
   }
 
-  // 3. reproduction — per-plant, energy-paced. Each flower runs simplant's
-  // two-phase cycle against the plant's shared bank: conceive a child
-  // genome at energy >= G, launch it (paying childG) at energy >= G +
-  // childG. Banked energy = rate × age − spent. Leafless (rate 0) or
-  // flowerless plants are sterile: the economy does the selecting. With
-  // decay off, emission pauses on a long failure streak so completion can
-  // drain and trigger (the -3 behavior).
-  if (decayWindow > 0 || failStreak < completionStreak) {
+  // 3. reproduction — each flower emits a seed every emitInterval ticks
+  // (interval = SEED_ENERGY_COST / energyRate, fixed at maturity). Two
+  // flowers = two independent emitters = double the seeds. Flowerless or
+  // rate-0 plants never emit. With lifespan off (immortal mode), emission
+  // pauses on a long failure streak so completion can drain and trigger
+  // (the -3 behavior).
+  if (lifespan > 0 || failStreak < completionStreak) {
     for (let i = 0; i < immortals.length; i++) {
       const pl = immortals[i];
-      if (pl.energyRate === 0 || pl.flowerCells.length === 0) continue;
-      let avail = (frame - pl.matureTick) * pl.energyRate - pl.energySpent;
-      const G = pl.genome.length;
-      if (avail < G) continue;
-      const fr = pl.flowerRepro;
-      for (let s = 0; s < fr.length; s++) {
-        const st = fr[s];
-        if (st.phase === 0) {
-          st.childGenome = makeChildGenome(pl.genome);
-          st.phase = 1;
-        } else if (avail >= G + st.childGenome.length) {
-          emitSeed(pl, pl.flowerCells[s], st.childGenome);
-          pl.energySpent += st.childGenome.length;
-          avail -= st.childGenome.length;
-          st.phase = 0;
-          st.childGenome = null;
+      const ne = pl.flowerNextEmit;
+      if (!ne) continue;
+      for (let s = 0; s < ne.length; s++) {
+        if (frame >= ne[s]) {
+          emitSeed(pl, pl.flowerCells[s], makeChildGenome(pl.genome));
+          ne[s] += pl.emitInterval;
         }
       }
     }
   }
 
-  // 3.5 decay of the fruitless: a plant whose lineage has gone decayWindow
-  // ticks without ANY descendant success starts fading; after FADE_TICKS
-  // its space AND its genome are freed. A success anywhere downstream
-  // refreshes the whole ancestor chain (see immortalize).
-  if (decayWindow > 0) {
-    if ((frame & CONSTANTS.DECAY_SCAN_MASK) === 0) {
-      for (let i = immortals.length - 1; i >= 0; i--) {
-        const pl = immortals[i];
-        if (frame - pl.lastLineageSuccessTick > decayWindow) {
-          pl.fadeStart = frame;
-          fading.push(pl);
-          immortals[i] = immortals[immortals.length - 1];
-          immortals.pop();
-        }
+  // 3.5 end of life: every mature plant dies exactly `lifespan` ticks after
+  // immortalizing — it fades for FADE_TICKS, then its space AND its genome
+  // are freed. One clock, one death.
+  if (lifespan > 0) {
+    for (let i = immortals.length - 1; i >= 0; i--) {
+      const pl = immortals[i];
+      if (frame - pl.matureTick >= lifespan) {
+        pl.fadeStart = frame;
+        fading.push(pl);
+        immortals[i] = immortals[immortals.length - 1];
+        immortals.pop();
       }
     }
-    for (let i = fading.length - 1; i >= 0; i--) {
-      const pl = fading[i];
-      const t = (frame - pl.fadeStart) / CONSTANTS.FADE_TICKS;
-      if (t >= 1) {
-        removePlantMatter(pl);
-        unregisterImmortalKey(pl);
-        stats.decayed++;
-        fading[i] = fading[fading.length - 1];
-        fading.pop();
-      } else if (IS_BROWSER) {
-        const a = 1 - t;
-        const cells = pl.cells;
-        for (let j = 0; j < cells.length; j++)
-          if (cells[j].sprite) cells[j].sprite.alpha = a * cells[j].baseAlpha;
-      }
+  }
+  for (let i = fading.length - 1; i >= 0; i--) {
+    const pl = fading[i];
+    const t = (frame - pl.fadeStart) / CONSTANTS.FADE_TICKS;
+    if (t >= 1) {
+      removePlantMatter(pl);
+      unregisterImmortalKey(pl);
+      stats.died++;
+      fading[i] = fading[fading.length - 1];
+      fading.pop();
+    } else if (IS_BROWSER) {
+      const a = 1 - t;
+      const cells = pl.cells;
+      for (let j = 0; j < cells.length; j++)
+        if (cells[j].sprite) cells[j].sprite.alpha = a * cells[j].baseAlpha;
     }
   }
 
   // 4. completion: streak exceeded and everything in flight has drained.
-  // Only reachable with decay off — the endless ecology never completes.
+  // Only reachable in immortal mode — the mortal ecology never completes.
   if (
-    decayWindow === 0 &&
+    lifespan === 0 &&
     immortals.length > 0 &&
     failStreak >= completionStreak &&
     growing.length === 0 &&
@@ -1022,9 +997,7 @@ if (!IS_BROWSER) {
   rows = parseInt(args[3] || "135", 10);
   if (args[4]) uniqRadius = parseInt(args[4], 10);
   if (args[5]) pClone = parseFloat(args[5]);
-  if (args[6] !== undefined) decayWindow = parseInt(args[6], 10);
-  if (decayWindow === -1)
-    decayWindow = (cols * rows * CONSTANTS.DECAY_WINDOW_AUTO_FACTOR) | 0;
+  if (args[6] !== undefined) lifespan = parseInt(args[6], 10);
   runSeed = seed;
   rngState = seed >>> 0;
   grid = new Array(cols * rows).fill(null);
@@ -1033,7 +1006,7 @@ if (!IS_BROWSER) {
   console.log(
     `millefleur-4 headless: seed=${seed} maxTicks=${maxTicks} ` +
       `world=${cols}x${rows} radius=${uniqRadius} pClone=${pClone} ` +
-      `decay=${decayWindow || "off"}`
+      `life=${lifespan || "immortal"}`
   );
   const t0 = Date.now();
   initializeStarters();
@@ -1044,7 +1017,7 @@ if (!IS_BROWSER) {
       console.log(
         `t=${frame} plants=${immortals.length} growing=${growing.length} ` +
           `seeds=${travelingSeeds.length} emitted=${stats.emitted} ` +
-          `decayed=${stats.decayed} fill=${fill}%`
+          `died=${stats.died} fill=${fill}%`
       );
     }
   }
@@ -1058,7 +1031,7 @@ if (!IS_BROWSER) {
     `germinated=${stats.germinated} seedDeaths=${stats.seedDeaths} ` +
       `dupeFails=${stats.dupeFails} plantFails=${stats.plantFails} ` +
       `clones=${stats.clones} blooms=${stats.blooms} emitted=${stats.emitted} ` +
-      `decayed=${stats.decayed}`
+      `died=${stats.died}`
   );
   let flowerOrgans = 0,
     leafOrgans = 0,
@@ -1103,11 +1076,11 @@ if (!IS_BROWSER) {
       `repeats=${immortals.length + fading.length - immortalByKey.size} ` +
       `radius violations=${violations}`
   );
-  // decay runs pass by sustaining an ecology; decay-off runs by completing
+  // mortal runs pass by sustaining an ecology; immortal runs by completing
   const pass =
     violations === 0 &&
     stats.emitted > 0 &&
-    (decayWindow > 0
+    (lifespan > 0
       ? immortals.length + growing.length > 0
       : immortals.length > 0);
   console.log(pass ? "PASS" : "FAIL");
@@ -1193,11 +1166,11 @@ function initBrowser() {
     const s = parseInt(params.get("scale"), 10);
     if (isFinite(s) && s >= 1 && s <= 32) CONSTANTS.SCALE_SIZE = s;
   }
-  if (params.has("decay")) {
-    // default is auto; ?decay=0 disables (completion mode), ?decay=1 auto,
-    // ?decay=N a window of N ticks
-    const d = parseInt(params.get("decay"), 10);
-    if (isFinite(d) && d >= 0) decayWindow = d === 1 ? -1 : d;
+  if (params.has("life")) {
+    // ?life=0 makes plants immortal (completion mode), ?life=N sets the
+    // fixed lifespan in ticks
+    const d = parseInt(params.get("life"), 10);
+    if (isFinite(d) && d >= 0) lifespan = d;
   }
   runSeed = newRunSeed();
   rngState = runSeed >>> 0;
@@ -1225,12 +1198,10 @@ function initBrowser() {
   }
   grid = new Array(cols * rows).fill(null);
   computeCompletionStreak();
-  if (decayWindow === -1)
-    decayWindow = (cols * rows * CONSTANTS.DECAY_WINDOW_AUTO_FACTOR) | 0;
   console.log(
     `millefleur-4: seed=${runSeed} world=${cols}x${rows} ` +
       `scale=${CONSTANTS.SCALE_SIZE} radius=${uniqRadius} pClone=${pClone} ` +
-      `decay=${decayWindow || "off"} (replay with ?seed=${runSeed})`
+      `life=${lifespan || "immortal"} (replay with ?seed=${runSeed})`
   );
 
   worldContainer = new PIXI.Container();
@@ -1384,10 +1355,10 @@ function updateUI() {
     `\nPlants: ${immortals.length} (${repeats} rep)  Growing: ${growing.length}` +
     `  Seeds: ${travelingSeeds.length}` +
     `\nEmitted: ${abbrev(stats.emitted)}  Fill: ${fill}%  ` +
-    (decayWindow > 0
-      ? `Decay: ${decayWindow} (${stats.decayed})`
+    (lifespan > 0
+      ? `Life: ${lifespan} (${stats.died} died)`
       : `Streak: ${failStreak}`);
-  knobText.text = knobLine() + "  [e/E g/G o/O s/S x  [ ]]";
+  knobText.text = knobLine() + "  [e/E g/G o/O s/S d  [ ]]";
   if (complete && !completeText.text) {
     completeText.text = `❀ complete — ${immortals.length} plants, seed ${runSeed} ❀`;
     completeText.x = ((app.renderer.width - completeText.width) / 2) | 0;
@@ -1431,7 +1402,7 @@ function resetSimulation(keepSeed) {
   stats.clones = 0;
   stats.blooms = 0;
   stats.emitted = 0;
-  stats.decayed = 0;
+  stats.died = 0;
   stats.footprints = [];
   stats.genomeLens = [];
   completeText.text = "";
@@ -1454,8 +1425,7 @@ function knobLine() {
     `E(nergy):${CONSTANTS.ABSORB_COEFF} | G(erm):${CONSTANTS.GERM_CLEAR_RADIUS} | ` +
     `O(rganify):${CONSTANTS.P_ORGANIFY.toFixed(2)} | ` +
     `S(teps):${CONSTANTS.AIRBORNE_STEPS} | ` +
-    `X-overlap:${CONSTANTS.ORGAN_OVERLAP ? "on" : "off"} | ` +
-    `Decay:${decayWindow > 0 ? decayWindow : "off"}`
+    `Life:${lifespan > 0 ? lifespan : "immortal"}`
   );
 }
 
@@ -1512,11 +1482,6 @@ function onKeyDown(e) {
         CONSTANTS.AIRBORNE_STEPS * 2
       ))}`
     );
-  // organ overlap: toggle overlay-tissue mode
-  if (e.key === "x" || e.key === "X")
-    bumpKnob(
-      `ORGAN_OVERLAP -> ${(CONSTANTS.ORGAN_OVERLAP = !CONSTANTS.ORGAN_OVERLAP)}`
-    );
   // organify probability: ±0.1, clamp [0, 1]
   if (e.key === "o")
     bumpKnob(
@@ -1532,28 +1497,25 @@ function onKeyDown(e) {
         +(CONSTANTS.P_ORGANIFY + 0.1).toFixed(2)
       ))}`
     );
-  // decay window: geometric ×/÷ 1.5, clamp [1000, 20×area]; [ shorter, ] longer
+  // lifespan: geometric ×/÷ 1.5, clamp [500, 500000]; [ shorter, ] longer
   if (e.key === "[") {
-    if (decayWindow <= 0) decayWindow = (cols * rows) | 0;
-    decayWindow = Math.max(1000, (decayWindow / 1.5) | 0);
-    bumpKnob(`decayWindow -> ${decayWindow}`);
+    if (lifespan <= 0) lifespan = CONSTANTS.MATURE_LIFESPAN;
+    lifespan = Math.max(500, (lifespan / 1.5) | 0);
+    bumpKnob(`lifespan -> ${lifespan}`);
   }
   if (e.key === "]") {
-    if (decayWindow <= 0) decayWindow = (cols * rows) | 0;
-    decayWindow = Math.min((cols * rows * 20) | 0, (decayWindow * 1.5) | 0);
-    bumpKnob(`decayWindow -> ${decayWindow}`);
+    if (lifespan <= 0) lifespan = CONSTANTS.MATURE_LIFESPAN;
+    lifespan = Math.min(500000, (lifespan * 1.5) | 0);
+    bumpKnob(`lifespan -> ${lifespan}`);
   }
   if (e.key === "d" || e.key === "D") {
-    // toggle decay of the fruitless mid-run (auto window when turning on)
-    decayWindow =
-      decayWindow > 0
-        ? 0
-        : (cols * rows * CONSTANTS.DECAY_WINDOW_AUTO_FACTOR) | 0;
-    if (complete && decayWindow > 0) {
-      complete = false; // wake a finished piece into the endless ecology
+    // toggle mortality mid-run (default lifespan when turning on)
+    lifespan = lifespan > 0 ? 0 : CONSTANTS.MATURE_LIFESPAN;
+    if (complete && lifespan > 0) {
+      complete = false; // wake a finished piece into the mortal ecology
       completeText.text = "";
     }
-    console.log(`decay: ${decayWindow > 0 ? decayWindow + " ticks" : "off"}`);
+    console.log(`lifespan: ${lifespan > 0 ? lifespan + " ticks" : "immortal"}`);
   }
   if (e.key === "r" || e.key === "R") {
     const fp = quartileMeans(stats.footprints);
@@ -1561,7 +1523,7 @@ function onKeyDown(e) {
       `seed=${runSeed} t=${frame} plants=${immortals.length} ` +
         `distinct=${immortalByKey.size} growing=${growing.length} ` +
         `seeds=${travelingSeeds.length} emitted=${stats.emitted} ` +
-        `decayed=${stats.decayed} ` +
+        `died=${stats.died} ` +
         `fails=${stats.plantFails}/${stats.seedDeaths} dupes=${stats.dupeFails}` +
         (fp ? ` footprint ${fp[0].toFixed(1)}->${fp[1].toFixed(1)}` : "")
     );
