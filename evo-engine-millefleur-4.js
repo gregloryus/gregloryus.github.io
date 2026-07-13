@@ -15,10 +15,11 @@
 //   from mutation — the first cell above the seed always grows straight up.
 // - ECONOMY (static rate → emission interval; simplified 2026-07-12):
 //   unfolding is free; energy exists only as fecundity. At immortalization
-//   EVERY cell's open cardinal sides are scored by the graduated table
-//   (uniform, simplant-style), with leaf tissue worth LEAF_ENERGY_MULT× —
-//   the enforced aestheedlings teardrop is the designed form, so it pays a
-//   deliberate bonus. The result is a STATIC energy rate: never spent,
+//   EVERY cell's open cardinal sides are scored by the graduated table:
+//   leaf tissue is worth LEAF_ENERGY_MULT× (the enforced aestheedlings
+//   teardrop is the designed form, so it pays a deliberate bonus), all
+//   other tissue NONLEAF_ENERGY_MULT× (a token fraction — leaves dominate
+//   the fecundity ratio). The result is a STATIC energy rate: never spent,
 //   never recomputed, never multiplied by age. Each flower emits a seed
 //   every SEED_ENERGY_COST / rate ticks — energy sets the pace, flowers
 //   multiply it (2 flowers = 2× the seeds). No banking, no spend-down.
@@ -71,7 +72,11 @@ const CONSTANTS = {
   LEAF_ENERGY_MULT: 2, // leaf tissue's exposure counts double — the enforced
   // aestheedlings teardrop is the designed form, so it pays a deliberate
   // bonus beyond the uniform per-particle rule
-  SEED_ENERGY_COST: 40, // emission pacing: each flower emits a seed every
+  NONLEAF_ENERGY_MULT: 0.1, // all other tissue (stems, petals, centers)
+  // earns a token fraction: leaves are 20× more valuable per exposure
+  // point, so leaf count dominates the fecundity ratio between body plans.
+  // Stems become scaffolding — worth building only to mount organs.
+  SEED_ENERGY_COST: 20, // emission pacing: each flower emits a seed every
   // SEED_ENERGY_COST / energyRate ticks. No banking — rate sets the interval.
   MATURE_LIFESPAN: 8000, // ticks every mature plant lives after
   // immortalizing, identical for all (0 = immortal → completion mode).
@@ -683,15 +688,18 @@ class Plant {
     failStreak = 0;
     if (this.parentPlant) this.parentPlant.directSuccesses++;
     // energy: computed ONCE from the mature form, then static forever.
-    // Every cell's open cardinal sides pay per the graduated table
-    // (uniform, simplant-style); leaf tissue counts LEAF_ENERGY_MULT× —
-    // the designed teardrop form pays a deliberate bonus. Energy is never
-    // spent or recomputed: it only sets each flower's emission interval.
+    // Every cell's open cardinal sides pay per the graduated table; leaf
+    // tissue counts LEAF_ENERGY_MULT× (the designed teardrop pays a
+    // deliberate bonus), everything else NONLEAF_ENERGY_MULT× (token).
+    // Energy is never spent or recomputed: it only sets each flower's
+    // emission interval.
     let sum = 0;
     for (let i = 0; i < this.cells.length; i++)
-      sum += exposureScore(this.cells[i]);
+      sum += CONSTANTS.NONLEAF_ENERGY_MULT * exposureScore(this.cells[i]);
     for (let i = 0; i < this.leafSurface.length; i++)
-      sum += (CONSTANTS.LEAF_ENERGY_MULT - 1) * exposureScore(this.leafSurface[i]);
+      sum +=
+        (CONSTANTS.LEAF_ENERGY_MULT - CONSTANTS.NONLEAF_ENERGY_MULT) *
+        exposureScore(this.leafSurface[i]);
     this.energyRate = sum * CONSTANTS.ABSORB_COEFF;
     this.matureTick = frame;
     if (this.flowerCells.length > 0 && this.energyRate > 0) {
