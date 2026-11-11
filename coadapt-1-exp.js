@@ -23,6 +23,10 @@ const ARMS=[
   {name:'point-e0', cfg:{bodyMode:'point',keep:2, emit:0 }},
   {name:'point-e1', cfg:{bodyMode:'point',keep:1, emit:1 }},
   {name:'point-e15',cfg:{bodyMode:'point',keep:0.5,emit:1.5}},
+  // v2: per-cell intake cap (size matters) + lower density (seedCost 128)
+  {name:'tree-v2',  cfg:{bodyMode:'tree', keep:0.5,emit:1.5,absorbCap:0.75,seedCost:128}},
+  {name:'point-v2', cfg:{bodyMode:'point',keep:0.5,emit:1.5,absorbCap:0.75,seedCost:128}},
+  {name:'tree-v2u', cfg:{bodyMode:'tree', keep:0.5,emit:1.5,seedCost:128}}, // uncapped control
 ];
 function doRun(arm,ws){
   const id=arm.name+'-ws'+ws,dir=path.join(ROOT,id);
