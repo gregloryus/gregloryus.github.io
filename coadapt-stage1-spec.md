@@ -237,6 +237,7 @@ extinctions and all arms, including nulls.
 | 'single' founder: long flat epoch then organization | Bootstrap is mutation-limited; population hue spread ≈ sigma·√(mu·generations), so matched pairs need roughly mu·g ≈ 1 → ~100 generations ≈ 6–10k ticks at defaults. Do not abort early runs as "dead" before ~3× that |
 | S2 both arms identical | Adaptation without reciprocity — the honest negative; headline anyway |
 | S1 deficit uncorrelated with Δφ but positive | Specificity exists but not via the axis — investigate before claiming anything |
+| Stringy/lamellar interdigitated domains in hue fields | Predicted (2026-11-10, before sweep results): complementary income accrues only at kin-domain boundaries, so selection should elongate domains to maximize boundary per area, block-copolymer style. Positive A = interdigitation beating kin segregation. Big round segregated domains with A ≤ neutral baseline = kin structure winning |
 
 ## 11. Viewer (`coadapt-0.html`)
 
