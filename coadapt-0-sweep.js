@@ -62,7 +62,17 @@ function aggregate(){
   const runs=runList(), rows=[];
   for(const r of runs){
     const p=path.join(ROOT,r.id,'summary.json');
-    if(fs.existsSync(p)) rows.push(JSON.parse(fs.readFileSync(p,'utf8')));
+    if(!fs.existsSync(p)) continue;
+    const row=JSON.parse(fs.readFileSync(p,'utf8'));
+    // R1 post hoc from the final dump: R1~R2 = one cluster (coalesced monoculture);
+    // R1<<R2 = genuine antipodal pair. Older summaries may predate R1 in metricsOf.
+    const fp=path.join(ROOT,r.id,'final.json');
+    if(row.final.R1===undefined&&fs.existsSync(fp)){
+      const cells=JSON.parse(fs.readFileSync(fp,'utf8')).cells;
+      row.final.R1=CO.resultant1(cells.map(c=>c[1]));
+    }
+    row.final.bimod=row.final.R2-(row.final.R1||0);
+    rows.push(row);
   }
   // sweet spot: among anti-kernel sweep cells (s>0) with all seeds done and surviving,
   // maximize mean A; ties -> smaller D, then smaller s. Predeclared in spec §8/§9.
@@ -70,26 +80,29 @@ function aggregate(){
   for(const row of rows){
     if(row.id.startsWith('ctl-')) continue;
     const key=`s${row.cfg.s}-D${row.cfg.D}-mu${row.cfg.mu}`;
-    let c=cells.get(key); if(!c){c={key,s:row.cfg.s,D:row.cfg.D,mu:row.cfg.mu,As:[],phis:[],extinct:0};cells.set(key,c);}
-    c.As.push(row.final.A); c.phis.push(row.final.phi);
+    let c=cells.get(key); if(!c){c={key,s:row.cfg.s,D:row.cfg.D,mu:row.cfg.mu,As:[],phis:[],bimods:[],extinct:0};cells.set(key,c);}
+    c.As.push(row.final.A); c.phis.push(row.final.phi); c.bimods.push(row.final.bimod);
     if(row.extinct) c.extinct++;
   }
   let sweet=null;
   const cellRows=[];
   for(const c of cells.values()){
     const meanA=c.As.reduce((a,b)=>a+b,0)/c.As.length;
+    const meanBimod=c.bimods.reduce((a,b)=>a+b,0)/c.bimods.length;
     // axis spread across seeds: mean pairwise axis distance (0.25 = uncorrelated axes = contingent)
     let ad=0,np=0;
     for(let i=0;i<c.phis.length;i++) for(let j=i+1;j<c.phis.length;j++){ ad+=CO.axisDist(c.phis[i],c.phis[j]); np++; }
     const axisSpread=np?ad/np:0;
     const complete=c.As.length===SEEDS.length&&!c.extinct;
-    cellRows.push({...c,meanA,axisSpread,complete});
-    if(complete&&(!sweet||meanA>sweet.meanA+1e-12||
+    cellRows.push({...c,meanA,meanBimod,axisSpread,complete});
+    // sweet spot: maximize mean A among complete cells WITH genuine pair structure
+    // (meanBimod > 0.2 excludes coalesced monocultures where R1 ~ R2); predeclared.
+    if(complete&&meanBimod>0.2&&(!sweet||meanA>sweet.meanA+1e-12||
        (Math.abs(meanA-sweet.meanA)<1e-12&&(c.D<sweet.D||(c.D===sweet.D&&c.s<sweet.s)))))
-      sweet={...c,meanA,axisSpread};
+      sweet={...c,meanA,meanBimod,axisSpread};
   }
   const out={generated:new Date().toISOString(),done:rows.length,of:runs.length,
-    sweetSpot:sweet?{s:sweet.s,D:sweet.D,mu:sweet.mu,meanA:sweet.meanA,axisSpread:sweet.axisSpread}:null,
+    sweetSpot:sweet?{s:sweet.s,D:sweet.D,mu:sweet.mu,meanA:sweet.meanA,meanBimod:sweet.meanBimod,axisSpread:sweet.axisSpread}:null,
     cells:cellRows.sort((a,b)=>b.meanA-a.meanA),
     controls:rows.filter(r=>r.id.startsWith('ctl-')).map(r=>({id:r.id,final:r.final,extinct:r.extinct}))};
   fs.mkdirSync(ROOT,{recursive:true});

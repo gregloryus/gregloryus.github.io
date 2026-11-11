@@ -114,6 +114,11 @@ Let the active population be hues θ₁…θ_N at positions p₁…p_N.
   randomly permuted over the occupied positions (20 permutations, keys `null|<tick>|<k>`,
   averaged). Positive A = complementarity is spatially organized beyond what the hue histogram
   alone gives. A ≈ 0 under neutrality (fixture 8).
+- **Period-1 resultant R₁ and bimodality** (added 2026-11-10 after first sweep logs): R₂ alone
+  cannot distinguish two antipodal clusters (a matched pair) from ONE cluster (monoculture via
+  coalescence) — a single tight cluster also has R₂ ≈ 1. Compute `R₁ = |Σ exp(2πiθ)|/N`;
+  a true pair cancels (R₁ ≪ R₂), a monoculture doesn't (R₁ ≈ R₂). **Bimodality = R₂ − R₁** is
+  the pair-structure indicator; the sweet-spot rule requires meanBimod > 0.2.
 - **Nematic order R₂ and axis φ** (this is why the hue model is analyzable: under an antipodal
   kernel the population is a nematic — hues θ and θ+0.5 are the *same* matched structure, so the
   order parameter has period ½):
