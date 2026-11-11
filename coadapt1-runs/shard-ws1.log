@@ -1,0 +1,24 @@
+tree-e0-ws1  orgs 3627  mean 2.3  cA -0.035  flux 0.0%  R2 0.08  R1 0.22  46s
+tree-e1-ws1  orgs 3174  mean 2.4  cA -0.001  flux 14.1%  R2 0.44  R1 0.08  60s
+tree-e15-ws1  orgs 3029  mean 2.4  cA 0.003  flux 25.3%  R2 0.69  R1 0.02  50s
+point-e0-ws1  orgs 7514  mean 1.0  cA -0.013  flux 0.0%  R2 0.00  R1 0.03  25s
+point-e1-ws1  orgs 7233  mean 1.0  cA 0.001  flux 15.1%  R2 0.50  R1 0.00  51s
+point-e15-ws1  orgs 6629  mean 1.0  cA 0.005  flux 26.6%  R2 0.70  R1 0.00  40s
+skip tree-e0-ws1
+skip tree-e1-ws1
+skip tree-e15-ws1
+skip point-e0-ws1
+skip point-e1-ws1
+skip point-e15-ws1
+tree-v2-ws1  orgs 934  mean 7.1  cA 0.011  flux 9.5%  R2 0.14  R1 0.01  26s
+point-v2-ws1  orgs 104  mean 1.0  cA 0.410  flux 0.7%  R2 0.11  R1 0.05  1s
+tree-v2u-ws1  orgs 1817  mean 3.6  cA -0.003  flux 21.5%  R2 0.63  R1 0.03  26s
+skip tree-e0-ws1
+skip tree-e1-ws1
+skip tree-e15-ws1
+skip point-e0-ws1
+skip point-e1-ws1
+skip point-e15-ws1
+skip tree-v2-ws1
+skip point-v2-ws1
+skip tree-v2u-ws1
