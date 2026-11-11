@@ -24,6 +24,15 @@
     <input id="seed" type="number" style="width:7em" title="world seed">
     <button id="go">restart</button>
     <button id="reseed">new world</button>
+    <details open style="margin-top:10px;max-width:240px">
+      <summary style="cursor:pointer;color:#ccc">dials</summary>
+      <div id="dials" style="display:grid;grid-template-columns:auto 1fr;gap:3px;margin-top:6px"></div>
+      <button id="apply" style="margin-top:6px">apply &amp; restart</button>
+      <div style="margin-top:10px;color:#777">paste a cfg URL or JSON:</div>
+      <textarea id="paste" rows="3" style="width:100%;background:#1a1a20;color:#9a9aa0;border:1px solid #333;font:inherit"></textarea>
+      <button id="pasteGo">load pasted</button>
+      <div id="pasteMsg" style="color:#777"></div>
+    </details>
   </div>
 </div>
 <script>
@@ -46,7 +55,16 @@ function defaults(){ return {
                              // body SIZE matter (a point saturates; more cells = more intake)
   w: 0.25, kernelMode: 'anti',
   cellCost: 8, seedCost: 64, lifespan: 256, gracePeriod: 16, minExpression: 0.5,
-  D: 6,                      // seed dispersal radius (Chebyshev) from the root
+  exposurePow: 0,            // production ×= (emptyFaces/4)^pow: punishes flabby interiors,
+                             // rewards spindly vines; touching a partner costs exposure but
+                             // buys flux — a real tradeoff, not a prescription
+  lifespanPerCell: 0,        // adult lifespan += this × built cells (big lives longer; the
+                             // risk is the long immature build that can die unfinished)
+  upkeep: 0,                 // energy per built cell per tick; pool < 0 starves the organism.
+                             // With exposurePow this makes enclosure lethal rather than merely
+                             // unprofitable — unless a complementary interface subsidizes it
+  seedFrom: 'root',          // 'root' | 'tip': tips launch seeds, so reach disperses further
+  D: 6,                      // seed dispersal radius (Chebyshev) from the launch cell
   muTree: 0.25, muHue: 0.25, sigma: 0.05,
   urnMode: 'linear', urnMult: 2, slotChance: 1/3,
   bodyMode: 'tree',          // 'tree' | 'point' (single-cell control: geometry off)
@@ -212,16 +230,23 @@ class Sim {
     const taken=capOn?(this._taken&&this._taken.length===N?this._taken.fill(0):(this._taken=new Float64Array(N))):null;
     for(let idx=0;idx<N;idx++){
       const o=occ[idx]; if(!o||o.bornTick>=t) continue;
-      led.influx+=cfg.keep+cfg.emit;
-      o.pool+=cfg.keep; led.kept+=cfg.keep;
-      if(cfg.emit<=0) continue;
-      led.emitted+=cfg.emit;
       const x=idx%W,y=(idx-idx%W)/W;
       const nb=[y*W+((x+1)%W),y*W+((x+W-1)%W),((y+1)%H)*W+x,((y+H-1)%H)*W+x];
+      let f=1;
+      if(cfg.exposurePow>0){
+        let open=0;
+        for(const j of nb) if(!occ[j]) open++;
+        f=Math.pow(open/4,cfg.exposurePow);
+      }
+      const keep=cfg.keep*f,emit=cfg.emit*f;
+      led.influx+=keep+emit;
+      o.pool+=keep; led.kept+=keep;
+      if(emit<=0) continue;
+      led.emitted+=emit;
       let F=0;
       for(const j of nb){ const n=occ[j]; if(n&&n!==o&&n.bornTick<t) F++; }
-      if(!F){ led.dissipated+=cfg.emit; continue; }
-      const share=cfg.emit/F;
+      if(!F){ led.dissipated+=emit; continue; }
+      const share=emit/F;
       for(const j of nb){
         const n=occ[j]; if(!n||n===o||n.bornTick>=t) continue;
         let gain=share*matchK(n.hue,o.hue,cfg);
@@ -280,10 +305,17 @@ class Sim {
         hue=((hue+cfg.sigma*z)%1+1)%1;
       }
       const prng=this.dice(id+'|place|'+(rr.j||0));
+      let lx=o.rx,ly=o.ry;
+      if(cfg.seedFrom==='tip'){ // launch from a built tip: reach disperses further
+        const tips=[];
+        for(const [p,ci] of o.built)
+          if(!o.built.has(p+'0')&&!o.built.has(p+'1')&&!o.built.has(p+'2')) tips.push(ci);
+        if(tips.length){ const ci=tips[Math.floor(prng()*tips.length)]; lx=ci%W; ly=(ci-ci%W)/W; }
+      }
       const span=2*cfg.D+1,count=span*span-1,center=(span*span-1)>>1;
       let k=Math.floor(prng()*count); if(k>=center)k++;
       const dx=(k%span)-cfg.D,dy=Math.floor(k/span)-cfg.D;
-      const idx=((o.ry+dy+H)%H)*W+((o.rx+dx+W)%W);
+      const idx=((ly+dy+H)%H)*W+((lx+dx+W)%W);
       const facing=Math.floor(prng()*4);
       const rec=this.records.get(o.id); if(rec) rec.birthsAttempted++;
       seeds.push({o,id,tree,hue,facing,idx});
@@ -304,6 +336,10 @@ class Sim {
     // phase 4: lifecycle
     for(const o of this.orgs){
       if(o.freshCells) o.freshCells=null;
+      if(cfg.upkeep>0&&o.bornTick<t){
+        o.pool-=cfg.upkeep*o.built.size;
+        if(o.pool<0){ this.kill(o,t); continue; }
+      }
       if(o.state==='growing'){
         if(o.bornTick===t||o.grew) o.grace=0; else o.grace++;
         o.grew=false;
@@ -314,7 +350,7 @@ class Sim {
         }
       } else if(o.state==='hardened'){
         o.age++;
-        if(o.age>=cfg.lifespan) this.kill(o,t);
+        if(o.age>=cfg.lifespan+cfg.lifespanPerCell*o.built.size) this.kill(o,t);
       }
     }
     this.orgs=this.orgs.filter(o=>o.state!=='dead');
@@ -429,7 +465,7 @@ if(typeof module!=='undefined') module.exports=C1;
   if(q) Object.assign(cfg,JSON.parse(q));
   let sim=new C1.Sim(cfg);
   const canvas=document.getElementById('world'),ctx=canvas.getContext('2d');
-  const px=Math.max(2,Math.floor(Math.min((innerWidth-200)/cfg.W,(innerHeight-120)/cfg.H)));
+  let px=Math.max(2,Math.floor(Math.min((innerWidth-280)/cfg.W,(innerHeight-120)/cfg.H)));
   canvas.width=cfg.W*px; canvas.height=cfg.H*px;
   const clock=document.getElementById('clock'),cctx=clock.getContext('2d');
   const hud=document.getElementById('hud');
@@ -439,6 +475,47 @@ if(typeof module!=='undefined') module.exports=C1;
   function restart(ws){ cfg.worldSeed=ws; seedBox.value=ws; sim=new C1.Sim(cfg); lastM=null; }
   document.getElementById('go').onclick=()=>restart(+seedBox.value||1);
   document.getElementById('reseed').onclick=()=>restart(Math.floor(Math.random()*1e9));
+  // dials panel
+  const DIALS=['keep','emit','absorbCap','exposurePow','upkeep','cellCost','seedCost','lifespan',
+    'lifespanPerCell','seedFrom','D','muTree','muHue','sigma','bodyMode','W','H','initN'];
+  const dialsEl=document.getElementById('dials'),dialIn={};
+  for(const k of DIALS){
+    const lab=document.createElement('label'); lab.textContent=k; lab.style.color='#777';
+    const inp=document.createElement('input');
+    inp.value=typeof cfg[k]==='number'&&!isFinite(cfg[k])?'Infinity':String(cfg[k]);
+    inp.style.width='100%';
+    dialsEl.appendChild(lab); dialsEl.appendChild(inp); dialIn[k]=inp;
+  }
+  function refreshDials(){ for(const k of DIALS)
+    dialIn[k].value=typeof cfg[k]==='number'&&!isFinite(cfg[k])?'Infinity':String(cfg[k]); }
+  function applyCfg(patch){
+    Object.assign(cfg,patch);
+    refreshDials();
+    const npx=Math.max(2,Math.floor(Math.min((innerWidth-280)/cfg.W,(innerHeight-120)/cfg.H)));
+    px=npx; canvas.width=cfg.W*px; canvas.height=cfg.H*px;
+    restart(cfg.worldSeed);
+  }
+  document.getElementById('apply').onclick=()=>{
+    const patch={};
+    for(const k of DIALS){
+      const v=dialIn[k].value.trim();
+      if(v==='Infinity') patch[k]=Infinity;
+      else if(v!==''&&!isNaN(+v)) patch[k]=+v;
+      else patch[k]=v;
+    }
+    applyCfg(patch);
+  };
+  document.getElementById('pasteGo').onclick=()=>{
+    const t=document.getElementById('paste').value.trim(),msg=document.getElementById('pasteMsg');
+    try{
+      let j=t;
+      const m=t.match(/cfg=([^&\s]+)/);
+      if(m) j=decodeURIComponent(m[1]);
+      const patch=JSON.parse(j);
+      applyCfg(patch);
+      msg.textContent='loaded ✓';
+    }catch(e){ msg.textContent='could not parse: '+e.message; }
+  };
   document.getElementById('pause').onclick=e=>{paused=!paused;e.target.textContent=paused?'play':'pause';};
   document.getElementById('step1').onclick=()=>{sim.step();draw(true);};
   document.getElementById('speed').onclick=e=>{speed=speed>=64?1:speed*4;e.target.textContent='speed x'+speed;};

@@ -135,5 +135,17 @@ function stateStr(sim){ return JSON.stringify(sim.toJSON()); }
   check('9 mutation self-consistency',okTree&&grew>0&&cut>0,'grew '+grew+' cut '+cut);
 }
 
+// 10. new dials (exposure, size-lifespan, tip launch): deterministic, viable, ledger holds
+{
+  const cfg=()=>Object.assign(C1.defaults(),{worldSeed:7,keep:0.75,emit:1.5,absorbCap:1.5,
+    seedCost:96,exposurePow:1,lifespanPerCell:24,seedFrom:'tip'});
+  const a=runSim(cfg(),800),b=runSim(cfg(),800);
+  let led=true;
+  const l=a.ledger;
+  if(Math.abs(l.kept+l.emitted-l.influx)>1e-6*(l.influx||1)) led=false;
+  check('10 exposure/tip/size dials',stateStr(a)===stateStr(b)&&a.population()>0&&led,
+    'pop '+a.population());
+}
+
 console.log(pass+' passed, '+fail+' failed');
 process.exit(fail?1:0);
