@@ -22,3 +22,5 @@ skip point-e15-ws3
 skip tree-v2-ws3
 skip point-v2-ws3
 skip tree-v2u-ws3
+tree-v3-ws3  orgs 1601  mean 4.0  cA 0.010  flux 20.7%  R2 0.67  R1 0.04  27s
+point-v3-ws3  orgs 1459  mean 1.0  cA 0.017  flux 9.6%  R2 0.05  R1 0.02  2s

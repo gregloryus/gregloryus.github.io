@@ -1,0 +1,89 @@
+# coadapt-1 — Stage 1.5 + Stage 2a findings (2026-11-11)
+
+Continuation of `coadapt-0-findings.md`. Code: `coadapt-1.html` (core+viewer, COADAPT1 CORE
+markers), `coadapt-1-tests.js` (9 fixtures green), `coadapt-1-exp.js` (factorial harness),
+results in `coadapt1-runs/` (+ `factorial-report.json`). Archipelago lives in coadapt-0.
+
+## Stage 1.5 — archipelago (convention mosaic): works
+
+Islands (habitability mask) + `longJump` wind dispersal added to coadapt-0, defaults off,
+fixture 11. Demo (4×4 islands, longJump 0.003, 200k ticks, 2 seeds): islands hold **distinct
+conventions persistently** — cross-island axis spread ≈ 0.12 (0.25 = uncorrelated, 0 =
+homogenized) — with occasional convention takeovers (6 in one seed, 0 in the other).
+Migration rate is the dial between one world-convention and a patchwork of them.
+Watch: `coadapt-0.html?cfg={"islandsNx":4,"islandsNy":4,"longJump":0.003,"s":8,"D":1,"mu":0.05,"sigma":0.1,"initN":400}`
+
+## Stage 2a — bodies + byproduct exchange
+
+Substrate: TBT-tree bodies (godsroll machinery, flat torus, no gravity/shade). Each tissue
+cell produces `keep`+`emit` energy per tick; `emit` is byproduct split among FOREIGN adjacent
+tissue cells, valued by the receiver at hue antipodality. Kin byproduct is worth exactly 0
+(T1/T2 enforced by physics, not rules); nothing is minted at interfaces (ledger fixture);
+shared boundary = bandwidth. `bodyMode:'point'` is the geometry-off control; `emit:0` the
+exchange-off control.
+
+### Factorial results (3 seeds × 30k ticks each, 96²)
+
+| arm | cA | flux% | meanCells | orgs | R2 | R1 |
+|---|---|---|---|---|---|---|
+| tree-e0 (no exchange) | −0.029 | 0.0 | 2.1 | 4005 | 0.06 | 0.20 |
+| tree-e1 | −0.001 | 14.0 | 2.4 | 3188 | 0.42 | 0.04 |
+| tree-e15 | 0.008 | 24.9 | 2.5 | 3002 | 0.65 | 0.02 |
+| point-e15 | 0.003 | 26.2 | 1.0 | 6636 | 0.70 | 0.01 |
+| tree-v2 (cap 0.75, cost 128) | −0.009 | 9.0 | **6.8** | 960 | 0.17 | 0.06 |
+| point-v2 | **0.155** | 0.9 | 1.0 | **108** | 0.12 | 0.05 |
+| tree-v2u (cost 128 only) | −0.005 | 20.8 | 3.5 | 1806 | 0.62 | 0.05 |
+| **tree-v3 (cap 1.5 = emit)** | 0.009 | **19.6** | 3.9 | 1627 | 0.59 | 0.07 |
+| **point-v3** | 0.020 | **11.8** | 1.0 | 1688 | 0.31 | 0.02 |
+
+(cA = contact assortment vs org-hue permutation null; flux% = share of the world's entire
+energy influx flowing through complementary interfaces; R2/R1 = pair structure vs monoculture.)
+
+### What was learned
+
+1. **Hue coadaptation transfers to bodies.** Exchange off → hue-neutral (R2 ≈ 0.04, the
+   predeclared floor). Exchange on → antipodal pair structure (R2 up to 0.70, R1 ≈ 0.02) with
+   a quarter of the global economy flowing through complementary contacts, under mutation of
+   both hue AND body-plan simultaneously.
+2. **Surface exchange alone rewards pointness.** v1's clean negative: points slightly beat
+   trees (26.2% vs 24.9% flux) because a single cell is the maximal surface-to-volume body.
+   Under pure boundary economics the optimal organism is a degenerate finger.
+3. **A per-cell intake ceiling makes anatomy pay — if it's set right.** cap < single-contact
+   share (v2, 0.75 < 1.5) clips the best matches, flattening the matching gradient itself
+   (R2 collapses to 0.17) even as bodies triple (6.8 cells). cap = emit (v3, 1.5) binds only
+   multi-partner gluttony: **trees then beat points 19.6% vs 11.8% flux — a 66% energetic
+   dividend for having a body — with pair structure intact** (R2 0.59 vs 0.31) and bodies at
+   3.9 cells and growing. The dial between "shape is irrelevant" and "shape is the economy"
+   is one number with a principled setting.
+4. **Accidental find — obligate-mutualism collapse.** point-v2 (harsh cap + high seedCost) is
+   barely viable alone: the population crashed to ~108 survivors, and the survivors are
+   matched couples (cA = 0.155, by far the highest spatial assortment seen in any arm).
+   Survivorship under obligate partnership produces exactly "only the glove-fits persist."
+   As a *regime* this is a legible, dramatic world: sparse, nearly-empty, inhabited by pairs.
+5. **Open: spatial partner-choice is still weak in viable regimes** (cA ≈ 0.01–0.02). The
+   histogram adapts; bodies profit from exchange; but at 50–80% density organisms press
+   against whoever is there. Lower density, longer horizons, tip-launched seeds (so where
+   you drop a seed depends on your shape), or seeds that preferentially establish beside
+   complementary tissue (U22's glom-on) are the candidate mechanisms for making *arrangement*
+   itself evolve. That is the next experiment.
+
+## Where this leaves the program
+
+- Stage 1 (hue circle): coadaptation, contingency, specificity, lock-in, twirl — all shown.
+- Stage 1.5 (archipelago): convention mosaic + takeovers — shown.
+- Stage 2a (bodies + exchange): exchange ecology on evolving bodies — shown; geometry
+  dividend — shown (v3); interlocking *arrangement* — not yet (the live frontier).
+- Not yet run on coadapt-1: transplant/specificity assays (S1-style, use match-based metrics
+  per Stage 1's lesson — saturated-arena birth rates are fitness-blind), archipelago on
+  bodies, obligate-mutualism regime explored deliberately rather than accidentally.
+
+## Suggested immediate next steps
+
+1. Partner-choice mechanism: seeds launch from tips (shape → dispersal pattern) and/or a
+   germination bonus adjacent to high-m tissue — then measure whether cA rises above the
+   v3 floor at viable densities.
+2. Push one world long (200k+) at tree-v3 dials to see if body plans elaborate (meanCells
+   trend, genome depth) once the economy rewards interface area.
+3. S1-style transplants between coadapt-1 worlds (match-metric, growth-phase window).
+4. The obligate regime (point-v2 dials, or tree equivalent) as a deliberate "sparse world of
+   couples" — likely the most immediately *legible* coadaptation display the project has.
