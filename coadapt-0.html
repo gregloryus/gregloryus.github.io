@@ -43,6 +43,10 @@ function defaults(){ return {
   initMode: 'uniform', // 'uniform' | 'single' | 'pair'
   initN: 200,
   freezeTag: null, // experimental clamp (S2): offspring of this tag never mutate
+  // archipelago (0 = plain torus): islands of habitable cells separated by dead sea.
+  // longJump: probability a birth disperses uniformly over the whole world (wind) —
+  // the only way across a sea gap wider than D.
+  islandsNx: 0, islandsNy: 0, islandGap: 4, longJump: 0,
 }; }
 
 // ---------- keyed dice: verbatim from godsroll-3 ----------
@@ -76,6 +80,13 @@ class Sim {
     this.tick=0;
     this.grid=new Array(this.W*this.H).fill(null);
     this.records=new Map(); // observational only; physics never reads it; outside snapshots
+    this.hab=null; // habitability mask (archipelago); null = all habitable
+    if(cfg.islandsNx>0&&cfg.islandsNy>0){
+      const px=Math.floor(this.W/cfg.islandsNx),py=Math.floor(this.H/cfg.islandsNy);
+      this.hab=new Uint8Array(this.W*this.H);
+      for(let y=0;y<this.H;y++) for(let x=0;x<this.W;x++)
+        this.hab[y*this.W+x]=(x%px)<px-cfg.islandGap&&(y%py)<py-cfg.islandGap?1:0;
+    }
     if(!(opts&&opts.skipInit)) this.initPopulation();
   }
   dice(key){ return dice(this.cfg.worldSeed,key); }
@@ -94,7 +105,7 @@ class Sim {
     } else {
       const rng=this.dice('init');
       for(let i=0;i<cfg.initN;i++){
-        let idx; do{ idx=Math.floor(rng()*W*H); }while(this.grid[idx]);
+        let idx; do{ idx=Math.floor(rng()*W*H); }while(this.grid[idx]||(this.hab&&!this.hab[idx]));
         this.addFounder('U'+i,idx%W,Math.floor(idx/W),rng(),'U'+i);
       }
     }
@@ -135,9 +146,14 @@ class Sim {
         hue=((hue+cfg.sigma*z)%1+1)%1;
       }
       const prng=this.dice(id+'|place|'+(rr.j||0));
-      let k=Math.floor(prng()*count); if(k>=center)k++;
-      const dx=(k%span)-cfg.D,dy=Math.floor(k/span)-cfg.D;
-      const dest=((o.y+dy+H)%H)*W+((o.x+dx+W)%W);
+      let dest;
+      if(cfg.longJump>0&&prng()<cfg.longJump){ dest=Math.floor(prng()*W*H); }
+      else{
+        let k=Math.floor(prng()*count); if(k>=center)k++;
+        const dx=(k%span)-cfg.D,dy=Math.floor(k/span)-cfg.D;
+        dest=((o.y+dy+H)%H)*W+((o.x+dx+W)%W);
+      }
+      if(this.hab&&!this.hab[dest]){ const rec0=this.records.get(o.id); if(rec0) rec0.birthsAttempted++; continue; } // lost at sea (energy spent)
       const rec=this.records.get(o.id); if(rec) rec.birthsAttempted++;
       attempts.push({po:o,id,hue,dest});
     }
@@ -257,6 +273,22 @@ function tagMeans(sim){ // pair-mode cluster means
   for(const [tag,hs] of by) out[tag]={mean:circMean(hs),n:hs.length};
   return out;
 }
+function islandStats(sim){ // per-island nematic: the convention mosaic
+  const cfg=sim.cfg;
+  if(!(cfg.islandsNx>0)) return null;
+  const px=Math.floor(sim.W/cfg.islandsNx),py=Math.floor(sim.H/cfg.islandsNy);
+  const by=new Map();
+  for(const o of sim.individuals()){
+    const i=Math.floor(o.x/px)+cfg.islandsNx*Math.floor(o.y/py);
+    let l=by.get(i); if(!l){l=[];by.set(i,l);} l.push(o.hue);
+  }
+  const out=[];
+  for(const [i,hues] of [...by.entries()].sort((a,b)=>a[0]-b[0])){
+    const {R2,phi}=nematic(hues);
+    out.push({island:i,pop:hues.length,R2,phi});
+  }
+  return out;
+}
 function metricsOf(sim,withLocal){
   const hues=sim.individuals().map(o=>o.hue);
   const {A,mReal,pairs}=assortment(sim);
@@ -268,7 +300,7 @@ function metricsOf(sim,withLocal){
 }
 
 return {defaults,cyrb128,sfc32,dice,circDist,matchK,Sim,
-  pairList,assortment,nematic,resultant1,axisDist,localR2,circMean,tagMeans,metricsOf};
+  pairList,assortment,nematic,resultant1,axisDist,localR2,circMean,tagMeans,metricsOf,islandStats};
 })();
 if(typeof module!=='undefined') module.exports=CO;
 // ==== COADAPT CORE END ====
@@ -296,14 +328,26 @@ if(typeof module!=='undefined') module.exports=CO;
   document.getElementById('speed').onclick=e=>{speed=speed>=64?1:speed*4;e.target.textContent='speed x'+speed;};
   function draw(forceMetrics){
     ctx.fillStyle='#0a0a0c'; ctx.fillRect(0,0,canvas.width,canvas.height);
+    if(sim.hab){
+      ctx.fillStyle='#10141f';
+      for(let i=0;i<sim.hab.length;i++) if(!sim.hab[i])
+        ctx.fillRect((i%cfg.W)*px,Math.floor(i/cfg.W)*px,px,px);
+    }
     for(const o of sim.individuals()){
       ctx.fillStyle='hsl('+(o.hue*360)+',80%,55%)';
       ctx.fillRect(o.x*px,o.y*px,px,px);
     }
     if(forceMetrics||sim.tick%120===0||!lastM) lastM=CO.metricsOf(sim,sim.tick%960===0);
     const m=lastM;
+    let isl='';
+    if(sim.hab){
+      const st=CO.islandStats(sim)||[];
+      let sp=0,np=0;
+      for(let i=0;i<st.length;i++) for(let j=i+1;j<st.length;j++){ sp+=CO.axisDist(st[i].phi,st[j].phi); np++; }
+      isl='  islands '+st.length+'  axisSpread '+(np?(sp/np).toFixed(3):'0');
+    }
     hud.textContent='t '+sim.tick+'  pop '+m.pop+'  A '+m.A.toFixed(3)+'  m '+m.mReal.toFixed(3)
-      +'  R2 '+m.R2.toFixed(3)+'  axis '+m.phi.toFixed(3)+(m.localR2!==undefined?'  localR2 '+m.localR2.toFixed(3):'');
+      +'  R2 '+m.R2.toFixed(3)+'  axis '+m.phi.toFixed(3)+(m.localR2!==undefined?'  localR2 '+m.localR2.toFixed(3):'')+isl;
     cctx.fillStyle='#0a0a0c'; cctx.fillRect(0,0,140,140);
     cctx.strokeStyle='#333'; cctx.beginPath(); cctx.arc(70,70,60,0,2*Math.PI); cctx.stroke();
     for(const o of sim.individuals()){

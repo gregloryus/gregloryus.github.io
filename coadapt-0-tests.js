@@ -147,5 +147,17 @@ function stateStr(sim){ return JSON.stringify(sim.toJSON()); }
   check('10 instrumentation inert',stateStr(a)===stateStr(b));
 }
 
+// 11. archipelago: deterministic, nobody in the sea, and off-by-default changes nothing
+{
+  const icfg=()=>Object.assign(CO.defaults(),{worldSeed:7,islandsNx:4,islandsNy:4,islandGap:4,longJump:0.01});
+  const a=runSim(icfg(),800),b=runSim(icfg(),800);
+  let dry=true;
+  for(let i=0;i<a.grid.length;i++) if(a.grid[i]&&!a.hab[i]) dry=false;
+  const plain=runSim(Object.assign(CO.defaults(),{worldSeed:7}),300);
+  const base=runSim(Object.assign(CO.defaults(),{worldSeed:7,islandGap:4}),300); // dial present but islands off
+  check('11 archipelago',stateStr(a)===stateStr(b)&&dry&&a.population()>0
+    &&stateStr(plain)===stateStr(base));
+}
+
 console.log(pass+' passed, '+fail+' failed');
 process.exit(fail?1:0);
