@@ -20,7 +20,10 @@
     <canvas id="clock" width="140" height="140"></canvas><br>
     <button id="pause">pause</button>
     <button id="step1">step</button>
-    <button id="speed">speed x4</button>
+    <button id="speed">speed x4</button><br><br>
+    <input id="seed" type="number" style="width:7em;background:#1a1a20;color:#9a9aa0;border:1px solid #333;font:inherit" title="world seed">
+    <button id="go">restart</button>
+    <button id="reseed">new world</button>
   </div>
 </div>
 <script>
@@ -276,7 +279,12 @@ if(typeof module!=='undefined') module.exports=CO;
   const cfg=CO.defaults();
   const q=new URLSearchParams(location.search).get('cfg');
   if(q) Object.assign(cfg,JSON.parse(q));
-  const sim=new CO.Sim(cfg);
+  let sim=new CO.Sim(cfg);
+  const seedBox=document.getElementById('seed');
+  seedBox.value=cfg.worldSeed;
+  function restart(ws){ cfg.worldSeed=ws; seedBox.value=ws; sim=new CO.Sim(cfg); lastM=null; }
+  document.getElementById('go').onclick=()=>restart(+seedBox.value||1);
+  document.getElementById('reseed').onclick=()=>restart(Math.floor(Math.random()*1e9));
   const canvas=document.getElementById('world'),ctx=canvas.getContext('2d');
   const px=Math.max(2,Math.floor(Math.min((innerWidth-200)/cfg.W,(innerHeight-120)/cfg.H)));
   canvas.width=cfg.W*px; canvas.height=cfg.H*px;
