@@ -1,0 +1,22 @@
+fr-dock0-ws1  orgs 344 mean 16.1 open 1.04 cA -0.073 flux 3.5% R2 0.25 R1 0.14 depthMax 23
+fr-dock0-ws2  orgs 380 mean 14.5 open 1.11 cA -0.064 flux 3.9% R2 0.08 R1 0.07 depthMax 14
+fr-dock48-ws1  orgs 321 mean 17.4 open 0.99 cA -0.117 flux 1.3% R2 0.28 R1 0.44 depthMax 18
+fr-dock48-ws2  orgs 328 mean 16.7 open 1.03 cA -0.036 flux 1.5% R2 0.25 R1 0.59 depthMax 11
+fr-dock96-ws1  orgs 353 mean 15.4 open 1.10 cA -0.044 flux 2.7% R2 0.21 R1 0.34 depthMax 14
+fr-dock96-ws2  orgs 349 mean 16.2 open 1.06 cA -0.068 flux 1.3% R2 0.10 R1 0.52 depthMax 12
+fr-long-ws1  orgs 234 mean 25.1 open 0.87 cA -0.107 flux 1.5% R2 0.33 R1 0.44 depthMax 18
+fr-long-ws2  orgs 217 mean 27.8 open 0.84 cA -0.060 flux 2.2% R2 0.32 R1 0.41 depthMax 17
+fr-src-ws11  orgs 268 mean 21.4 open 1.00 cA -0.076 flux 1.9% R2 0.24 R1 0.45 depthMax 14
+fr-src-ws22  orgs 252 mean 23.8 open 0.82 cA -0.070 flux 1.0% R2 0.07 R1 0.57 depthMax 13
+fr-src-ws33  orgs 347 mean 16.9 open 0.96 cA -0.028 flux 3.3% R2 0.16 R1 0.29 depthMax 15
+fr-src-ws44  orgs 360 mean 15.1 open 1.10 cA -0.070 flux 3.1% R2 0.27 R1 0.25 depthMax 12
+SYM 11 m 0.118 flux 2.1%
+SYM 22 m 0.031 flux 0.5%
+SYM 33 m 0.167 flux 2.9%
+SYM 44 m 0.291 flux 5.7%
+ALLO 11x22 dphi 0.127 deficit -0.117
+ALLO 11x33 dphi 0.035 deficit 0.061
+ALLO 11x44 dphi 0.107 deficit -0.037
+ALLO 22x33 dphi 0.091 deficit -0.112
+ALLO 22x44 dphi 0.234 deficit 0.030
+ALLO 33x44 dphi 0.143 deficit 0.007

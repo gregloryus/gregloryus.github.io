@@ -1,0 +1,507 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>coadapt-2 — excavation</title>
+<style>
+  body{margin:0;background:#0a0a0c;color:#9a9aa0;font:12px/1.4 monospace;display:flex;flex-direction:column;align-items:center}
+  #hud{padding:6px;white-space:pre}
+  canvas{image-rendering:pixelated;cursor:crosshair}
+  #row{display:flex;gap:12px;align-items:flex-start;padding:6px}
+  button,input,textarea{background:#1a1a20;color:#9a9aa0;border:1px solid #333;font:inherit;padding:2px 8px}
+  #timeline{width:100%}
+  #panel{max-width:250px}
+  .anc{cursor:pointer;text-decoration:underline dotted}
+  #sel{border:1px solid #333;padding:6px;margin-top:8px;display:none}
+</style>
+</head>
+<body>
+<div id="hud">loading</div>
+<div id="row">
+  <div style="display:flex;flex-direction:column">
+    <canvas id="world"></canvas>
+    <input id="timeline" type="range" min="0" max="0" value="0" title="rewind">
+    <div id="tlabel" style="color:#777"></div>
+  </div>
+  <div id="panel">
+    <canvas id="clock" width="140" height="140"></canvas><br>
+    <button id="pause">pause</button>
+    <button id="step1">step</button>
+    <button id="speed">speed x4</button>
+    <button id="ghostBtn" disabled>ghost</button><br><br>
+    <input id="seed" type="number" style="width:7em" title="world seed">
+    <button id="go">restart</button>
+    <button id="reseed">new world</button>
+    <div id="sel"></div>
+    <details style="margin-top:10px;max-width:250px">
+      <summary style="cursor:pointer;color:#ccc">dials</summary>
+      <div id="dials" style="display:grid;grid-template-columns:auto 1fr;gap:3px;margin-top:6px"></div>
+      <button id="apply" style="margin-top:6px">apply &amp; restart</button>
+      <div style="margin-top:10px;color:#777">paste a cfg URL or JSON:</div>
+      <textarea id="paste" rows="3" style="width:100%"></textarea>
+      <button id="pasteGo">load pasted</button>
+      <div id="pasteMsg" style="color:#777"></div>
+    </details>
+    <div style="color:#555;margin-top:10px;max-width:250px">click an organism to select it; reroll
+    its genes or journey to branch history. ghost toggles the abandoned timeline.</div>
+  </div>
+</div>
+<script>
+// ==== COADAPT2 CORE BEGIN ====
+'use strict';
+// Stage 2a: organisms are TBT-tree bodies on a flat 2D torus (top-down, no gravity/shade).
+// Economy: every built cell produces (keep + emit) energy per tick. `keep` goes to the
+// organism's pool. `emit` is byproduct released at that cell, split equally among FOREIGN
+// tissue cells in its 4-neighborhood; a receiver values it by hue antipodality
+// m(receiver,emitter) — anti-reflexive (T1) and therefore kin-worthless (T2): your clone's
+// byproduct is worth exactly 0 to you. Unvalued remainder and uncontacted emission dissipate;
+// nothing is minted at an interface (no free-energy loophole). Shared boundary length is
+// exchange bandwidth, so interdigitated anatomy is how partnerships scale.
+const C2 = (() => {
+
+function defaults(){ return {
+  worldSeed: 1, W: 96, H: 96,
+  keep: 1, emit: 1,          // per-cell production split; emit 0 (keep 2) = exchange-off control
+  absorbCap: Infinity,       // max byproduct one cell may absorb per tick; finite cap makes
+                             // body SIZE matter (a point saturates; more cells = more intake)
+  w: 0.25, kernelMode: 'anti',
+  cellCost: 8, seedCost: 64, lifespan: 256, gracePeriod: 16, minExpression: 0.5,
+  exposurePow: 0,            // production ×= (emptyFaces/4)^pow: punishes flabby interiors,
+                             // rewards spindly vines; touching a partner costs exposure but
+                             // buys flux — a real tradeoff, not a prescription
+  lifespanPerCell: 0,        // adult lifespan += this × built cells (big lives longer; the
+                             // risk is the long immature build that can die unfinished)
+  upkeep: 0,                 // energy per built cell per tick; pool < 0 starves the organism.
+                             // With exposurePow this makes enclosure lethal rather than merely
+                             // unprofitable — unless a complementary interface subsidizes it
+  dieback: 0,                // 1: starvation sheds the deepest built tip per tick (withering)
+                             // instead of killing the whole organism; death only at 0 cells
+  dockReserve: 0,            // seed dowry usable only when docked: establishing seed starts
+                             // with pool = dockReserve × min(1, Σmatch with adjacent foreign
+                             // tissue / 2). Paid from seedCost economics, wasted if undocked —
+                             // U22's glom-on made lawful (no energy minted)
+  seedFrom: 'root',          // 'root' | 'tip': tips launch seeds, so reach disperses further
+  D: 6,                      // seed dispersal radius (Chebyshev) from the launch cell
+  muTree: 0.25, muHue: 0.25, sigma: 0.05,
+  urnMode: 'linear', urnMult: 2, slotChance: 1/3,
+  bodyMode: 'tree',          // 'tree' | 'point' (single-cell control: geometry off)
+  initN: 150,
+}; }
+
+// ---------- keyed dice: verbatim from godsroll-3 ----------
+function cyrb128(str){
+  let h1=1779033703,h2=3144134277,h3=1013904242,h4=2773480762;
+  for(let i=0;i<str.length;i++){ const k=str.charCodeAt(i);
+    h1=h2^Math.imul(h1^k,597399067); h2=h3^Math.imul(h2^k,2869860233);
+    h3=h4^Math.imul(h3^k,951274213); h4=h1^Math.imul(h4^k,2716044179); }
+  h1=Math.imul(h3^(h1>>>18),597399067); h2=Math.imul(h4^(h2>>>22),2869860233);
+  h3=Math.imul(h1^(h3>>>17),951274213); h4=Math.imul(h2^(h4>>>19),2716044179);
+  return [(h1^h2^h3^h4)>>>0,(h2^h1)>>>0,(h3^h1)>>>0,(h4^h1)>>>0];
+}
+function sfc32(a,b,c,d){ return function(){
+  a>>>=0;b>>>=0;c>>>=0;d>>>=0; let t=(a+b)|0; a=b^(b>>>9); b=(c+(c<<3))|0;
+  c=(c<<21)|(c>>>11); d=(d+1)|0; t=(t+d)|0; c=(c+t)|0; return (t>>>0)/4294967296; }; }
+function dice(worldSeed,key){ const h=cyrb128(worldSeed+'§'+key); return sfc32(h[0],h[1],h[2],h[3]); }
+
+function circDist(a,b){ let d=Math.abs(a-b); return d>0.5?1-d:d; }
+function matchK(a,b,cfg){
+  const d=circDist(a,b);
+  const v=cfg.kernelMode==='self'?1-d/cfg.w:1-Math.abs(d-0.5)/cfg.w;
+  return v>0?v:0;
+}
+
+// ---------- TBT genomes (godsroll-3 machinery, flat-world, no y-bit/halo) ----------
+const DXL=[0,1,0,-1], DZL=[1,0,-1,0]; // local plane: +z forward, +x right
+const SLOT_FACING=[];
+for(let f=0;f<4;f++){ SLOT_FACING[f*3+0]=(f+3)%4; SLOT_FACING[f*3+1]=f; SLOT_FACING[f*3+2]=(f+1)%4; }
+function newNode(){ return {c:[null,null,null]}; }
+function cloneTree(n){ return n?{c:[cloneTree(n.c[0]),cloneTree(n.c[1]),cloneTree(n.c[2])]}:null; }
+function countNodes(n){ return n?1+countNodes(n.c[0])+countNodes(n.c[1])+countNodes(n.c[2]):0; }
+function bits(n){ return (n.c[0]?'1':'0')+(n.c[1]?'1':'0')+(n.c[2]?'1':'0'); }
+function encodeBits(tree){ let s=''; (function w(n){ s+=bits(n); for(let i=0;i<3;i++) if(n.c[i]) w(n.c[i]); })(tree); return s; }
+function decodeBits(str){ let i=0;
+  function r(){ const n=newNode(); const b=str.slice(i*3,i*3+3); i++;
+    for(let s=0;s<3;s++) if(b[s]==='1') n.c[s]=r(); return n; }
+  return r(); }
+function layoutTree(tree){ // root-relative coords, root facing 0 (local +z forward)
+  const cells=[], posSet=new Set(), byPath=new Map();
+  (function walk(node,path,px,pz,facing,depth){
+    const rec={node,path,px,pz,facing,depth,parentPath:path?path.slice(0,-1):null};
+    cells.push(rec); posSet.add(px+','+pz); byPath.set(path,rec);
+    for(let s=0;s<3;s++){ const ch=node.c[s]; if(!ch) continue;
+      const f2=SLOT_FACING[facing*3+s];
+      walk(ch,path+s,px+DXL[f2],pz+DZL[f2],f2,depth+1); }
+  })(tree,'',0,0,0,1);
+  return {cells,posSet,byPath};
+}
+function eligibleSites(tree,cfg){
+  const {cells,posSet}=layoutTree(tree);
+  const fills=[],cuts=[];
+  for(const rec of cells){
+    for(let s=0;s<3;s++){
+      if(rec.node.c[s]) cuts.push({rec,s});
+      else{
+        const f2=SLOT_FACING[rec.facing*3+s];
+        if(posSet.has((rec.px+DXL[f2])+','+(rec.pz+DZL[f2]))) continue;
+        fills.push({rec,s});
+      }
+    }
+  }
+  return {fills,cuts};
+}
+function siteWeight(site,cfg){
+  const d=site.rec.depth;
+  return cfg.urnMode==='mult'?Math.pow(cfg.urnMult,d-1):cfg.urnMode==='flat'?1:d;
+}
+function growAt(tree,site,rng,cfg){ // recursive [0,0,1]-urn additions, no self-overlap
+  const {posSet}=layoutTree(tree);
+  const f2=SLOT_FACING[site.rec.facing*3+site.s];
+  const child=newNode();
+  site.rec.node.c[site.s]=child;
+  posSet.add((site.rec.px+DXL[f2])+','+(site.rec.pz+DZL[f2]));
+  const queue=[{node:child,px:site.rec.px+DXL[f2],pz:site.rec.pz+DZL[f2],facing:f2}];
+  while(queue.length){
+    const cur=queue.shift();
+    for(let s=0;s<3;s++){
+      if(rng()>=cfg.slotChance) continue;
+      const ff=SLOT_FACING[cur.facing*3+s];
+      const nx=cur.px+DXL[ff],nz=cur.pz+DZL[ff],key=nx+','+nz;
+      if(posSet.has(key)) continue;
+      const nn=newNode(); cur.node.c[s]=nn; posSet.add(key);
+      queue.push({node:nn,px:nx,pz:nz,facing:ff});
+    }
+  }
+}
+function mutateTree(tree,rng,cfg){ // slot-first depth-weighted urn over fills+cuts
+  const {fills,cuts}=eligibleSites(tree,cfg);
+  const sites=fills.concat(cuts);
+  if(!sites.length) return {t:'none'};
+  let total=0; const w=sites.map(s=>{const v=siteWeight(s,cfg); total+=v; return v;});
+  let t=rng()*total,i=0;
+  while(i<w.length-1&&t>=w[i]){ t-=w[i]; i++; }
+  const site=sites[i];
+  if(site.rec.node.c[site.s]){ site.rec.node.c[site.s]=null; return {t:'cut'}; }
+  growAt(tree,site,rng,cfg);
+  return {t:'grow'};
+}
+// world placement: rotate root-relative (px,pz) by organism facing F
+function worldXY(px,pz,F,rx,ry,W,H){
+  let dx,dy;
+  if(F===0){dx=px;dy=-pz;} else if(F===1){dx=pz;dy=px;}
+  else if(F===2){dx=-px;dy=pz;} else{dx=-pz;dy=-px;}
+  return ((ry+dy+H)%H)*W+((rx+dx+W)%W);
+}
+
+// ---------- simulation ----------
+class Sim {
+  constructor(cfg,rerolls,opts){
+    if(cfg.kernelMode==='anti'&&cfg.w>0.5) throw new Error('w>0.5 breaks anti-reflexivity (T1)');
+    this.cfg=cfg; this.W=cfg.W; this.H=cfg.H; this.rerolls=rerolls||{};
+    this.tick=0;
+    this.occ=new Array(this.W*this.H).fill(null); // -> organism
+    this.orgs=[];
+    this.records=new Map(); // observational only, outside snapshots
+    this.ledger={influx:0,kept:0,emitted:0,absorbed:0,dissipated:0}; // last tick
+    if(!(opts&&opts.skipInit)) this.initPopulation();
+  }
+  dice(key){ return dice(this.cfg.worldSeed,key); }
+  founderTree(){
+    const g=newNode();
+    if(this.cfg.bodyMode!=='point') g.c[1]=newNode(); // root + one forward cell
+    return g;
+  }
+  makeOrg(id,tree,hue,facing,rx,ry,t,parentId){
+    const o={id,hue,facing,rx,ry,tree,state:'growing',grace:0,age:0,grew:false,
+      pool:0,bornTick:t,ord:0,parentId};
+    o.layout=layoutTree(tree);
+    o.planSize=o.layout.cells.length;
+    o.built=new Map(); // path -> world idx
+    this.orgs.push(o);
+    this.addCell(o,'',t);
+    this.records.set(id,{parentId:parentId||null,bornTick:t,deathTick:-1,hueAtBirth:hue,
+      treeAtBirth:encodeBits(tree),birthsAttempted:0,birthsSucceeded:0});
+    return o;
+  }
+  addCell(o,path,t){
+    const rec=o.layout.byPath.get(path);
+    const idx=worldXY(rec.px,rec.pz,o.facing,o.rx,o.ry,this.W,this.H);
+    o.built.set(path,idx);
+    this.occ[idx]=o;
+  }
+  initPopulation(){
+    const cfg=this.cfg,W=this.W,H=this.H;
+    const rng=this.dice('init');
+    for(let i=0;i<cfg.initN;i++){
+      let idx; do{ idx=Math.floor(rng()*W*H); }while(this.occ[idx]);
+      const hue=rng(), facing=Math.floor(rng()*4);
+      this.makeOrg('U'+i,this.founderTree(),hue,facing,idx%W,Math.floor(idx/W),0,null);
+    }
+  }
+  step(){
+    const t=++this.tick,cfg=this.cfg,W=this.W,H=this.H,occ=this.occ,N=W*H;
+    // phase 1: production + byproduct exchange (all reads from start-of-tick state).
+    // absorbCap is per receiving cell per tick; canonical ascending emitter order keeps the
+    // cap's first-come allocation deterministic.
+    const led={influx:0,kept:0,emitted:0,absorbed:0,dissipated:0};
+    const capOn=isFinite(cfg.absorbCap);
+    const taken=capOn?(this._taken&&this._taken.length===N?this._taken.fill(0):(this._taken=new Float64Array(N))):null;
+    for(let idx=0;idx<N;idx++){
+      const o=occ[idx]; if(!o||o.bornTick>=t) continue;
+      const x=idx%W,y=(idx-idx%W)/W;
+      const nb=[y*W+((x+1)%W),y*W+((x+W-1)%W),((y+1)%H)*W+x,((y+H-1)%H)*W+x];
+      let f=1;
+      if(cfg.exposurePow>0){
+        // a face is living surface if empty, or foreign tissue weighted by match quality:
+        // kin/self contact smothers; a complementary interface breathes. This aligns the
+        // anti-flab pressure with the exchange reward instead of taxing it.
+        let open=0;
+        for(const j of nb){
+          const n=occ[j];
+          if(!n) open+=1;
+          else if(n!==o) open+=matchK(o.hue,n.hue,cfg);
+        }
+        f=Math.pow(open/4,cfg.exposurePow);
+      }
+      const keep=cfg.keep*f,emit=cfg.emit*f;
+      led.influx+=keep+emit;
+      o.pool+=keep; led.kept+=keep;
+      if(emit<=0) continue;
+      led.emitted+=emit;
+      let F=0;
+      for(const j of nb){ const n=occ[j]; if(n&&n!==o&&n.bornTick<t) F++; }
+      if(!F){ led.dissipated+=emit; continue; }
+      const share=emit/F;
+      for(const j of nb){
+        const n=occ[j]; if(!n||n===o||n.bornTick>=t) continue;
+        let gain=share*matchK(n.hue,o.hue,cfg);
+        if(capOn){ const room=cfg.absorbCap-taken[j]; if(gain>room) gain=room>0?room:0; taken[j]+=gain; }
+        n.pool+=gain; led.absorbed+=gain; led.dissipated+=share-gain;
+      }
+    }
+    this.ledger=led;
+    // phase 2: growth — reserve within org budget, contest cells, winners pay
+    const attempts=[];
+    for(const o of this.orgs){
+      if(o.state!=='growing') continue;
+      let budget=o.pool;
+      for(const rec of o.layout.cells){
+        if(rec.path===''||o.built.has(rec.path)) continue;
+        if(!o.built.has(rec.parentPath)) continue;
+        const idx=worldXY(rec.px,rec.pz,o.facing,o.rx,o.ry,W,H);
+        if(occ[idx]) continue; // blocked: bud waits
+        if(budget>=cfg.cellCost){ budget-=cfg.cellCost;
+          attempts.push({o,path:rec.path,idx}); }
+      }
+    }
+    const byDest=new Map();
+    for(const a of attempts){ let l=byDest.get(a.idx); if(!l){l=[];byDest.set(a.idx,l);} l.push(a); }
+    for(const [idx,list] of byDest){
+      let win=list[0];
+      if(list.length>1){
+        list.sort((a,b)=>a.o.id<b.o.id?-1:a.o.id>b.o.id?1:(a.path<b.path?-1:1));
+        const rng=this.dice('grow|'+t+'|'+idx);
+        win=list[Math.floor(rng()*list.length)];
+      }
+      win.o.pool-=cfg.cellCost;
+      const rec=win.o.layout.byPath.get(win.path);
+      win.o.built.set(win.path,idx); occ[idx]=win.o;
+      win.o.grew=true;
+      // cells built this tick are inert until next tick (bornTick check uses org-level
+      // granularity: track per-cell activation via a birth map)
+      (win.o.freshCells||(win.o.freshCells=new Set())).add(win.path);
+    }
+    // phase 3: reproduction — hardened orgs, one seed attempt per tick
+    const seeds=[];
+    for(const o of this.orgs){
+      if(o.state!=='hardened'||o.pool<cfg.seedCost) continue;
+      o.pool-=cfg.seedCost;
+      const ord=o.ord++;
+      const h=cyrb128(o.id+'·'+ord);
+      const id=h[0].toString(36)+'-'+h[1].toString(36);
+      const rr=this.rerolls[id]||{g:0,j:0};
+      const grng=this.dice(id+'|genes|'+(rr.g||0));
+      const tree=cloneTree(o.tree);
+      if(cfg.bodyMode!=='point'&&grng()<cfg.muTree) mutateTree(tree,grng,cfg);
+      let hue=o.hue;
+      if(grng()<cfg.muHue){
+        const u1=grng(),u2=grng();
+        const z=Math.sqrt(-2*Math.log(1-u1))*Math.cos(2*Math.PI*u2);
+        hue=((hue+cfg.sigma*z)%1+1)%1;
+      }
+      const prng=this.dice(id+'|place|'+(rr.j||0));
+      let lx=o.rx,ly=o.ry;
+      if(cfg.seedFrom==='tip'){ // launch from a built tip: reach disperses further
+        const tips=[];
+        for(const [p,ci] of o.built)
+          if(!o.built.has(p+'0')&&!o.built.has(p+'1')&&!o.built.has(p+'2')) tips.push(ci);
+        if(tips.length){ const ci=tips[Math.floor(prng()*tips.length)]; lx=ci%W; ly=(ci-ci%W)/W; }
+      }
+      const span=2*cfg.D+1,count=span*span-1,center=(span*span-1)>>1;
+      let k=Math.floor(prng()*count); if(k>=center)k++;
+      const dx=(k%span)-cfg.D,dy=Math.floor(k/span)-cfg.D;
+      const idx=((ly+dy+H)%H)*W+((lx+dx+W)%W);
+      const facing=Math.floor(prng()*4);
+      const rec=this.records.get(o.id); if(rec) rec.birthsAttempted++;
+      seeds.push({o,id,tree,hue,facing,idx});
+    }
+    const bySeed=new Map();
+    for(const s of seeds){ let l=bySeed.get(s.idx); if(!l){l=[];bySeed.set(s.idx,l);} l.push(s); }
+    for(const [idx,list] of bySeed){
+      if(occ[idx]) continue; // occupied: all fail, energy spent
+      let win=list[0];
+      if(list.length>1){
+        list.sort((a,b)=>a.id<b.id?-1:1);
+        const rng=this.dice('root|'+t+'|'+idx);
+        win=list[Math.floor(rng()*list.length)];
+      }
+      const child=this.makeOrg(win.id,win.tree,win.hue,win.facing,idx%W,(idx-idx%W)/W,t,win.o.id);
+      if(cfg.dockReserve>0){ // dowry unlocked by docking beside complementary tissue
+        const x=idx%W,y=(idx-idx%W)/W;
+        let sum=0;
+        for(const j of [y*W+((x+1)%W),y*W+((x+W-1)%W),((y+1)%H)*W+x,((y+H-1)%H)*W+x]){
+          const n=occ[j]; if(n&&n!==child) sum+=matchK(child.hue,n.hue,cfg);
+        }
+        child.pool+=cfg.dockReserve*Math.min(1,sum/2);
+      }
+      const pr=this.records.get(win.o.id); if(pr) pr.birthsSucceeded++;
+    }
+    // phase 4: lifecycle
+    for(const o of this.orgs){
+      if(o.freshCells) o.freshCells=null;
+      if(cfg.upkeep>0&&o.bornTick<t){
+        o.pool-=cfg.upkeep*o.built.size;
+        if(o.pool<0){
+          if(cfg.dieback){ // wither: shed the deepest built tip, clamp, survive the tick
+            let shed=null;
+            for(const p of o.built.keys()){
+              if(o.built.has(p+'0')||o.built.has(p+'1')||o.built.has(p+'2')) continue;
+              if(p==='') continue; // root sheds last, via the 0-cells death below
+              if(!shed||p.length>shed.length||(p.length===shed.length&&p>shed)) shed=p;
+            }
+            if(shed!==null){
+              this.occ[o.built.get(shed)]=null; o.built.delete(shed); o.pool=0;
+            } else { this.kill(o,t); continue; } // only the root left
+          } else { this.kill(o,t); continue; }
+        }
+      }
+      if(o.state==='growing'){
+        if(o.bornTick===t||o.grew) o.grace=0; else o.grace++;
+        o.grew=false;
+        if(o.built.size===o.planSize) this.harden(o);
+        else if(o.grace>=cfg.gracePeriod){
+          if(o.built.size/o.planSize>=cfg.minExpression) this.harden(o);
+          else this.kill(o,t);
+        }
+      } else if(o.state==='hardened'){
+        o.age++;
+        if(o.age>=cfg.lifespan+cfg.lifespanPerCell*o.built.size) this.kill(o,t);
+      }
+    }
+    this.orgs=this.orgs.filter(o=>o.state!=='dead');
+  }
+  harden(o){ o.state='hardened'; o.age=0; }
+  kill(o,t){
+    for(const idx of o.built.values()) this.occ[idx]=null;
+    o.state='dead';
+    const r=this.records.get(o.id); if(r) r.deathTick=t;
+  }
+  population(){ return this.orgs.length; }
+  cellCount(){ let n=0; for(const o of this.orgs) n+=o.built.size; return n; }
+  toJSON(){
+    return {tick:this.tick,
+      orgs:this.orgs.map(o=>({id:o.id,hue:o.hue,facing:o.facing,rx:o.rx,ry:o.ry,
+        tree:encodeBits(o.tree),state:o.state,grace:o.grace,age:o.age,pool:o.pool,
+        bornTick:o.bornTick,ord:o.ord,parentId:o.parentId,grew:o.grew,
+        builtPaths:[...o.built.keys()]}))};
+  }
+  static fromJSON(cfg,rerolls,data,records){
+    const sim=new Sim(cfg,rerolls,{skipInit:true});
+    sim.tick=data.tick;
+    if(records) sim.records=records;
+    for(const d of data.orgs){
+      const o={id:d.id,hue:d.hue,facing:d.facing,rx:d.rx,ry:d.ry,tree:decodeBits(d.tree),
+        state:d.state,grace:d.grace,age:d.age,grew:d.grew,pool:d.pool,bornTick:d.bornTick,
+        ord:d.ord,parentId:d.parentId};
+      o.layout=layoutTree(o.tree); o.planSize=o.layout.cells.length;
+      o.built=new Map();
+      for(const p of d.builtPaths){
+        const rec=o.layout.byPath.get(p);
+        const idx=worldXY(rec.px,rec.pz,o.facing,o.rx,o.ry,sim.W,sim.H);
+        o.built.set(p,idx); sim.occ[idx]=o;
+      }
+      sim.orgs.push(o);
+    }
+    return sim;
+  }
+}
+
+// ---------- statistics ----------
+function contactEdges(sim){ // foreign tissue-contact edges, each once (right+down)
+  const W=sim.W,H=sim.H,occ=sim.occ,edges=[];
+  for(let y=0;y<H;y++) for(let x=0;x<W;x++){
+    const o=occ[y*W+x]; if(!o) continue;
+    const r=occ[y*W+((x+1)%W)],d=occ[((y+1)%H)*W+x];
+    if(r&&r!==o) edges.push([o,r]);
+    if(d&&d!==o) edges.push([o,d]);
+  }
+  return edges;
+}
+function contactAssort(sim,nPerm){ // mean m over contacts minus org-hue-permutation null
+  nPerm=nPerm||10;
+  const cfg=sim.cfg,edges=contactEdges(sim);
+  if(!edges.length) return {cA:0,mContact:0,edges:0};
+  let mReal=0;
+  for(const [a,b] of edges) mReal+=matchK(a.hue,b.hue,cfg);
+  mReal/=edges.length;
+  const hues=sim.orgs.map(o=>o.hue);
+  const slot=new Map(); sim.orgs.forEach((o,i)=>slot.set(o,i));
+  let nullSum=0;
+  for(let p=0;p<nPerm;p++){
+    const rng=sim.dice('null|'+sim.tick+'|'+p);
+    const perm=hues.slice();
+    for(let i=perm.length-1;i>0;i--){ const j=Math.floor(rng()*(i+1));
+      const tmp=perm[i]; perm[i]=perm[j]; perm[j]=tmp; }
+    let m=0;
+    for(const [a,b] of edges) m+=matchK(perm[slot.get(a)],perm[slot.get(b)],cfg);
+    nullSum+=m/edges.length;
+  }
+  return {cA:mReal-nullSum/nPerm,mContact:mReal,edges:edges.length};
+}
+function nematic(hues){
+  if(!hues.length) return {R2:0,phi:0};
+  let c=0,s=0;
+  for(const h of hues){ c+=Math.cos(4*Math.PI*h); s+=Math.sin(4*Math.PI*h); }
+  const R2=Math.sqrt(c*c+s*s)/hues.length;
+  let phi=Math.atan2(s,c)/(4*Math.PI); phi=((phi%0.5)+0.5)%0.5;
+  return {R2,phi};
+}
+function resultant1(hues){
+  if(!hues.length) return 0;
+  let c=0,s=0;
+  for(const h of hues){ c+=Math.cos(2*Math.PI*h); s+=Math.sin(2*Math.PI*h); }
+  return Math.sqrt(c*c+s*s)/hues.length;
+}
+function metricsOf(sim){
+  const hues=sim.orgs.map(o=>o.hue);
+  const {cA,mContact,edges}=contactAssort(sim);
+  const {R2,phi}=nematic(hues);
+  const cells=sim.cellCount();
+  const led=sim.ledger;
+  return {tick:sim.tick,orgs:sim.orgs.length,cells,
+    meanCells:sim.orgs.length?cells/sim.orgs.length:0,
+    cA,mContact,edges,R2,phi,R1:resultant1(hues),
+    fluxShare:led.influx?led.absorbed/led.influx:0};
+}
+
+return {defaults,cyrb128,sfc32,dice,circDist,matchK,
+  newNode,cloneTree,countNodes,encodeBits,decodeBits,layoutTree,eligibleSites,
+  growAt,mutateTree,worldXY,SLOT_FACING,Sim,
+  contactEdges,contactAssort,nematic,resultant1,metricsOf};
+})();
+if(typeof module!=='undefined') module.exports=C2;
+// ==== COADAPT2 CORE END ====
+</script>
+<script src="coadapt-2-ui.js"></script>
+</body>
+</html>

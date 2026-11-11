@@ -240,8 +240,15 @@ class Sim {
       const nb=[y*W+((x+1)%W),y*W+((x+W-1)%W),((y+1)%H)*W+x,((y+H-1)%H)*W+x];
       let f=1;
       if(cfg.exposurePow>0){
+        // a face is living surface if empty, or foreign tissue weighted by match quality:
+        // kin/self contact smothers; a complementary interface breathes. This aligns the
+        // anti-flab pressure with the exchange reward instead of taxing it.
         let open=0;
-        for(const j of nb) if(!occ[j]) open++;
+        for(const j of nb){
+          const n=occ[j];
+          if(!n) open+=1;
+          else if(n!==o) open+=matchK(o.hue,n.hue,cfg);
+        }
         f=Math.pow(open/4,cfg.exposurePow);
       }
       const keep=cfg.keep*f,emit=cfg.emit*f;
