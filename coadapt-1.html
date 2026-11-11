@@ -449,6 +449,32 @@ if(typeof module!=='undefined') module.exports=C1;
       for(const idx of o.built.values())
         ctx.fillRect((idx%cfg.W)*px,Math.floor(idx/cfg.W)*px,px,px);
     }
+    // legibility pass (visual only): dark silhouettes around each organism;
+    // white seams on foreign contacts, brightness = match quality (where energy flows)
+    const occ=sim.occ,W=cfg.W,H=cfg.H,et=Math.max(1,Math.round(px/4));
+    for(let y=0;y<H;y++) for(let x=0;x<W;x++){
+      const o=occ[y*W+x]; if(!o) continue;
+      const r=occ[y*W+((x+1)%W)],d=occ[((y+1)%H)*W+x];
+      if(r!==o){
+        const m=r?C1.matchK(o.hue,r.hue,cfg):0;
+        ctx.fillStyle=r&&m>0?'rgba(255,255,255,'+(0.9*m)+')':'rgba(0,0,0,0.65)';
+        ctx.fillRect((x+1)*px-et,y*px,et,px);
+      }
+      if(d!==o){
+        const m=d?C1.matchK(o.hue,d.hue,cfg):0;
+        ctx.fillStyle=d&&m>0?'rgba(255,255,255,'+(0.9*m)+')':'rgba(0,0,0,0.65)';
+        ctx.fillRect(x*px,(y+1)*px-et,px,et);
+      }
+      const l=occ[y*W+((x+W-1)%W)],u=occ[((y+H-1)%H)*W+x];
+      if(l!==o&&!l){ ctx.fillStyle='rgba(0,0,0,0.65)'; ctx.fillRect(x*px,y*px,et,px); }
+      if(u!==o&&!u){ ctx.fillStyle='rgba(0,0,0,0.65)'; ctx.fillRect(x*px,y*px,px,et); }
+    }
+    // root marker: each organism's origin cell gets a small dot
+    ctx.fillStyle='rgba(255,255,255,0.45)';
+    for(const o of sim.orgs){
+      const c=Math.max(2,px>>2);
+      ctx.fillRect(o.rx*px+(px-c)/2,o.ry*px+(px-c)/2,c,c);
+    }
     if(force||sim.tick%60===0||!lastM) lastM=C1.metricsOf(sim);
     const m=lastM;
     hud.textContent='t '+sim.tick+'  orgs '+m.orgs+'  cells '+m.cells+'  mean '+m.meanCells.toFixed(1)
