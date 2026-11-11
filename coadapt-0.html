@@ -1,0 +1,312 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>coadapt-0</title>
+<style>
+  body{margin:0;background:#0a0a0c;color:#9a9aa0;font:12px/1.4 monospace;display:flex;flex-direction:column;align-items:center}
+  #hud{padding:6px;white-space:pre}
+  canvas{image-rendering:pixelated}
+  #row{display:flex;gap:12px;align-items:flex-start;padding:6px}
+  button{background:#1a1a20;color:#9a9aa0;border:1px solid #333;font:inherit;padding:2px 8px}
+</style>
+</head>
+<body>
+<div id="hud">loading</div>
+<div id="row">
+  <canvas id="world"></canvas>
+  <div>
+    <canvas id="clock" width="140" height="140"></canvas><br>
+    <button id="pause">pause</button>
+    <button id="step1">step</button>
+    <button id="speed">speed x4</button>
+  </div>
+</div>
+<script>
+// ==== COADAPT CORE BEGIN ====
+'use strict';
+const CO = (() => {
+
+// ---------- config: every value a dial ----------
+function defaults(){ return {
+  worldSeed: 1, W: 96, H: 96,
+  b0: 1,          // abiotic income per tick (lone viability: lifespan*b0/seedCost births)
+  s: 4,           // interaction strength; the dimensionless dial is s/b0
+  w: 0.25,        // kernel width; anti mode requires w <= 0.5 (anti-reflexivity)
+  kernelMode: 'anti', // 'anti' (peaks antipodal) | 'self' (T1-violation control)
+  seedCost: 64, lifespan: 256, D: 4, E0: 0,
+  mu: 0.01, sigma: 0.05,
+  initMode: 'uniform', // 'uniform' | 'single' | 'pair'
+  initN: 200,
+  freezeTag: null, // experimental clamp (S2): offspring of this tag never mutate
+}; }
+
+// ---------- keyed dice: verbatim from godsroll-3 ----------
+function cyrb128(str){
+  let h1=1779033703,h2=3144134277,h3=1013904242,h4=2773480762;
+  for(let i=0;i<str.length;i++){ const k=str.charCodeAt(i);
+    h1=h2^Math.imul(h1^k,597399067); h2=h3^Math.imul(h2^k,2869860233);
+    h3=h4^Math.imul(h3^k,951274213); h4=h1^Math.imul(h4^k,2716044179); }
+  h1=Math.imul(h3^(h1>>>18),597399067); h2=Math.imul(h4^(h2>>>22),2869860233);
+  h3=Math.imul(h1^(h3>>>17),951274213); h4=Math.imul(h2^(h4>>>19),2716044179);
+  return [(h1^h2^h3^h4)>>>0,(h2^h1)>>>0,(h3^h1)>>>0,(h4^h1)>>>0];
+}
+function sfc32(a,b,c,d){ return function(){
+  a>>>=0;b>>>=0;c>>>=0;d>>>=0; let t=(a+b)|0; a=b^(b>>>9); b=(c+(c<<3))|0;
+  c=(c<<21)|(c>>>11); d=(d+1)|0; t=(t+d)|0; c=(c+t)|0; return (t>>>0)/4294967296; }; }
+function dice(worldSeed,key){ const h=cyrb128(worldSeed+'§'+key); return sfc32(h[0],h[1],h[2],h[3]); }
+
+// ---------- match kernel ----------
+function circDist(a,b){ let d=Math.abs(a-b); return d>0.5?1-d:d; }
+function matchK(a,b,cfg){
+  const d=circDist(a,b);
+  const v=cfg.kernelMode==='self'?1-d/cfg.w:1-Math.abs(d-0.5)/cfg.w;
+  return v>0?v:0;
+}
+
+// ---------- simulation ----------
+class Sim {
+  constructor(cfg,rerolls,opts){
+    if(cfg.kernelMode==='anti'&&cfg.w>0.5) throw new Error('w>0.5 breaks anti-reflexivity (T1)');
+    this.cfg=cfg; this.W=cfg.W; this.H=cfg.H; this.rerolls=rerolls||{};
+    this.tick=0;
+    this.grid=new Array(this.W*this.H).fill(null);
+    this.records=new Map(); // observational only; physics never reads it; outside snapshots
+    if(!(opts&&opts.skipInit)) this.initPopulation();
+  }
+  dice(key){ return dice(this.cfg.worldSeed,key); }
+  addFounder(id,x,y,hue,tag){
+    const o={id,x,y,hue,energy:this.cfg.E0,bornTick:0,ord:0,tag,parentId:null};
+    this.grid[y*this.W+x]=o;
+    this.records.set(id,{parentId:null,tag,bornTick:0,deathTick:-1,
+      birthsAttempted:0,birthsSucceeded:0,hueAtBirth:hue});
+  }
+  initPopulation(){
+    const cfg=this.cfg,W=this.W,H=this.H;
+    if(cfg.initMode==='single'){ this.addFounder('R',W>>1,H>>1,0,'R'); }
+    else if(cfg.initMode==='pair'){
+      this.addFounder('RA',W>>2,H>>1,0,'A');
+      this.addFounder('RB',3*(W>>2),H>>1,0.5,'B');
+    } else {
+      const rng=this.dice('init');
+      for(let i=0;i<cfg.initN;i++){
+        let idx; do{ idx=Math.floor(rng()*W*H); }while(this.grid[idx]);
+        this.addFounder('U'+i,idx%W,Math.floor(idx/W),rng(),'U'+i);
+      }
+    }
+  }
+  step(){
+    const t=++this.tick,cfg=this.cfg,W=this.W,H=this.H,grid=this.grid,N=W*H;
+    // phase 1: income (hues immutable within a tick, so order cannot matter)
+    for(let idx=0;idx<N;idx++){
+      const o=grid[idx]; if(!o||o.bornTick>=t) continue;
+      let inc=cfg.b0;
+      if(cfg.s>0){
+        const x=o.x,y=o.y;
+        const n0=grid[y*W+((x+1)%W)],n1=grid[y*W+((x+W-1)%W)],
+              n2=grid[((y+1)%H)*W+x],n3=grid[((y+H-1)%H)*W+x];
+        if(n0&&n0.bornTick<t) inc+=cfg.s*matchK(o.hue,n0.hue,cfg);
+        if(n1&&n1.bornTick<t) inc+=cfg.s*matchK(o.hue,n1.hue,cfg);
+        if(n2&&n2.bornTick<t) inc+=cfg.s*matchK(o.hue,n2.hue,cfg);
+        if(n3&&n3.bornTick<t) inc+=cfg.s*matchK(o.hue,n3.hue,cfg);
+      }
+      o.energy+=inc;
+    }
+    // phase 2: reproduction — energy spent whether or not the birth lands (no refunds)
+    const attempts=[];
+    const span=2*cfg.D+1,count=span*span-1,center=(span*span-1)>>1;
+    for(let idx=0;idx<N;idx++){
+      const o=grid[idx]; if(!o||o.bornTick>=t||o.energy<cfg.seedCost) continue;
+      o.energy-=cfg.seedCost;
+      const ord=o.ord++;
+      const h=cyrb128(o.id+'·'+ord);
+      const id=h[0].toString(36)+'-'+h[1].toString(36);
+      const rr=this.rerolls[id]||{g:0,j:0};
+      const grng=this.dice(id+'|genes|'+(rr.g||0));
+      let hue=o.hue;
+      const effMu=(cfg.freezeTag!==null&&o.tag===cfg.freezeTag)?0:cfg.mu;
+      if(grng()<effMu){
+        const u1=grng(),u2=grng();
+        const z=Math.sqrt(-2*Math.log(1-u1))*Math.cos(2*Math.PI*u2);
+        hue=((hue+cfg.sigma*z)%1+1)%1;
+      }
+      const prng=this.dice(id+'|place|'+(rr.j||0));
+      let k=Math.floor(prng()*count); if(k>=center)k++;
+      const dx=(k%span)-cfg.D,dy=Math.floor(k/span)-cfg.D;
+      const dest=((o.y+dy+H)%H)*W+((o.x+dx+W)%W);
+      const rec=this.records.get(o.id); if(rec) rec.birthsAttempted++;
+      attempts.push({po:o,id,hue,dest});
+    }
+    const byDest=new Map();
+    for(const a of attempts){ let l=byDest.get(a.dest); if(!l){l=[];byDest.set(a.dest,l);} l.push(a); }
+    for(const [dest,list] of byDest){
+      if(grid[dest]) continue; // occupied at phase start: every attempt there fails
+      let win=list[0];
+      if(list.length>1){
+        list.sort((a,b)=>a.id<b.id?-1:1);
+        const rng=this.dice('claim|'+t+'|'+dest);
+        win=list[Math.floor(rng()*list.length)];
+      }
+      const child={id:win.id,x:dest%W,y:(dest-dest%W)/W,hue:win.hue,energy:cfg.E0,
+        bornTick:t,ord:0,tag:win.po.tag,parentId:win.po.id};
+      grid[dest]=child;
+      this.records.set(win.id,{parentId:win.po.id,tag:child.tag,bornTick:t,deathTick:-1,
+        birthsAttempted:0,birthsSucceeded:0,hueAtBirth:win.hue});
+      const pr=this.records.get(win.po.id); if(pr) pr.birthsSucceeded++;
+    }
+    // phase 3: death — deterministic, no dice
+    for(let idx=0;idx<N;idx++){
+      const o=grid[idx]; if(!o) continue;
+      if(t-o.bornTick>=cfg.lifespan){
+        grid[idx]=null;
+        const r=this.records.get(o.id); if(r) r.deathTick=t;
+      }
+    }
+  }
+  population(){ let n=0; for(const o of this.grid) if(o) n++; return n; }
+  individuals(){ const out=[]; for(const o of this.grid) if(o) out.push(o); return out; }
+  toJSON(){ return {tick:this.tick,
+    pop:this.individuals().map(o=>({id:o.id,x:o.x,y:o.y,hue:o.hue,energy:o.energy,
+      bornTick:o.bornTick,ord:o.ord,tag:o.tag,parentId:o.parentId}))}; }
+  static fromJSON(cfg,rerolls,data,records){
+    const sim=new Sim(cfg,rerolls,{skipInit:true});
+    sim.tick=data.tick;
+    if(records) sim.records=records;
+    for(const d of data.pop) sim.grid[d.y*sim.W+d.x]={...d};
+    return sim;
+  }
+}
+
+// ---------- statistics ----------
+function pairList(sim){ // each adjacent occupied pair exactly once (right + down edges, torus)
+  const W=sim.W,H=sim.H,grid=sim.grid,pairs=[];
+  for(let y=0;y<H;y++) for(let x=0;x<W;x++){
+    const o=grid[y*W+x]; if(!o) continue;
+    const r=grid[y*W+((x+1)%W)]; if(r) pairs.push([y*W+x,y*W+((x+1)%W)]);
+    const d=grid[((y+1)%H)*W+x]; if(d) pairs.push([y*W+x,((y+1)%H)*W+x]);
+  }
+  return pairs;
+}
+function assortment(sim,nPerm){
+  nPerm=nPerm||20;
+  const grid=sim.grid,cfg=sim.cfg,pairs=pairList(sim);
+  if(!pairs.length) return {A:0,mReal:0,pairs:0};
+  let mReal=0;
+  for(const [i,j] of pairs) mReal+=matchK(grid[i].hue,grid[j].hue,cfg);
+  mReal/=pairs.length;
+  const occ=[],hues=[];
+  for(let idx=0;idx<grid.length;idx++) if(grid[idx]){ occ.push(idx); hues.push(grid[idx].hue); }
+  const slot=new Map(); for(let k=0;k<occ.length;k++) slot.set(occ[k],k);
+  let nullSum=0;
+  for(let p=0;p<nPerm;p++){
+    const rng=sim.dice('null|'+sim.tick+'|'+p);
+    const perm=hues.slice();
+    for(let i=perm.length-1;i>0;i--){ const j=Math.floor(rng()*(i+1));
+      const tmp=perm[i]; perm[i]=perm[j]; perm[j]=tmp; }
+    let m=0;
+    for(const [i,j] of pairs) m+=matchK(perm[slot.get(i)],perm[slot.get(j)],cfg);
+    nullSum+=m/pairs.length;
+  }
+  return {A:mReal-nullSum/nPerm,mReal,pairs:pairs.length};
+}
+function nematic(hues){ // hue structure has period 1/2 under an antipodal kernel
+  if(!hues.length) return {R2:0,phi:0};
+  let c=0,s=0;
+  for(const h of hues){ c+=Math.cos(4*Math.PI*h); s+=Math.sin(4*Math.PI*h); }
+  const R2=Math.sqrt(c*c+s*s)/hues.length;
+  let phi=Math.atan2(s,c)/(4*Math.PI); phi=((phi%0.5)+0.5)%0.5;
+  return {R2,phi};
+}
+function axisDist(p1,p2){ const d=Math.abs(p1-p2)%0.5; return Math.min(d,0.5-d); }
+function localR2(sim,radius){
+  radius=radius||8;
+  const W=sim.W,H=sim.H,grid=sim.grid;
+  let sum=0,n=0;
+  for(let y=0;y<H;y++) for(let x=0;x<W;x++){
+    if(!grid[y*W+x]) continue;
+    let c=0,s=0,m=0;
+    for(let dy=-radius;dy<=radius;dy++) for(let dx=-radius;dx<=radius;dx++){
+      const o=grid[((y+dy+H)%H)*W+((x+dx+W)%W)]; if(!o) continue;
+      c+=Math.cos(4*Math.PI*o.hue); s+=Math.sin(4*Math.PI*o.hue); m++;
+    }
+    if(m){ sum+=Math.sqrt(c*c+s*s)/m; n++; }
+  }
+  return n?sum/n:0;
+}
+function circMean(hues){
+  let c=0,s=0;
+  for(const h of hues){ c+=Math.cos(2*Math.PI*h); s+=Math.sin(2*Math.PI*h); }
+  let m=Math.atan2(s,c)/(2*Math.PI); return ((m%1)+1)%1;
+}
+function tagMeans(sim){ // pair-mode cluster means
+  const by=new Map();
+  for(const o of sim.individuals()){ let l=by.get(o.tag); if(!l){l=[];by.set(o.tag,l);} l.push(o.hue); }
+  const out={};
+  for(const [tag,hs] of by) out[tag]={mean:circMean(hs),n:hs.length};
+  return out;
+}
+function metricsOf(sim,withLocal){
+  const hues=sim.individuals().map(o=>o.hue);
+  const {A,mReal,pairs}=assortment(sim);
+  const {R2,phi}=nematic(hues);
+  const m={tick:sim.tick,pop:hues.length,A,mReal,pairs,R2,phi};
+  if(withLocal) m.localR2=localR2(sim);
+  if(sim.cfg.initMode==='pair') m.tags=tagMeans(sim);
+  return m;
+}
+
+return {defaults,cyrb128,sfc32,dice,circDist,matchK,Sim,
+  pairList,assortment,nematic,axisDist,localR2,circMean,tagMeans,metricsOf};
+})();
+if(typeof module!=='undefined') module.exports=CO;
+// ==== COADAPT CORE END ====
+</script>
+<script>
+'use strict';
+(function(){
+  const cfg=CO.defaults();
+  const q=new URLSearchParams(location.search).get('cfg');
+  if(q) Object.assign(cfg,JSON.parse(q));
+  const sim=new CO.Sim(cfg);
+  const canvas=document.getElementById('world'),ctx=canvas.getContext('2d');
+  const px=Math.max(2,Math.floor(Math.min((innerWidth-200)/cfg.W,(innerHeight-120)/cfg.H)));
+  canvas.width=cfg.W*px; canvas.height=cfg.H*px;
+  const clock=document.getElementById('clock'),cctx=clock.getContext('2d');
+  const hud=document.getElementById('hud');
+  let paused=false,speed=4,lastM=null;
+  document.getElementById('pause').onclick=e=>{paused=!paused;e.target.textContent=paused?'play':'pause';};
+  document.getElementById('step1').onclick=()=>{sim.step();draw(true);};
+  document.getElementById('speed').onclick=e=>{speed=speed>=64?1:speed*4;e.target.textContent='speed x'+speed;};
+  function draw(forceMetrics){
+    ctx.fillStyle='#0a0a0c'; ctx.fillRect(0,0,canvas.width,canvas.height);
+    for(const o of sim.individuals()){
+      ctx.fillStyle='hsl('+(o.hue*360)+',80%,55%)';
+      ctx.fillRect(o.x*px,o.y*px,px,px);
+    }
+    if(forceMetrics||sim.tick%120===0||!lastM) lastM=CO.metricsOf(sim,sim.tick%960===0);
+    const m=lastM;
+    hud.textContent='t '+sim.tick+'  pop '+m.pop+'  A '+m.A.toFixed(3)+'  m '+m.mReal.toFixed(3)
+      +'  R2 '+m.R2.toFixed(3)+'  axis '+m.phi.toFixed(3)+(m.localR2!==undefined?'  localR2 '+m.localR2.toFixed(3):'');
+    cctx.fillStyle='#0a0a0c'; cctx.fillRect(0,0,140,140);
+    cctx.strokeStyle='#333'; cctx.beginPath(); cctx.arc(70,70,60,0,2*Math.PI); cctx.stroke();
+    for(const o of sim.individuals()){
+      const a=2*Math.PI*o.hue;
+      cctx.fillStyle='hsl('+(o.hue*360)+',80%,55%)';
+      cctx.fillRect(70+58*Math.cos(a)-1,70+58*Math.sin(a)-1,2,2);
+    }
+    const pa=2*Math.PI*m.phi; // axis line: hues phi and phi+0.5
+    cctx.strokeStyle='#888'; cctx.beginPath();
+    cctx.moveTo(70+66*Math.cos(pa),70+66*Math.sin(pa));
+    cctx.lineTo(70-66*Math.cos(pa),70-66*Math.sin(pa)); cctx.stroke();
+  }
+  function loop(){
+    if(!paused) for(let i=0;i<speed;i++) sim.step();
+    draw();
+    requestAnimationFrame(loop);
+  }
+  loop();
+})();
+</script>
+</body>
+</html>
