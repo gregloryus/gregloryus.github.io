@@ -63,6 +63,12 @@ function defaults(){ return {
   upkeep: 0,                 // energy per built cell per tick; pool < 0 starves the organism.
                              // With exposurePow this makes enclosure lethal rather than merely
                              // unprofitable — unless a complementary interface subsidizes it
+  dieback: 0,                // 1: starvation sheds the deepest built tip per tick (withering)
+                             // instead of killing the whole organism; death only at 0 cells
+  dockReserve: 0,            // seed dowry usable only when docked: establishing seed starts
+                             // with pool = dockReserve × min(1, Σmatch with adjacent foreign
+                             // tissue / 2). Paid from seedCost economics, wasted if undocked —
+                             // U22's glom-on made lawful (no energy minted)
   seedFrom: 'root',          // 'root' | 'tip': tips launch seeds, so reach disperses further
   D: 6,                      // seed dispersal radius (Chebyshev) from the launch cell
   muTree: 0.25, muHue: 0.25, sigma: 0.05,
@@ -330,7 +336,15 @@ class Sim {
         const rng=this.dice('root|'+t+'|'+idx);
         win=list[Math.floor(rng()*list.length)];
       }
-      this.makeOrg(win.id,win.tree,win.hue,win.facing,idx%W,(idx-idx%W)/W,t,win.o.id);
+      const child=this.makeOrg(win.id,win.tree,win.hue,win.facing,idx%W,(idx-idx%W)/W,t,win.o.id);
+      if(cfg.dockReserve>0){ // dowry unlocked by docking beside complementary tissue
+        const x=idx%W,y=(idx-idx%W)/W;
+        let sum=0;
+        for(const j of [y*W+((x+1)%W),y*W+((x+W-1)%W),((y+1)%H)*W+x,((y+H-1)%H)*W+x]){
+          const n=occ[j]; if(n&&n!==child) sum+=matchK(child.hue,n.hue,cfg);
+        }
+        child.pool+=cfg.dockReserve*Math.min(1,sum/2);
+      }
       const pr=this.records.get(win.o.id); if(pr) pr.birthsSucceeded++;
     }
     // phase 4: lifecycle
@@ -338,7 +352,19 @@ class Sim {
       if(o.freshCells) o.freshCells=null;
       if(cfg.upkeep>0&&o.bornTick<t){
         o.pool-=cfg.upkeep*o.built.size;
-        if(o.pool<0){ this.kill(o,t); continue; }
+        if(o.pool<0){
+          if(cfg.dieback){ // wither: shed the deepest built tip, clamp, survive the tick
+            let shed=null;
+            for(const p of o.built.keys()){
+              if(o.built.has(p+'0')||o.built.has(p+'1')||o.built.has(p+'2')) continue;
+              if(p==='') continue; // root sheds last, via the 0-cells death below
+              if(!shed||p.length>shed.length||(p.length===shed.length&&p>shed)) shed=p;
+            }
+            if(shed!==null){
+              this.occ[o.built.get(shed)]=null; o.built.delete(shed); o.pool=0;
+            } else { this.kill(o,t); continue; } // only the root left
+          } else { this.kill(o,t); continue; }
+        }
       }
       if(o.state==='growing'){
         if(o.bornTick===t||o.grew) o.grace=0; else o.grace++;

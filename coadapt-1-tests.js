@@ -138,7 +138,7 @@ function stateStr(sim){ return JSON.stringify(sim.toJSON()); }
 // 10. new dials (exposure, size-lifespan, tip launch): deterministic, viable, ledger holds
 {
   const cfg=()=>Object.assign(C1.defaults(),{worldSeed:7,keep:0.75,emit:1.5,absorbCap:1.5,
-    seedCost:96,exposurePow:1,lifespanPerCell:24,seedFrom:'tip'});
+    seedCost:96,exposurePow:1,lifespanPerCell:24,seedFrom:'tip',upkeep:0.05,dieback:1,dockReserve:32});
   const a=runSim(cfg(),800),b=runSim(cfg(),800);
   let led=true;
   const l=a.ledger;
