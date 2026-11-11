@@ -95,6 +95,35 @@ far. Upkeep is doing the pruning that halos did in godsroll, but through energy 
 prohibition. Candidate refinement: starvation die-back (drop deepest cells when pool < 0
 instead of whole-organism death) would open space smoothly and remove the extinction cliff.
 
+## Addendum 2 (2026-11-11, late session): frontier results, the matched-face law, Stage 3
+
+**Frontier experiments** (`coadapt-1-frontier.js`, results `coadapt1-runs/frontier-*.json`):
+at equilibrium (30–100k ticks) the original vine regime degraded — world re-packed
+(open/cell → 1.0), monoculture drift returned (R1 > R2), flux fell to 1–4%, and dockReserve
+did not rescue it. Bodies DID elaborate (mean 25–28 cells, tree depth to 23 at 100k — the
+economy does grow anatomy). Body transplants were inconclusive in that degraded regime
+(deficit uncorrelated with Δφ — consistent with monoculture-drifted sources).
+
+**The realization that fixed it:** exposure and exchange were fighting over the same faces —
+the exposure law taxed contact, exactly what exchange rewards. THE MATCHED-FACE LAW: a face
+counts as living surface if empty OR foreign-weighted-by-match (kin/self contact smothers; a
+complementary interface breathes). One change aligns anti-flab pressure with partnership:
+mismatched packing starves, matched packing thrives. Equilibrium at 40k (2 seeds): flux
+12.6–13.2% (from 1–4%), R2 0.53–0.55 with R1 0.06–0.19 (no monoculture), ~520 organisms of
+mean 11 cells. This is the current best body-world regime and the coadapt-2 default.
+
+**Stage 3 shipped: `coadapt-2.html` + `coadapt-2-ui.js`** — the excavation build. Snapshots
+every 500 ticks, rewind scrubber, click-to-select with lineage/ancestor chain, reroll genes or
+journey on any organism (keyed per-event dice; reroll counters per birth identity), replay from
+before the birth, and a GHOST overlay rendering the abandoned timeline at the same tick so the
+divergence is visible. `coadapt-2-tests.js` (5 fixtures green) pins the reroll contract:
+no-reroll replay identical; past-invariance; locality at the birth tick; stream independence
+(journey reroll leaves genes unchanged); snapshot round-trip under rerolls. Two lawful
+subtleties the fixtures encode: a reroll may resample the SAME outcome (~40%: the mutation
+gate rolls "copy" again), and a divergent variant that dies young can leave zero trace —
+timelines can lawfully RECONVERGE (no litter in this world). If reconvergence should be rare,
+add a litter/memory channel (godsroll has one; port it in a later pass).
+
 ## Suggested immediate next steps
 
 1. Partner-choice mechanism: seeds launch from tips (shape → dispersal pattern) and/or a
