@@ -1,0 +1,113 @@
+src-ws11 done, pop 2255
+src-ws22 done, pop 2252
+src-ws33 done, pop 2263
+src-ws44 done, pop 2268
+src-ws55 done, pop 2250
+src-ws66 done, pop 2261
+SYM ws11 perf 3.81 m 0.455
+SYM ws22 perf 3.79 m 0.437
+SYM ws33 perf 3.80 m 0.450
+SYM ws44 perf 3.80 m 0.452
+SYM ws55 perf 3.80 m 0.441
+SYM ws66 perf 3.81 m 0.451
+ALLO 11x22  dphi 0.155  deficit -0.00
+ALLO 11x33  dphi 0.021  deficit 0.00
+ALLO 11x44  dphi 0.019  deficit 0.00
+ALLO 11x55  dphi 0.131  deficit 0.00
+ALLO 11x66  dphi 0.222  deficit -0.00
+ALLO 22x33  dphi 0.134  deficit 0.02
+ALLO 22x44  dphi 0.174  deficit -0.01
+ALLO 22x55  dphi 0.024  deficit 0.00
+ALLO 22x66  dphi 0.066  deficit 0.01
+ALLO 33x44  dphi 0.040  deficit 0.02
+ALLO 33x55  dphi 0.110  deficit 0.00
+ALLO 33x66  dphi 0.200  deficit -0.01
+ALLO 44x55  dphi 0.150  deficit -0.01
+ALLO 44x66  dphi 0.240  deficit -0.02
+ALLO 55x66  dphi 0.090  deficit 0.01
+s2-free-ws11 done, pop 2257
+s2-frozen-ws11 done, pop 2264
+s2-free-ws22 done, pop 2258
+s2-frozen-ws22 done, pop 2242
+s2-free-ws33 done, pop 2252
+s2-frozen-ws33 done, pop 2251
+s3 ws11 Δ10000  perf 3.81  deficit 0.00
+s3 ws11 Δ20000  perf 3.81  deficit 0.00
+s3 ws11 Δ50000  perf 3.80  deficit 0.01
+s3 ws22 Δ10000  perf 3.81  deficit -0.01
+s3 ws22 Δ20000  perf 3.82  deficit -0.02
+s3 ws22 Δ50000  perf 3.80  deficit -0.01
+s3 ws33 Δ10000  perf 3.81  deficit 0.01
+s3 ws33 Δ20000  perf 3.82  deficit -0.00
+s3 ws33 Δ50000  perf 3.81  deficit -0.00
+s4 ws11  A0 -0.037 -> -0.029  pop 2258
+s4 ws22  A0 -0.016 -> -0.023  pop 2258
+s4 ws33  A0 -0.020 -> -0.028  pop 2265
+s4 ws44  A0 -0.011 -> -0.027  pop 2261
+s4 ws55  A0 -0.025 -> -0.039  pop 2261
+s4 ws66  A0 -0.023 -> -0.032  pop 2249
+{
+ "s1": {
+  "rho": -0.7142857142857143,
+  "meanDeficit": 0.0015956279241208609,
+  "pass": false
+ },
+ "s2": [
+  {
+   "ws": 11,
+   "arm": "free",
+   "tracking": 0.5031193665383121,
+   "axisWander": 0.0016121283444643364,
+   "meanSpacingErr": 0.001609377283528095,
+   "survivedA": 1140,
+   "survivedB": 1117
+  },
+  {
+   "ws": 11,
+   "arm": "frozen",
+   "tracking": 0,
+   "axisWander": 0.0012793733061964296,
+   "meanSpacingErr": 0.0013918465693679204,
+   "survivedA": 1070,
+   "survivedB": 1194
+  },
+  {
+   "ws": 22,
+   "arm": "free",
+   "tracking": 0.06023185995221338,
+   "axisWander": 0.00014962327645706708,
+   "meanSpacingErr": 0.0021018820465452826,
+   "survivedA": 1132,
+   "survivedB": 1126
+  },
+  {
+   "ws": 22,
+   "arm": "frozen",
+   "tracking": 0,
+   "axisWander": 0.00029842761909626425,
+   "meanSpacingErr": 0.0008441347959089196,
+   "survivedA": 1130,
+   "survivedB": 1112
+  },
+  {
+   "ws": 33,
+   "arm": "free",
+   "tracking": 0.7027057450691747,
+   "axisWander": 0.004057179052898929,
+   "meanSpacingErr": 0.0017902415715072939,
+   "survivedA": 1134,
+   "survivedB": 1118
+  },
+  {
+   "ws": 33,
+   "arm": "frozen",
+   "tracking": 0,
+   "axisWander": 0.004175227817284188,
+   "meanSpacingErr": 0.0010797374646857017,
+   "survivedA": 1097,
+   "survivedB": 1154
+  }
+ ],
+ "s3": -0.08333333333333333,
+ "s4": false
+}
