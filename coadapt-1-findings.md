@@ -77,6 +77,24 @@ energy influx flowing through complementary interfaces; R2/R1 = pair structure v
   per Stage 1's lesson — saturated-arena birth rates are fitness-blind), archipelago on
   bodies, obligate-mutualism regime explored deliberately rather than accidentally.
 
+## Addendum (2026-11-11, same session): legibility + body-shape laws
+
+Viewer: organism silhouettes, glowing flux seams (brightness = match quality), root dots,
+dials panel + cfg paste box. New physics dials (all default-off): `exposurePow` (production ×
+(openFaces/4)^pow — punishes flabby interiors), `upkeep` (per-cell per-tick cost; starvation
+death — makes enclosure lethal, not just unprofitable), `lifespanPerCell` (big bodies live
+longer; the risk is the long immature build), `seedFrom:'tip'` (reach disperses further).
+
+Probe lessons: a production tax alone cannot create space in a space-limited world (packing
+returned, monoculture drifted back, flux died); upkeep too high → extinction cascade (packing
+outruns hue-sorting, everyone starves together). The balanced **vine regime**:
+`{"keep":0.75,"emit":1.5,"absorbCap":1.5,"seedCost":96,"lifespan":192,"lifespanPerCell":12,"exposurePow":1,"upkeep":0.05,"seedFrom":"tip"}`
+→ open faces/cell = 1.97 (straight-vine density exactly 2.0), R1 ≈ 0.05 (no monoculture),
+R2 0.32–0.44, cA up to 0.024 — the best spatial partner-assortment in any viable regime so
+far. Upkeep is doing the pruning that halos did in godsroll, but through energy rather than
+prohibition. Candidate refinement: starvation die-back (drop deepest cells when pool < 0
+instead of whole-organism death) would open space smoothly and remove the extinction cliff.
+
 ## Suggested immediate next steps
 
 1. Partner-choice mechanism: seeds launch from tips (shape → dispersal pattern) and/or a
