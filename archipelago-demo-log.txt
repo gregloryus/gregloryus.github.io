@@ -1,0 +1,2 @@
+ws3 spread@20k 0.120 spread@100k 0.122 spread@200k 0.105 axisJumps(>0.1/4k) 6 islandsAlive 16
+ws4 spread@20k 0.117 spread@100k 0.118 spread@200k 0.114 axisJumps(>0.1/4k) 0 islandsAlive 16
