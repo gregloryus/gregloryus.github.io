@@ -1,0 +1,31 @@
+shard 0/8: 30 runs
+skip s0.5-D1-mu0.002-ws101
+s0.5-D1-mu0.05-ws303  pop 1879  A -0.037  R2 0.601  localR2 0.666  phi 0.390  14s
+s0.5-D2-mu0.05-ws202  pop 1893  A -0.004  R2 0.828  localR2 0.842  phi 0.224  14s
+s0.5-D4-mu0.05-ws101  pop 1946  A -0.009  R2 0.909  localR2 0.912  phi 0.010  17s
+s0.5-D8-mu0.01-ws303  pop 1956  A -0.003  R2 0.973  localR2 0.973  phi 0.299  15s
+s0.5-D16-mu0.01-ws202  pop 1963  A 0.005  R2 0.983  localR2 0.983  phi 0.190  17s
+s1-D1-mu0.01-ws101  pop 2019  A -0.028  R2 0.892  localR2 0.921  phi 0.016  19s
+s1-D2-mu0.002-ws303  pop 2057  A 0.115  R2 0.502  localR2 0.645  phi 0.271  21s
+s1-D4-mu0.002-ws202  pop 2100  A -0.008  R2 0.997  localR2 0.997  phi 0.284  24s
+s1-D8-mu0.002-ws101  pop 2096  A -0.009  R2 0.998  localR2 0.998  phi 0.473  24s
+s1-D8-mu0.05-ws303  pop 2052  A 0.006  R2 0.906  localR2 0.907  phi 0.429  26s
+s1-D16-mu0.05-ws202  pop 2083  A -0.004  R2 0.924  localR2 0.924  phi 0.258  25s
+s2-D1-mu0.05-ws101  pop 2113  A -0.013  R2 0.725  localR2 0.780  phi 0.130  33s
+s2-D2-mu0.01-ws303  pop 2146  A 0.086  R2 0.690  localR2 0.824  phi 0.298  34s
+s2-D4-mu0.01-ws202  pop 2192  A -0.005  R2 0.986  localR2 0.986  phi 0.237  35s
+s2-D8-mu0.01-ws101  pop 2175  A 0.015  R2 0.991  localR2 0.991  phi 0.450  35s
+s2-D16-mu0.002-ws303  pop 2166  A -0.005  R2 0.997  localR2 0.997  phi 0.371  35s
+s4-D1-mu0.002-ws202  pop 2211  A 0.002  R2 0.918  localR2 0.942  phi 0.316  51s
+s4-D2-mu0.002-ws101  pop 2224  A -0.023  R2 0.998  localR2 0.998  phi 0.392  54s
+s4-D2-mu0.05-ws303  pop 2230  A 0.019  R2 0.915  localR2 0.920  phi 0.334  49s
+s4-D4-mu0.05-ws202  pop 2223  A -0.006  R2 0.920  localR2 0.922  phi 0.237  52s
+s4-D8-mu0.05-ws101  pop 2225  A 0.006  R2 0.940  localR2 0.941  phi 0.451  49s
+s4-D16-mu0.01-ws303  pop 2233  A 0.003  R2 0.988  localR2 0.988  phi 0.328  53s
+s8-D1-mu0.01-ws202  pop 2253  A 0.052  R2 0.687  localR2 0.746  phi 0.248  79s
+s8-D2-mu0.01-ws101  pop 2235  A -0.010  R2 0.985  localR2 0.985  phi 0.475  94s
+s8-D4-mu0.002-ws303  pop 2262  A -0.004  R2 0.999  localR2 0.999  phi 0.376  96s
+s8-D8-mu0.002-ws202  pop 2278  A 0.005  R2 0.995  localR2 0.995  phi 0.218  102s
+s8-D16-mu0.002-ws101  pop 2286  A 0.007  R2 0.998  localR2 0.998  phi 0.163  98s
+s8-D16-mu0.05-ws303  pop 2242  A 0.002  R2 0.946  localR2 0.946  phi 0.322  89s
+ctl-self-ws303  pop 2254  A 0.001  R2 0.991  localR2 0.991  phi 0.117  57s

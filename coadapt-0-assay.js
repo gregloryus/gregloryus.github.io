@@ -19,7 +19,7 @@ function loadCore(){
 const CO=loadCore();
 const ROOT=path.join(__dirname,'coadapt-assays');
 const W=48,H=48,SRC_T=100000,SRC_SEEDS=[11,22,33,44,55,66],S2_SEEDS=[11,22,33];
-const ARENA_T=5000,ARENA_N=400,ARENA_WIN=2500,DUMP_EVERY=10000,DELTAS=[10000,25000,50000];
+const ARENA_T=5000,ARENA_N=400,ARENA_WIN=2500,DUMP_EVERY=10000,DELTAS=[10000,20000,50000];
 
 function sweetCfg(){
   const agg=JSON.parse(fs.readFileSync(path.join(__dirname,'coadapt-runs','aggregate.json'),'utf8'));
