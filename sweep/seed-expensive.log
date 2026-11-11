@@ -1,0 +1,1 @@
+seed-expensive: t265 plants=1 popCV=0.000 genomes=1 dom=1 meanPlan=2 meanH=1 maxDeathAvalanche=1 deaths={"expired":1} 1s

@@ -1,0 +1,31 @@
+{
+ "overrides": {
+  "seedCost": 384
+ },
+ "worldSeed": 1,
+ "dims": {
+  "C": 97,
+  "S": 42,
+  "G": 169
+ },
+ "series": [
+  {
+   "t": 250,
+   "plants": 1,
+   "cells": 2,
+   "seeds": 0,
+   "genomes": 1,
+   "domShare": 1,
+   "meanPlan": 2,
+   "maxPlan": 2,
+   "meanH": 1,
+   "births": 1,
+   "deaths": {},
+   "litter": 0
+  }
+ ],
+ "deathHist": {
+  "0": 264,
+  "1": 1
+ }
+}

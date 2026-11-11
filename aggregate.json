@@ -1,0 +1,41 @@
+{
+  "format": "tbt-water-light-oee-probe-aggregate-v1",
+  "directory": "/workspace/scratch/7bf09e36d084/tbt-water-light-lab-1/analysis/oee-probes/long-baseline-100x70-1m",
+  "runs": 3,
+  "ticks": [
+    1000000
+  ],
+  "dimensions": [
+    "100x70"
+  ],
+  "scoringCaveat": "The proximity score averages finite-run sign/reliability diagnostics. It is a screen, not a formal OEE score or pass probability.",
+  "presets": [
+    {
+      "preset": "baseline",
+      "label": "water + exposure + 5/3/1 shade",
+      "runs": 3,
+      "shadowReplicates": 21,
+      "survivalFraction": 1,
+      "meanFinalPopulation": 98.66666666666667,
+      "meanFinalLiveGenomes": 38.333333333333336,
+      "meanFinalKnownGenomes": 1679,
+      "meanFinalGenomeLength": 36.46214924452667,
+      "meanFinalTotalNormalized": 75.9047619047619,
+      "medianFinalTotalNormalized": 80,
+      "meanFinalMedianNormalized": 1.5238095238095237,
+      "medianFinalMedianNormalized": 1.5,
+      "meanFinalNewActivity": 1.9874727211683734,
+      "meanRawSlopeLastHalf": 878.4301039355094,
+      "meanTotalNormalizedSlopeLastHalf": -7.514173701544713,
+      "meanMedianNormalizedSlopeLastHalf": 0.6155702255136861,
+      "meanPositiveNewFractionLastHalf": 0.9872635681018915,
+      "rawPositiveFraction": 0.6666666666666666,
+      "totalNormalizedPositiveFraction": 0.38095238095238093,
+      "medianNormalizedPositiveFraction": 0.7142857142857143,
+      "newActivityPersistentFraction": 1,
+      "allFourSignsFraction": 0.38095238095238093,
+      "lateQuarterBothNormalizedPositiveFraction": 0.3333333333333333,
+      "proximityScore": 0.7523809523809524
+    }
+  ]
+}

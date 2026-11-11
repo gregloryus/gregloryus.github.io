@@ -1,0 +1,362 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
+  <meta name="theme-color" content="#05090a">
+  <title>Simplant 20 · 3D TBT</title>
+  <style>
+    :root { color-scheme: dark; --ink:#edf5ef; --muted:#91a39a; --panel:rgba(6,12,12,.84); --line:rgba(181,214,193,.17); --green:#54b86a; --gold:#ffd866; }
+    * { box-sizing:border-box; }
+    html,body { width:100%; height:100%; margin:0; overflow:hidden; background:#05090a; }
+    body { font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace; color:var(--ink); overscroll-behavior:none; }
+    canvas { position:fixed; inset:0; display:block; width:100%; height:100%; touch-action:none; cursor:grab; }
+    canvas:active { cursor:grabbing; }
+    .top { position:fixed; z-index:2; top:max(10px,env(safe-area-inset-top)); left:10px; right:10px; display:flex; justify-content:space-between; align-items:flex-start; gap:10px; pointer-events:none; }
+    .panel { border:1px solid var(--line); border-radius:13px; background:var(--panel); box-shadow:0 14px 40px rgba(0,0,0,.28); backdrop-filter:blur(13px); -webkit-backdrop-filter:blur(13px); }
+    .identity { padding:10px 12px; }
+    h1 { margin:0; font-size:15px; line-height:1.2; letter-spacing:.08em; text-transform:uppercase; }
+    .sub { margin-top:4px; color:var(--muted); font-size:12px; line-height:1.35; }
+    .stats { display:grid; grid-template-columns:repeat(4,minmax(44px,auto)); gap:10px; padding:9px 11px; }
+    .stat b { display:block; font-size:13px; font-weight:700; }
+    .stat span { display:block; margin-top:2px; color:var(--muted); font-size:9px; letter-spacing:.07em; text-transform:uppercase; }
+    .dock { position:fixed; z-index:3; left:50%; bottom:max(10px,env(safe-area-inset-bottom)); transform:translateX(-50%); display:flex; gap:7px; align-items:center; width:min(770px,calc(100% - 18px)); padding:8px; overflow-x:auto; scrollbar-width:none; border:1px solid var(--line); border-radius:16px; background:var(--panel); box-shadow:0 16px 44px rgba(0,0,0,.4); backdrop-filter:blur(15px); -webkit-backdrop-filter:blur(15px); }
+    .dock::-webkit-scrollbar { display:none; }
+    button { flex:0 0 auto; min-height:46px; padding:0 14px; border:1px solid var(--line); border-radius:11px; background:rgba(255,255,255,.055); color:var(--ink); font:650 14px/1 ui-monospace,monospace; -webkit-tap-highlight-color:transparent; }
+    button:active { transform:translateY(1px); background:rgba(255,255,255,.11); }
+    button:focus-visible { outline:2px solid white; outline-offset:2px; }
+    .primary { min-width:72px; color:#06100a; background:#dff1e4; border-color:transparent; }
+    .light-on { color:var(--gold); border-color:rgba(255,216,102,.42); }
+    .divider { flex:0 0 1px; height:30px; background:var(--line); }
+    .legend { position:fixed; z-index:2; left:12px; bottom:82px; display:flex; gap:12px; padding:7px 10px; color:var(--muted); font-size:11px; pointer-events:none; }
+    .key { display:flex; align-items:center; gap:5px; white-space:nowrap; }
+    .dot { width:8px; height:8px; border-radius:2px; background:var(--green); }
+    .dot.seed { background:#a85e28; } .dot.air { background:#f0a43c; } .dot.light { background:var(--gold); }
+    #fallback { display:none; position:fixed; inset:24px; place-items:center; text-align:center; line-height:1.5; }
+    @media(max-width:650px){
+      .top{top:max(7px,env(safe-area-inset-top));left:7px;right:7px}.identity{padding:9px 10px}.sub{max-width:160px}.stats{grid-template-columns:repeat(2,52px);gap:6px 9px;padding:8px 9px}.legend{left:9px;bottom:78px;gap:8px;padding:6px 8px}.dock{justify-content:flex-start}button{min-height:48px;padding-inline:13px}
+    }
+  </style>
+</head>
+<body>
+  <canvas id="world" aria-label="Three-dimensional evolving plant simulation"></canvas>
+  <div id="fallback">This simulation requires WebGL 2. Try opening the file in a current version of Safari, Chrome, Firefox, or Edge.</div>
+
+  <header class="top">
+    <section class="identity panel">
+      <h1>Simplant 20 · 3D TBT</h1>
+      <div class="sub">64×64×16 · seed 14<br>Drag to orbit · pinch to zoom and pan</div>
+    </section>
+    <section class="stats panel" aria-hidden="true">
+      <div class="stat"><b id="plants">0</b><span>plants</span></div>
+      <div class="stat"><b id="cells">0</b><span>cells</span></div>
+      <div class="stat"><b id="seeds">0</b><span>seeds</span></div>
+      <div class="stat"><b id="ticks">0</b><span>ticks</span></div>
+    </section>
+  </header>
+
+  <div class="legend panel" aria-hidden="true">
+    <span class="key"><i class="dot"></i>plant</span>
+    <span class="key"><i class="dot seed"></i>root seed</span>
+    <span class="key"><i class="dot air"></i>airborne</span>
+    <span class="key"><i class="dot light"></i>light</span>
+  </div>
+
+  <nav class="dock" aria-label="Simulation controls">
+    <button id="play" class="primary">Pause</button>
+    <button id="step">Step</button>
+    <button id="speed">Speed 1×</button>
+    <span class="divider" aria-hidden="true"></span>
+    <button id="showLight">Light off</button>
+    <button id="tint">Tint off</button>
+    <span class="divider" aria-hidden="true"></span>
+    <button id="view">View</button>
+    <button id="reset">Reset</button>
+  </nav>
+
+  <script>
+  (() => {
+    'use strict';
+
+    const C = Object.freeze({
+      W:64, D:64, H:16, RNG_SEED:14,
+      LIGHT_PROB:.6, LIGHT_COOLDOWN:30, LIGHT_PAUSE:1,
+      MUTATION_RATE:.2, MAX_PLANT_AGE:1000, STARVATION_TICKS:200,
+      GERMINATION_RADIUS:3, SEED_MAX_AGE:360, TICKS_PER_SECOND:20
+    });
+    const LAYER=C.W*C.D, CAPACITY=LAYER*C.H;
+    const DEFAULT_GENOME=new Uint8Array([0b010,0b010,0b010,0b000]);
+    const grid=new Array(CAPACITY).fill(null);
+    const plants=[];
+    const travelingSeeds=[];
+    const lightPulses=[];
+    let rngState=C.RNG_SEED>>>0, nextPlantId=1, tick=0, running=true, showLight=false, genomeTint=false;
+    const speedLevels=[1,5,25,100]; let speedIndex=0;
+
+    const idx=(x,y,z)=>x+z*C.W+y*LAYER;
+    const wrapX=x=>(x+C.W)%C.W, wrapZ=z=>(z+C.D)%C.D;
+    function rand(){let x=rngState|0;x^=x<<13;x^=x>>>17;x^=x<<5;rngState=x>>>0;return rngState/4294967296;}
+    const randInt=n=>(rand()*n)|0;
+    const neg=v=>[-v[0],-v[1],-v[2]];
+    const cross=(a,b)=>[a[1]*b[2]-a[2]*b[1],a[2]*b[0]-a[0]*b[2],a[0]*b[1]-a[1]*b[0]];
+    const scaleVec=(v,s)=>[v[0]*s,v[1]*s,v[2]*s];
+
+    class GeneNode {
+      constructor(bits){this.geneBits=bits;this.parent=null;this.children=[null,null,null];this.slotFromParent=-1;this.cell=null;this.grownMask=0;}
+    }
+    function decodeGenome(genome){
+      let p=0;
+      function build(){
+        if(p>=genome.length)return null;
+        const node=new GeneNode(genome[p++]);
+        for(let slot=0;slot<3;slot++)if((node.geneBits>>slot)&1){const child=build();if(child){node.children[slot]=child;child.parent=node;child.slotFromParent=slot;}}
+        return node;
+      }
+      return build();
+    }
+    function encodeGenome(root){const out=[];(function walk(n){if(!n)return;out.push(n.geneBits);for(let s=0;s<3;s++)if(n.children[s])walk(n.children[s]);})(root);return new Uint8Array(out);}
+    function mutateGenome(genome){
+      const copy=new Uint8Array(genome), len=copy.length;
+      let geneIndex=len>1?Math.max(randInt(len),randInt(len)):0;
+      if(len>1&&geneIndex===0)geneIndex=randInt(len-1)+1;
+      const bitIndex=randInt(3), root=decodeGenome(copy); let cursor=0,target=null;
+      (function find(n){if(!n||target)return;if(cursor===geneIndex){target=n;return;}cursor++;for(let s=0;s<3;s++)if(n.children[s])find(n.children[s]);})(root);
+      if(!target)return copy;
+      const mask=1<<bitIndex, set=(target.geneBits&mask)!==0;
+      if(set&&target.children[bitIndex]&&target.children[bitIndex].geneBits>0)return copy;
+      target.geneBits^=mask;
+      if(set)target.children[bitIndex]=null;
+      else{const child=new GeneNode(0);target.children[bitIndex]=child;child.parent=target;child.slotFromParent=bitIndex;}
+      return encodeGenome(root);
+    }
+    function genomeColor(genome){
+      let h=2166136261;
+      for(let i=0;i<genome.length;i++){h^=genome[i]+i*17;h=Math.imul(h,16777619);}
+      const hue=(h>>>0)%360, c=.65, x=c*(1-Math.abs((hue/60)%2-1)), m=.3; let r=0,g=0,b=0;
+      if(hue<60){r=c;g=x}else if(hue<120){r=x;g=c}else if(hue<180){g=c;b=x}else if(hue<240){g=x;b=c}else if(hue<300){r=x;b=c}else{r=c;b=x}
+      return [r+m,g+m,b+m];
+    }
+
+    class PlantCell {
+      constructor(x,y,z,plant,node,parent,forward,side,isSeed=false){
+        this.x=x;this.y=y;this.z=z;this.plant=plant;this.node=node;this.parent=parent;this.forward=forward;this.side=side;this.isSeed=isSeed;this.cooldown=0;this.children=[];
+        grid[idx(x,y,z)]=this;node.cell=this;plant.registerCell(this);if(parent)parent.children.push(this);
+      }
+    }
+    class Plant {
+      constructor(genome,energy=0){
+        this.id=nextPlantId++;this.genome=genome;this.color=genomeColor(genome);this.rollSign=1;
+        this.rootNode=decodeGenome(genome);this.seed=null;this.energy=energy;this.freeSproutUsed=false;this.cells=[];this.frontier=[];
+        this.reproPhase=0;this.childGenome=null;this.childGeneCount=0;this.age=0;this.ticksWithoutLight=0;this.dead=false;
+      }
+      registerCell(cell){
+        this.cells.push(cell);
+        const bits=cell.node.geneBits;
+        for(let slot=0;slot<3;slot++)if((bits>>slot)&1)this.frontier.push(cell.node,slot);
+      }
+      tryGrow(){
+        if(this.freeSproutUsed&&this.energy<1)return;
+        for(let i=this.frontier.length-2;i>=0;i-=2){
+          if(this.freeSproutUsed&&this.energy<1)return;
+          const node=this.frontier[i],slot=this.frontier[i+1],cell=node.cell;
+          this.frontier.splice(i,2);
+          if(!cell||!node.children[slot]){node.grownMask|=1<<slot;continue;}
+          const up=cross(cell.forward,cell.side);
+          const direction=slot===0?neg(cell.side):slot===1?cell.forward:cell.side;
+          const nx=wrapX(cell.x+direction[0]), ny=cell.y+direction[1], nz=wrapZ(cell.z+direction[2]);
+          if(ny<0||ny>=C.H||grid[idx(nx,ny,nz)]||blockedByOtherPlant(nx,ny,nz,this)){node.grownMask|=1<<slot;continue;}
+          const childSide=scaleVec(up,this.rollSign);
+          new PlantCell(nx,ny,nz,this,node.children[slot],cell,direction,childSide,false);
+          if(this.freeSproutUsed)this.energy-=1;else this.freeSproutUsed=true;
+          return;
+        }
+      }
+      die(){
+        this.dead=true;
+        for(const cell of this.cells){const at=idx(cell.x,cell.y,cell.z);if(grid[at]===cell)grid[at]=null;cell.node.cell=null;}
+        this.cells.length=0;this.frontier.length=0;
+        for(const pulse of lightPulses)if(pulse.plant===this)pulse.dead=true;
+      }
+    }
+    function blockedByOtherPlant(x,y,z,plant){
+      for(let dy=-1;dy<=1;dy++)for(let dz=-1;dz<=1;dz++)for(let dx=-1;dx<=1;dx++){
+        if(dx===0&&dy===0&&dz===0)continue;const yy=y+dy;if(yy<0||yy>=C.H)continue;
+        const other=grid[idx(wrapX(x+dx),yy,wrapZ(z+dz))];
+        if(other&&other.kind!=='airSeed'&&other.plant!==plant)return true;
+      }
+      return false;
+    }
+    function createPlant(genome,x,z,energy=0){
+      const plant=new Plant(genome,energy);
+      plant.seed=new PlantCell(x,0,z,plant,plant.rootNode,null,[0,1,0],[1,0,0],true);
+      plants.push(plant);return plant;
+    }
+    function createTravelingSeed(plant,genome){return{kind:'airSeed',state:0,parentPlant:plant,genome,currentNode:plant.rootNode,x:0,y:0,z:0,age:0,blocked:0,occupying:false,dead:false};}
+
+    const CARDINAL=[[1,0,0],[-1,0,0],[0,1,0],[0,-1,0],[0,0,1],[0,0,-1]];
+    const SEED_STEPS=[[1,0,0],[-1,0,0],[0,0,1],[0,0,-1],[0,1,0],[0,-1,0],[0,-1,0],[0,-1,0]];
+    function openSides(cell){
+      let n=0;
+      for(const d of CARDINAL){const y=cell.y+d[1];if(y>=C.H){n++;continue;}if(y<0)continue;if(!grid[idx(wrapX(cell.x+d[0]),y,wrapZ(cell.z+d[2]))])n++;}
+      return n;
+    }
+    function advanceLight(){
+      for(let i=lightPulses.length-1;i>=0;i--){
+        const p=lightPulses[i];if(p.dead||p.plant.dead){lightPulses.splice(i,1);continue;}
+        if(p.pause>0){p.pause--;continue;}
+        if(p.cell.parent){p.cell=p.cell.parent;p.steps++;}
+        else{p.plant.energy+=p.energy;p.dead=true;lightPulses.splice(i,1);}
+      }
+    }
+    function clearSeedOccupancy(seed){if(seed.occupying&&grid[idx(seed.x,seed.y,seed.z)]===seed)grid[idx(seed.x,seed.y,seed.z)]=null;seed.occupying=false;}
+    function germinationClear(seed){
+      const r=C.GERMINATION_RADIUS;
+      for(let dz=-r;dz<=r;dz++)for(let dx=-r;dx<=r;dx++){
+        for(let y=0;y<=Math.min(C.H-1,r);y++){
+          if(dx===0&&dz===0&&y===0)continue;
+          if(grid[idx(wrapX(seed.x+dx),y,wrapZ(seed.z+dz))])return false;
+        }
+      }
+      return true;
+    }
+    function updateTravelingSeed(seed){
+      if(seed.state===0){
+        if(!seed.currentNode.cell){seed.dead=true;return;}
+        const available=seed.currentNode.children.filter(n=>n&&n.cell);
+        if(available.length){seed.currentNode=available[randInt(available.length)];return;}
+        const leaf=seed.currentNode.cell;seed.state=1;seed.x=leaf.x;seed.y=leaf.y;seed.z=leaf.z;return;
+      }
+      seed.age++;
+      if(seed.y===0){
+        clearSeedOccupancy(seed);
+        if(!grid[idx(seed.x,0,seed.z)]&&germinationClear(seed))createPlant(seed.genome,seed.x,seed.z,0);
+        seed.dead=true;return;
+      }
+      const start=randInt(SEED_STEPS.length);let moved=false;
+      for(let i=0;i<SEED_STEPS.length;i++){
+        const d=SEED_STEPS[(start+i)%SEED_STEPS.length], ny=seed.y+d[1];
+        if(ny<0||ny>=C.H)continue;
+        const nx=wrapX(seed.x+d[0]),nz=wrapZ(seed.z+d[2]),target=idx(nx,ny,nz);
+        if(!grid[target]){clearSeedOccupancy(seed);seed.x=nx;seed.y=ny;seed.z=nz;grid[target]=seed;seed.occupying=true;moved=true;break;}
+      }
+      seed.blocked=moved?0:seed.blocked+1;
+      if(seed.age>C.SEED_MAX_AGE||seed.blocked>40){clearSeedOccupancy(seed);seed.dead=true;}
+    }
+
+    function advanceTick(){
+      tick++;
+      for(let i=plants.length-1;i>=0;i--){
+        const p=plants[i];p.age++;p.ticksWithoutLight++;
+        if(p.age>=C.MAX_PLANT_AGE*p.genome.length||p.ticksWithoutLight>=C.STARVATION_TICKS){p.die();plants[i]=plants[plants.length-1];plants.pop();continue;}
+        p.tryGrow();
+      }
+      for(const p of plants){
+        for(const cell of p.cells){
+          if(cell.isSeed)continue;
+          if(cell.cooldown>0){cell.cooldown--;continue;}
+          const exposed=openSides(cell);
+          if(exposed>0&&rand()<C.LIGHT_PROB){lightPulses.push({plant:p,cell,energy:exposed/6,steps:0,pause:C.LIGHT_PAUSE,dead:false});cell.cooldown=C.LIGHT_COOLDOWN;p.ticksWithoutLight=0;}
+        }
+      }
+      advanceLight();
+      for(const p of plants){
+        const G=p.genome.length;
+        if(p.reproPhase===0&&p.energy>=G){p.childGenome=rand()<C.MUTATION_RATE?mutateGenome(p.genome):new Uint8Array(p.genome);p.childGeneCount=p.childGenome.length;p.reproPhase=1;}
+        else if(p.reproPhase===1&&p.energy>=G+p.childGeneCount){travelingSeeds.push(createTravelingSeed(p,p.childGenome));p.energy-=p.childGeneCount;p.reproPhase=0;p.childGenome=null;p.childGeneCount=0;}
+      }
+      for(let i=travelingSeeds.length-1;i>=0;i--){const seed=travelingSeeds[i];updateTravelingSeed(seed);if(seed.dead){clearSeedOccupancy(seed);travelingSeeds[i]=travelingSeeds[travelingSeeds.length-1];travelingSeeds.pop();}}
+      renderDirty=true;
+    }
+    function resetSimulation(){
+      grid.fill(null);plants.length=0;travelingSeeds.length=0;lightPulses.length=0;rngState=C.RNG_SEED>>>0;nextPlantId=1;tick=0;
+      createPlant(new Uint8Array(DEFAULT_GENOME),C.W>>1,C.D>>1,0);renderDirty=true;
+    }
+
+    const canvas=document.getElementById('world');
+    const gl=canvas.getContext('webgl2',{antialias:true,alpha:false,powerPreference:'high-performance'});
+    if(!gl){canvas.style.display='none';document.getElementById('fallback').style.display='grid';return;}
+    function compile(type,source){const s=gl.createShader(type);gl.shaderSource(s,source);gl.compileShader(s);if(!gl.getShaderParameter(s,gl.COMPILE_STATUS))throw Error(gl.getShaderInfoLog(s));return s;}
+    function makeProgram(v,f){const p=gl.createProgram();gl.attachShader(p,compile(gl.VERTEX_SHADER,v));gl.attachShader(p,compile(gl.FRAGMENT_SHADER,f));gl.linkProgram(p);if(!gl.getProgramParameter(p,gl.LINK_STATUS))throw Error(gl.getProgramInfoLog(p));return p;}
+    const voxelProgram=makeProgram(`#version 300 es
+      precision highp float;layout(location=0)in vec3 aPosition;layout(location=1)in vec3 aNormal;layout(location=2)in vec4 aPlace;layout(location=3)in vec4 aColor;
+      uniform mat4 uProjection;uniform mat4 uView;out vec3 vNormal;out vec4 vColor;
+      void main(){vec3 world=(aPosition-.5)*aPlace.w+aPlace.xyz+.5;gl_Position=uProjection*uView*vec4(world,1.);vNormal=aNormal;vColor=aColor;}`,
+      `#version 300 es
+      precision highp float;in vec3 vNormal;in vec4 vColor;out vec4 outColor;
+      void main(){vec3 l=normalize(vec3(-.35,.9,.45));float light=.48+.52*max(dot(normalize(vNormal),l),0.);vec3 c=vColor.rgb*mix(light,1.,vColor.a);outColor=vec4(c,1.);}`);
+    const floorProgram=makeProgram(`#version 300 es
+      precision highp float;layout(location=0)in vec3 aPosition;uniform mat4 uProjection;uniform mat4 uView;out vec2 vWorld;
+      void main(){gl_Position=uProjection*uView*vec4(aPosition,1.);vWorld=aPosition.xz;}`,
+      `#version 300 es
+      precision highp float;in vec2 vWorld;out vec4 outColor;
+      void main(){vec2 d=abs(fract(vWorld-.5)-.5)/fwidth(vWorld);float g=1.-min(min(d.x,d.y),1.);outColor=vec4(mix(vec3(.018,.036,.032),vec3(.08,.14,.105),g*.62),1.);}`);
+    const cube=new Float32Array([
+      0,0,1,0,0,1, 1,0,1,0,0,1, 1,1,1,0,0,1, 0,0,1,0,0,1, 1,1,1,0,0,1, 0,1,1,0,0,1,
+      1,0,0,0,0,-1, 0,0,0,0,0,-1, 0,1,0,0,0,-1, 1,0,0,0,0,-1, 0,1,0,0,0,-1, 1,1,0,0,0,-1,
+      0,0,0,-1,0,0, 0,0,1,-1,0,0, 0,1,1,-1,0,0, 0,0,0,-1,0,0, 0,1,1,-1,0,0, 0,1,0,-1,0,0,
+      1,0,1,1,0,0, 1,0,0,1,0,0, 1,1,0,1,0,0, 1,0,1,1,0,0, 1,1,0,1,0,0, 1,1,1,1,0,0,
+      0,1,1,0,1,0, 1,1,1,0,1,0, 1,1,0,0,1,0, 0,1,1,0,1,0, 1,1,0,0,1,0, 0,1,0,0,1,0,
+      0,0,0,0,-1,0, 1,0,0,0,-1,0, 1,0,1,0,-1,0, 0,0,0,0,-1,0, 1,0,1,0,-1,0, 0,0,1,0,-1,0]);
+    const floorVerts=new Float32Array([0,-.03,0,64,-.03,0,64,-.03,64,0,-.03,0,64,-.03,64,0,-.03,64]);
+    const vao=gl.createVertexArray();gl.bindVertexArray(vao);
+    const cubeBuffer=gl.createBuffer();gl.bindBuffer(gl.ARRAY_BUFFER,cubeBuffer);gl.bufferData(gl.ARRAY_BUFFER,cube,gl.STATIC_DRAW);
+    gl.enableVertexAttribArray(0);gl.vertexAttribPointer(0,3,gl.FLOAT,false,24,0);gl.enableVertexAttribArray(1);gl.vertexAttribPointer(1,3,gl.FLOAT,false,24,12);
+    const instanceBuffer=gl.createBuffer();gl.bindBuffer(gl.ARRAY_BUFFER,instanceBuffer);gl.bufferData(gl.ARRAY_BUFFER,CAPACITY*2*8*4,gl.DYNAMIC_DRAW);
+    gl.enableVertexAttribArray(2);gl.vertexAttribPointer(2,4,gl.FLOAT,false,32,0);gl.vertexAttribDivisor(2,1);gl.enableVertexAttribArray(3);gl.vertexAttribPointer(3,4,gl.FLOAT,false,32,16);gl.vertexAttribDivisor(3,1);
+    const floorVao=gl.createVertexArray();gl.bindVertexArray(floorVao);const fb=gl.createBuffer();gl.bindBuffer(gl.ARRAY_BUFFER,fb);gl.bufferData(gl.ARRAY_BUFFER,floorVerts,gl.STATIC_DRAW);gl.enableVertexAttribArray(0);gl.vertexAttribPointer(0,3,gl.FLOAT,false,12,0);gl.bindVertexArray(null);
+    let instanceData=new Float32Array(8192),instanceCount=0,renderDirty=true;
+    function ensureInstances(n){if(instanceData.length<n*8){let size=instanceData.length;while(size<n*8)size*=2;instanceData=new Float32Array(size);}}
+    function mix(a,b,t){return a+(b-a)*t;}
+    function pushInstance(x,y,z,size,color,emissive=0){ensureInstances(instanceCount+1);let p=instanceCount++*8;instanceData[p]=x;instanceData[p+1]=y;instanceData[p+2]=z;instanceData[p+3]=size;instanceData[p+4]=color[0];instanceData[p+5]=color[1];instanceData[p+6]=color[2];instanceData[p+7]=emissive;}
+    function rootColor(p){
+      const G=p.genome.length;
+      if(p.reproPhase===0){const t=Math.min(1,p.energy/G);return[mix(.42,1,t),mix(.20,.08,t),mix(.055,.05,t)];}
+      const t=Math.min(1,(p.energy-G)/Math.max(1,p.childGeneCount));return[1,mix(.08,1,t),mix(.05,1,t)];
+    }
+    function rebuildInstances(){
+      instanceCount=0;const base=[.12,.48,.16];
+      for(const p of plants){const stem=genomeTint?[mix(base[0],p.color[0],.5),mix(base[1],p.color[1],.5),mix(base[2],p.color[2],.5)]:base;for(const cell of p.cells)pushInstance(cell.x,cell.y,cell.z,cell.isSeed?.78:.9,cell.isSeed?rootColor(p):stem,0);}
+      for(const s of travelingSeeds)if(s.state===1)pushInstance(s.x,s.y,s.z,.58,[.94,.51,.12],.2);
+      if(showLight)for(const p of lightPulses)if(!p.dead&&p.cell)pushInstance(p.cell.x,p.cell.y,p.cell.z,.35,[1,.78,.12],1);
+      gl.bindBuffer(gl.ARRAY_BUFFER,instanceBuffer);gl.bufferSubData(gl.ARRAY_BUFFER,0,instanceData.subarray(0,instanceCount*8));renderDirty=false;
+    }
+    const projection=new Float32Array(16),view=new Float32Array(16);let yaw=.72,pitch=.58,distance=91;const target=[32,4.8,32];
+    function perspective(out,fovy,aspect,near,far){const f=1/Math.tan(fovy/2);out.fill(0);out[0]=f/aspect;out[5]=f;out[10]=(far+near)/(near-far);out[11]=-1;out[14]=2*far*near/(near-far);}
+    function lookAt(out,eye,center){let zx=eye[0]-center[0],zy=eye[1]-center[1],zz=eye[2]-center[2],l=Math.hypot(zx,zy,zz);zx/=l;zy/=l;zz/=l;let xx=zz,xz=-zx;l=Math.hypot(xx,xz);xx/=l;xz/=l;const yx=zy*xz,yy=zz*xx-zx*xz,yz=-zy*xx;out[0]=xx;out[1]=yx;out[2]=zx;out[3]=0;out[4]=0;out[5]=yy;out[6]=zy;out[7]=0;out[8]=xz;out[9]=yz;out[10]=zz;out[11]=0;out[12]=-(xx*eye[0]+xz*eye[2]);out[13]=-(yx*eye[0]+yy*eye[1]+yz*eye[2]);out[14]=-(zx*eye[0]+zy*eye[1]+zz*eye[2]);out[15]=1;}
+    function resize(){const d=Math.min(devicePixelRatio||1,2),w=Math.max(1,Math.floor(innerWidth*d)),h=Math.max(1,Math.floor(innerHeight*d));if(canvas.width!==w||canvas.height!==h){canvas.width=w;canvas.height=h;}gl.viewport(0,0,w,h);}
+    function matrices(){perspective(projection,Math.PI/4.15,canvas.width/canvas.height,.1,400);const cp=Math.cos(pitch),eye=[target[0]+distance*cp*Math.cos(yaw),target[1]+distance*Math.sin(pitch),target[2]+distance*cp*Math.sin(yaw)];lookAt(view,eye,target);}
+    function uniforms(program){gl.uniformMatrix4fv(gl.getUniformLocation(program,'uProjection'),false,projection);gl.uniformMatrix4fv(gl.getUniformLocation(program,'uView'),false,view);}
+    function render(){resize();matrices();if(renderDirty)rebuildInstances();gl.enable(gl.DEPTH_TEST);gl.enable(gl.CULL_FACE);gl.cullFace(gl.BACK);gl.clearColor(.018,.032,.032,1);gl.clear(gl.COLOR_BUFFER_BIT|gl.DEPTH_BUFFER_BIT);gl.useProgram(floorProgram);uniforms(floorProgram);gl.bindVertexArray(floorVao);gl.drawArrays(gl.TRIANGLES,0,6);gl.useProgram(voxelProgram);uniforms(voxelProgram);gl.bindVertexArray(vao);gl.drawArraysInstanced(gl.TRIANGLES,0,36,instanceCount);}
+
+    const pointers=new Map();let lastSingle=null,lastPinch=null;
+    const pinch=()=>{const p=[...pointers.values()];return{d:Math.hypot(p[1].x-p[0].x,p[1].y-p[0].y),x:(p[0].x+p[1].x)/2,y:(p[0].y+p[1].y)/2};};
+    canvas.addEventListener('pointerdown',e=>{canvas.setPointerCapture(e.pointerId);pointers.set(e.pointerId,{x:e.clientX,y:e.clientY});if(pointers.size===1)lastSingle={x:e.clientX,y:e.clientY};if(pointers.size===2)lastPinch=pinch();});
+    canvas.addEventListener('pointermove',e=>{if(!pointers.has(e.pointerId))return;pointers.set(e.pointerId,{x:e.clientX,y:e.clientY});if(pointers.size===1){if(lastSingle){yaw-=(e.clientX-lastSingle.x)*.008;pitch=Math.max(.12,Math.min(1.42,pitch+(e.clientY-lastSingle.y)*.006));}lastSingle={x:e.clientX,y:e.clientY};}else if(pointers.size===2){const n=pinch();if(lastPinch){if(n.d>4&&lastPinch.d>4)distance=Math.max(30,Math.min(175,distance*lastPinch.d/n.d));const dx=n.x-lastPinch.x,dy=n.y-lastPinch.y,s=distance*.0015;target[0]+=(-Math.sin(yaw)*dx+Math.cos(yaw)*dy)*s;target[2]+=(Math.cos(yaw)*dx+Math.sin(yaw)*dy)*s;target[0]=Math.max(-10,Math.min(74,target[0]));target[2]=Math.max(-10,Math.min(74,target[2]));}lastPinch=n;}});
+    function pointerEnd(e){pointers.delete(e.pointerId);lastPinch=null;const p=[...pointers.values()][0];lastSingle=p?{x:p.x,y:p.y}:null;}
+    canvas.addEventListener('pointerup',pointerEnd);canvas.addEventListener('pointercancel',pointerEnd);canvas.addEventListener('wheel',e=>{e.preventDefault();distance=Math.max(30,Math.min(175,distance*Math.exp(e.deltaY*.001)));},{passive:false});
+
+    const play=document.getElementById('play'),speed=document.getElementById('speed'),lightButton=document.getElementById('showLight'),tintButton=document.getElementById('tint');
+    function togglePlay(){running=!running;play.textContent=running?'Pause':'Play';}
+    play.addEventListener('click',togglePlay);document.getElementById('step').addEventListener('click',()=>{if(!running)advanceTick();});
+    speed.addEventListener('click',()=>{speedIndex=(speedIndex+1)%speedLevels.length;speed.textContent=`Speed ${speedLevels[speedIndex]}×`;});
+    lightButton.addEventListener('click',()=>{showLight=!showLight;lightButton.textContent=`Light ${showLight?'on':'off'}`;lightButton.classList.toggle('light-on',showLight);renderDirty=true;});
+    tintButton.addEventListener('click',()=>{genomeTint=!genomeTint;tintButton.textContent=`Tint ${genomeTint?'on':'off'}`;renderDirty=true;});
+    document.getElementById('view').addEventListener('click',()=>{yaw=.72;pitch=.58;distance=91;target[0]=32;target[1]=4.8;target[2]=32;});
+    document.getElementById('reset').addEventListener('click',resetSimulation);
+    addEventListener('keydown',e=>{if(e.code==='KeyP')togglePlay();else if(e.code==='Space'){e.preventDefault();if(!running)advanceTick();}else if(e.code==='Digit0')resetSimulation();});
+    addEventListener('resize',resize);
+
+    const plantsEl=document.getElementById('plants'),cellsEl=document.getElementById('cells'),seedsEl=document.getElementById('seeds'),ticksEl=document.getElementById('ticks');
+    let last=performance.now(),accumulator=0,lastStats=0;
+    function frame(now){
+      const dt=Math.min(.1,(now-last)/1000);last=now;
+      if(running){accumulator+=dt*C.TICKS_PER_SECOND*speedLevels[speedIndex];const start=performance.now();while(accumulator>=1&&performance.now()-start<11){advanceTick();accumulator--;}}
+      render();
+      if(now-lastStats>350){let count=0;for(const p of plants)count+=p.cells.length;plantsEl.textContent=plants.length.toLocaleString();cellsEl.textContent=count.toLocaleString();seedsEl.textContent=travelingSeeds.length.toLocaleString();ticksEl.textContent=tick.toLocaleString();lastStats=now;}
+      requestAnimationFrame(frame);
+    }
+    resetSimulation();requestAnimationFrame(frame);
+  })();
+  </script>
+</body>
+</html>

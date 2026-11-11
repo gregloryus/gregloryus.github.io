@@ -1,0 +1,152 @@
+{
+ "overrides": {
+  "fertilityLaw": 1,
+  "fertilityMin": 5,
+  "fertilityGateTick": 1500
+ },
+ "worldSeed": 7,
+ "dims": {
+  "C": 97,
+  "S": 42,
+  "G": 169
+ },
+ "series": [
+  {
+   "t": 250,
+   "plants": 2,
+   "cells": 3,
+   "seeds": 2,
+   "genomes": 1,
+   "domShare": 1,
+   "meanPlan": 2,
+   "maxPlan": 2,
+   "meanH": 0.5,
+   "births": 2,
+   "deaths": {},
+   "litter": 0,
+   "maxElev": 0
+  },
+  {
+   "t": 500,
+   "plants": 9,
+   "cells": 17,
+   "seeds": 7,
+   "genomes": 1,
+   "domShare": 1,
+   "meanPlan": 2,
+   "maxPlan": 2,
+   "meanH": 0.9,
+   "births": 11,
+   "deaths": {
+    "expired": 1,
+    "shaded": 1
+   },
+   "litter": 4,
+   "maxElev": 0
+  },
+  {
+   "t": 750,
+   "plants": 31,
+   "cells": 100,
+   "seeds": 35,
+   "genomes": 9,
+   "domShare": 0.581,
+   "meanPlan": 3.5,
+   "maxPlan": 11,
+   "meanH": 1.6,
+   "births": 42,
+   "deaths": {
+    "expired": 9,
+    "shaded": 2
+   },
+   "litter": 22,
+   "maxElev": 0
+  },
+  {
+   "t": 1000,
+   "plants": 76,
+   "cells": 431,
+   "seeds": 164,
+   "genomes": 27,
+   "domShare": 0.145,
+   "meanPlan": 7.6,
+   "maxPlan": 25,
+   "meanH": 2.3,
+   "births": 137,
+   "deaths": {
+    "expired": 26,
+    "shaded": 32,
+    "immature": 3
+   },
+   "litter": 263,
+   "maxElev": 0
+  },
+  {
+   "t": 1250,
+   "plants": 155,
+   "cells": 1283,
+   "seeds": 534,
+   "genomes": 62,
+   "domShare": 0.123,
+   "meanPlan": 11.1,
+   "maxPlan": 26,
+   "meanH": 3,
+   "births": 387,
+   "deaths": {
+    "expired": 48,
+    "shaded": 171,
+    "immature": 13
+   },
+   "litter": 1702,
+   "maxElev": 0
+  },
+  {
+   "t": 1500,
+   "plants": 250,
+   "cells": 2334,
+   "seeds": 931,
+   "genomes": 106,
+   "domShare": 0.088,
+   "meanPlan": 14.2,
+   "maxPlan": 32,
+   "meanH": 3.4,
+   "births": 986,
+   "deaths": {
+    "expired": 82,
+    "shaded": 593,
+    "immature": 61
+   },
+   "litter": 7316,
+   "maxElev": 0
+  },
+  {
+   "t": 1750,
+   "plants": 67,
+   "cells": 1000,
+   "seeds": 829,
+   "genomes": 41,
+   "domShare": 0.134,
+   "meanPlan": 15.9,
+   "maxPlan": 32,
+   "meanH": 5,
+   "births": 986,
+   "deaths": {
+    "expired": 174,
+    "shaded": 674,
+    "immature": 71
+   },
+   "litter": 9429,
+   "maxElev": 0
+  }
+ ],
+ "deathHist": {
+  "0": 1374,
+  "1": 266,
+  "2": 128,
+  "3": 71,
+  "4": 39,
+  "5": 13,
+  "6": 5
+ },
+ "maxElevSeen": 0
+}

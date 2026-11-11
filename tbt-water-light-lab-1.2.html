@@ -1,0 +1,2631 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <title>TBT Water + Light Laboratory</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      --ink: #eef8f2;
+      --muted: #9ebcab;
+      --panel: #081511ed;
+      --line: #72998555;
+      --control: #173127;
+      --accent: #76d59d;
+    }
+    * { box-sizing: border-box; }
+    html, body {
+      width: 100%; height: 100%; margin: 0; overflow: hidden;
+      background: #050c09; color: var(--ink);
+    }
+    #stage {
+      position: fixed; inset: 0; display: grid; place-items: center;
+      background:
+        radial-gradient(circle at 50% 45%, #10231a 0, #07100d 58%, #040906 100%);
+    }
+    #world {
+      display: block; image-rendering: pixelated; image-rendering: crisp-edges;
+      box-shadow: 0 0 0 1px #8fbba04d, 0 18px 70px #000b;
+      cursor: crosshair; touch-action: manipulation;
+    }
+    #panel {
+      position: fixed; z-index: 5;
+      inset: max(8px, env(safe-area-inset-top)) auto auto max(8px, env(safe-area-inset-left));
+      width: min(390px, calc(100vw - 16px)); max-height: calc(100dvh - 16px);
+      overflow: auto; overscroll-behavior: contain;
+      border: 1px solid var(--line); border-radius: 12px;
+      background: var(--panel); box-shadow: 0 12px 45px #000a;
+      backdrop-filter: blur(9px); -webkit-backdrop-filter: blur(9px);
+    }
+    #panel.hidden { display: none; }
+    #panelHeader {
+      position: sticky; top: 0; z-index: 2;
+      display: flex; align-items: center; justify-content: space-between; gap: 10px;
+      padding: 10px 11px; background: #0a1914f5; border-bottom: 1px solid var(--line);
+    }
+    #panelHeader h1 { margin: 0; font-size: 13px; letter-spacing: .04em; }
+    #panelHeader small { color: var(--muted); font-weight: 500; }
+    #panelBody { padding: 9px; }
+    #showPanel {
+      display: none; position: fixed; z-index: 6;
+      top: max(8px, env(safe-area-inset-top)); left: max(8px, env(safe-area-inset-left));
+      width: 38px; height: 38px; padding: 0; font-size: 19px;
+    }
+    #showPanel.visible { display: block; }
+    button, select, input {
+      font: inherit; color: var(--ink); background: var(--control);
+      border: 1px solid #668775; border-radius: 6px; padding: 5px 7px;
+    }
+    button { cursor: pointer; }
+    button:hover { border-color: var(--accent); }
+    button.primary { background: #20553a; border-color: #80ca9b; font-weight: 700; }
+    .toolbar { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
+    .toolbar > * { flex: 0 0 auto; }
+    .toolbar .grow { flex: 1 1 auto; }
+    .seedBar {
+      display: grid; grid-template-columns: auto minmax(74px, 1fr) auto;
+      align-items: center; gap: 6px; margin-bottom: 5px;
+    }
+    .seedBar label { color: #cce2d5; font-size: 11px; }
+    .seedBar input { width: 100%; min-width: 0; }
+    .seedBar button { white-space: nowrap; }
+    details { border-top: 1px solid var(--line); }
+    details:first-of-type { border-top: 0; }
+    summary {
+      cursor: pointer; padding: 9px 2px 7px; color: #d8eee1;
+      font-size: 12px; font-weight: 750; letter-spacing: .025em;
+    }
+    .settings { display: grid; grid-template-columns: 1fr 112px; gap: 7px 10px; padding: 0 2px 10px; }
+    .settings label { color: #cce2d5; font-size: 11.5px; align-self: center; }
+    .settings input[type="number"], .settings select { width: 100%; min-width: 0; }
+    .settings .check {
+      grid-column: 1 / -1; display: flex; align-items: center; gap: 7px;
+    }
+    .settings .check input { margin: 0; }
+    .settings .wide { grid-column: 1 / -1; }
+    .settings .hint {
+      grid-column: 1 / -1; margin: 0; color: var(--muted);
+      font-size: 10.5px; line-height: 1.4;
+    }
+    .presetRow { display: flex; gap: 5px; flex-wrap: wrap; }
+    .presetRow button { padding: 4px 6px; font-size: 10.5px; }
+    .toggleWithHelp {
+      display: flex; align-items: center; gap: 7px;
+    }
+    .toggleWithHelp .check { flex: 1 1 auto; }
+    .helpButton {
+      flex: 0 0 auto; width: 25px; height: 25px; padding: 0;
+      border-radius: 50%; color: #dff5e7; font-weight: 800;
+    }
+    #oeeCard {
+      grid-column: 1 / -1; padding: 8px;
+      border: 1px solid #648c7755; border-radius: 8px; background: #07110dbd;
+    }
+    #oeeCard[hidden] { display: none; }
+    .oeeMetricTitle {
+      display: flex; justify-content: space-between; gap: 8px;
+      color: #cfe5d7; font-size: 10.5px;
+    }
+    #oeeValue { font: 700 11px ui-monospace, SFMono-Regular, Menlo, monospace; }
+    #oeeSparkline {
+      display: block; width: 100%; height: 72px; margin-top: 5px;
+      border: 1px solid #4c70605c; border-radius: 5px; background: #050c09;
+    }
+    #oeeReadout {
+      min-height: 28px; margin-top: 5px; color: #9fc2ae;
+      font: 9.5px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace;
+      white-space: pre-line;
+    }
+    dialog {
+      width: min(560px, calc(100vw - 24px)); max-height: min(720px, calc(100dvh - 24px));
+      overflow: auto; padding: 17px 18px; color: var(--ink); background: #0a1914;
+      border: 1px solid #729985; border-radius: 12px; box-shadow: 0 18px 70px #000c;
+    }
+    dialog::backdrop { background: #010503c9; backdrop-filter: blur(3px); }
+    dialog h2 { margin: 0 34px 11px 0; font-size: 16px; }
+    dialog h3 { margin: 16px 0 5px; font-size: 12px; color: #d7ecdf; }
+    dialog p, dialog li { color: #b4cdbf; font-size: 11px; line-height: 1.5; }
+    dialog ul { padding-left: 19px; }
+    dialog .dialogClose { float: right; width: 28px; height: 28px; padding: 0; }
+    dialog .caution {
+      padding: 8px 9px; border-left: 3px solid #e1b65f;
+      color: #e7d8b5; background: #2b210f80;
+    }
+    #statusBox {
+      position: fixed; z-index: 3;
+      left: max(8px, env(safe-area-inset-left));
+      bottom: max(8px, env(safe-area-inset-bottom));
+      max-width: calc(100vw - 16px); padding: 6px 9px;
+      border: 1px solid #658a7555; border-radius: 7px;
+      color: #cce4d6; background: #07110de8; font: 11px/1.35 ui-monospace, SFMono-Regular, Menlo, monospace;
+      box-shadow: 0 5px 22px #0008; pointer-events: none; white-space: pre-line;
+    }
+    #statusBox.bad { color: #ffd6cc; border-color: #e9775b99; }
+    #applyNote { margin: 3px 2px 8px; color: #a8c6b5; font-size: 10.5px; }
+    @media (max-width: 600px) {
+      #panel { width: min(350px, calc(100vw - 16px)); }
+      #panelHeader { padding: 9px; }
+      #panelBody { padding: 7px; }
+      .settings { grid-template-columns: 1fr 104px; }
+    }
+  </style>
+</head>
+<body>
+  <main id="stage">
+    <canvas id="world" aria-label="Triple Bit Tree water and light simulation"></canvas>
+  </main>
+
+  <section id="panel" aria-label="Simulation controls">
+    <header id="panelHeader">
+      <h1>TBT Water + Light Lab <small>v1.2</small></h1>
+      <button id="hidePanel" type="button" title="Hide controls (Esc)">Hide</button>
+    </header>
+    <div id="panelBody">
+      <div class="toolbar">
+        <button id="play" type="button">Pause</button>
+        <button id="step" type="button">Step</button>
+        <select id="speed" aria-label="Simulation speed">
+          <option value="1">1×</option>
+          <option value="10" selected>10×</option>
+          <option value="100">100×</option>
+          <option value="1000">1000×</option>
+          <option value="5000">5000×</option>
+        </select>
+        <button id="apply" class="primary grow" type="button">Apply settings + reset</button>
+      </div>
+      <div class="seedBar">
+        <label for="seed">Seed</label>
+        <input id="seed" type="number" min="0" step="1" value="14" inputmode="numeric">
+        <button id="nextSeed" type="button">Seed +1 &amp; reset</button>
+      </div>
+      <p id="applyNote">Enter any seed number and reset to reproduce that world. Rule and starting-location changes apply together on reset.</p>
+
+      <details open>
+        <summary>World and display</summary>
+        <div class="settings">
+          <label for="cols">Grid width (cells)</label><input id="cols" type="number" min="12" max="2000" step="1" value="100">
+          <label for="rows">Grid height (cells)</label><input id="rows" type="number" min="12" max="2000" step="1" value="70">
+          <label for="pixelSize">Pixels per grid cell</label><input id="pixelSize" type="number" min="1" max="20" step="1" value="6">
+          <label class="check"><input id="showGenomeColors" type="checkbox" checked> Genome-signature colors (off = uniform green)</label>
+          <label class="check"><input id="showLiquid" type="checkbox" checked> Render liquid water</label>
+          <label for="liquidAlpha">Liquid opacity (0–1)</label><input id="liquidAlpha" type="number" min="0" max="1" step="0.05" value="1">
+          <label class="check"><input id="showVapor" type="checkbox" checked> Render vapor</label>
+          <label for="vaporAlpha">Vapor opacity (0–1)</label><input id="vaporAlpha" type="number" min="0" max="1" step="0.05" value="1">
+          <label for="seedAlpha">Seed-marker opacity (0–1)</label><input id="seedAlpha" type="number" min="0" max="1" step="0.05" value="1">
+          <label class="check"><input id="showWetCells" type="checkbox" checked> Tint hydrated plant cells blue</label>
+          <label class="check"><input id="showStatus" type="checkbox" checked> Show bottom diagnostics</label>
+          <p class="hint">Opacity controls update live and affect only rendering, not physics. Seed opacity covers planted seed cells and traveling seeds; at 0, planted seeds look like ordinary plant cells and traveling seeds disappear. The canvas preserves cell aspect ratio and shrinks to fit. Horizontal space wraps; sky and bottom do not. Plant hue is a deterministic genome signature—not calibrated genetic distance.</p>
+        </div>
+      </details>
+
+      <details open>
+        <summary>Live whole-genome OEE diagnostics</summary>
+        <div class="settings">
+          <div class="wide toggleWithHelp">
+            <label class="check"><input id="oeeEnabled" type="checkbox"> Run live OEE activity metrics</label>
+            <button id="oeeHelpButton" class="helpButton" type="button" aria-label="Explain the OEE assessment metrics" title="What do these metrics require?">?</button>
+          </div>
+          <div id="oeeCard" hidden>
+            <div class="oeeMetricTitle">
+              <span>Median normalized — must keep rising</span>
+              <span id="oeeValue">0</span>
+            </div>
+            <canvas id="oeeSparkline" width="340" height="72" role="img" aria-label="No OEE samples yet"></canvas>
+            <div id="oeeReadout">Waiting for the first 1,000-tick interval…</div>
+          </div>
+          <p class="hint">The sparkline is the signed median, which must establish progressively higher sustained levels—not merely remain above zero. “New activity” is different: it only needs to remain persistently above zero. Exact whole genomes are sampled every 1,000 ticks against the ordered-demography neutral shadow. Turning this on mid-run starts a new baseline at that tick.</p>
+        </div>
+      </details>
+
+      <details open>
+        <summary>Light and shade</summary>
+        <div class="settings">
+          <label class="check"><input id="exposure" type="checkbox" checked> Exposure energy: locally open cells photosynthesize</label>
+          <label class="check"><input id="shade" type="checkbox" checked> Vertical shade energy: sunlight passes downward by column</label>
+          <label for="shade1">Energy after 1 layer (0–10)</label><input id="shade1" type="number" min="0" max="10" step="0.1" value="5">
+          <label for="shade2">Energy after 2 layers</label><input id="shade2" type="number" min="0" max="10" step="0.1" value="3">
+          <label for="shade3">Energy after 3+ layers</label><input id="shade3" type="number" min="0" max="10" step="0.1" value="1">
+          <div class="wide presetRow">
+            <button type="button" data-shade="5,3,1">5 / 3 / 1</button>
+            <button type="button" data-shade="9,8,7">9 / 8 / 7</button>
+            <button type="button" data-shade="8,4,2">8 / 4 / 2</button>
+            <button type="button" data-shade="0,0,0">10 / 0 / 0</button>
+          </div>
+          <label for="absorbProbability">Energy-event probability</label><input id="absorbProbability" type="number" min="0" max="1" step="0.05" value="0.6">
+          <label for="energyCooldown">Cell cooldown (ticks)</label><input id="energyCooldown" type="number" min="0" max="10000" step="1" value="30">
+          <p class="hint">The uppermost cell receives 10/10 vertical energy. Each of the three lower-layer values remains independently editable from 0 to 10; the buttons are only shortcuts. Exposure and vertical shade are independent and additive when both are enabled.</p>
+        </div>
+      </details>
+
+      <details open>
+        <summary>Conserved water cycle</summary>
+        <div class="settings">
+          <label class="check"><input id="waterEnabled" type="checkbox" checked> Enable water-limited photosynthesis</label>
+          <label for="waterParticles">Total water particles</label><input id="waterParticles" type="number" min="0" max="4000000" step="1" value="1800">
+          <label for="initialVapor">Initial vapor fraction</label><input id="initialVapor" type="number" min="0" max="1" step="0.05" value="0.15">
+          <label for="transpiration">Transpiration rate</label><input id="transpiration" type="number" min="0" max="1" step="0.05" value="0.2">
+          <label for="condensation">Contact condensation chance</label><input id="condensation" type="number" min="0" max="1" step="0.05" value="0.2">
+          <label for="vaporTimeout">Vapor timeout (ticks)</label><input id="vaporTimeout" type="number" min="0" max="1000000" step="1" value="250">
+          <label for="groundEvaporation">Liquid-surface evaporation delay</label><input id="groundEvaporation" type="number" min="0" max="1000000" step="1" value="20">
+          <p class="hint">Every particle is always exactly one of: free liquid, freely diffusing vapor, or held by one plant cell. A connected plant can conduct stored water to a photosynthesizing cell. Rate 1 transpiration releases one held particle on every energy event; rate 0 retains it. A zero timeout disables that timeout. Surface evaporation closes the conserved cycle without creating rain.</p>
+        </div>
+      </details>
+
+      <details>
+        <summary>Evolution and lifespan</summary>
+        <div class="settings">
+          <label for="mutationRate">Mutation probability / offspring</label><input id="mutationRate" type="number" min="0" max="1" step="0.01" value="0.2">
+          <label class="check"><input id="frequencyDependence" type="checkbox"> Exact-genome local frequency dependence</label>
+          <label for="initialSeeds">Initial plants</label><input id="initialSeeds" type="number" min="1" max="10000" step="1" value="1">
+          <label for="initialSeedPlacement">First seed starts at</label>
+          <select id="initialSeedPlacement">
+            <option value="center" selected>Center</option>
+            <option value="bottom-center">Bottom-center</option>
+            <option value="random">Random position</option>
+          </select>
+          <label for="maxAge">Age multiplier</label><input id="maxAge" type="number" min="1" max="1000000" step="1" value="1000">
+          <label for="starvation">Dry/energy starvation clock</label><input id="starvation" type="number" min="1" max="1000000" step="1" value="200">
+          <label for="seedTravel">Airborne-seed walk (ticks)</label><input id="seedTravel" type="number" min="0" max="100000" step="1" value="40">
+          <label for="clearRadius">Germination clear radius</label><input id="clearRadius" type="number" min="0" max="100" step="1" value="3">
+          <p class="hint">The default is one initial seed. If initial plants is greater than one, the first uses the selected position and the rest start randomly. Mutation remains 60% bit flip, 20% subtree duplication, and 20% subtree deletion. Frequency dependence rejects locally common exact genomes at germination.</p>
+        </div>
+      </details>
+    </div>
+  </section>
+
+  <button id="showPanel" type="button" title="Show controls (Esc)">☰</button>
+  <div id="statusBox" role="status"></div>
+
+  <dialog id="oeeHelp" aria-labelledby="oeeHelpTitle">
+    <button id="oeeHelpClose" class="dialogClose" type="button" aria-label="Close">×</button>
+    <h2 id="oeeHelpTitle">What this OEE diagnostic tests</h2>
+    <p>Each exact whole genome is treated as one activity component. Once every 1,000 ticks, the lab compares the persistence of real genomes with a neutral shadow that receives the same ordered births and deaths but assigns genome identity without selection, drawing uniformly from genomes discovered so far.</p>
+    <h3>How to read the sparkline</h3>
+    <p>The line is the median normalized cumulative activity among genomes alive at that sample. Green/positive means the typical live genome has accumulated more sampled persistence than its neutral counterpart; coral/negative means less. This is not one overall “OEE score.”</p>
+    <p>If the median settles around +1 to +2 indefinitely, selection is real but bounded: the typical genome stays only one or two sampled persistence units ahead of neutral chance. That fails the unbounded-median requirement. A candidate OEE trajectory would be noisy, but its sustained envelope would keep reaching materially higher regimes—for example roughly +1, then +3, then +10, then +30 as observation time grows—without settling into a fixed band.</p>
+    <h3>Total versus new activity</h3>
+    <p><strong>Raw total</strong> and <strong>normalized total</strong> must also keep reaching higher sustained scales rather than repeatedly returning to the same range. <strong>New activity</strong> is different: it only has to stay persistently above zero. New activity hovering around +1 can satisfy that one condition if genuinely new genomes keep clearing the noise floor; it does not rescue a median or total that plateaus.</p>
+    <h3>What a strong single run would look like</h3>
+    <ul>
+      <li>Raw total activity keeps establishing higher long-run levels.</li>
+      <li>Normalized total and the median sparkline both keep expanding upward after chance is removed.</li>
+      <li>New activity remains above zero through late windows instead of appearing only in an early burst.</li>
+      <li>Extending the run reveals continued expansion, not a rise followed by a stable band or decline.</li>
+    </ul>
+    <h3>What the activity-statistics stage requires</h3>
+    <ul>
+      <li>Raw total cumulative activity keeps increasing without a finite ceiling.</li>
+      <li>Total and median activity remain unbounded after neutral normalization.</li>
+      <li>Normalized activity attributable to genuinely new genomes stays persistently positive.</li>
+    </ul>
+    <p class="caution">A single finite run can look consistent with OEE but cannot prove unboundedness. Repeated seeds and progressively longer/larger tests must show that the apparent upward envelope does not saturate. Passing these activity trends is also not the whole OEE claim: ongoing complexity growth and indefinite scalability still need separate evidence.</p>
+  </dialog>
+
+  <script>
+// TBT water/light laboratory core v1
+// Renderer-free, deterministic, and usable unchanged in Node or a browser.
+(function (root, factory) {
+  const api = factory();
+  if (typeof module === "object" && module.exports) module.exports = api;
+  else root.TbtWaterLab = api;
+})(typeof globalThis !== "undefined" ? globalThis : this, function () {
+  "use strict";
+
+  const SLOT_LEFT = 0;
+  const SLOT_UP = 1;
+  const SLOT_RIGHT = 2;
+  // Binary text is LEFT–UP–RIGHT, so LEFT is the high bit and RIGHT the low.
+  const SLOT_MASKS = new Uint8Array([0b100, 0b010, 0b001]);
+
+  // Facing order: north, east, south, west. Slots: left, up, right.
+  const DIR_DX = new Int8Array([
+    -1, 0, 1,
+     0, 1, 0,
+     1, 0, -1,
+     0, -1, 0,
+  ]);
+  const DIR_DY = new Int8Array([
+     0, -1, 0,
+    -1,  0, 1,
+     0,  1, 0,
+     1,  0, -1,
+  ]);
+  const ROTATIONS = new Uint8Array([
+    3, 0, 1,
+    0, 1, 2,
+    1, 2, 3,
+    2, 3, 0,
+  ]);
+
+  const DEFAULT_GENOME = new Uint8Array([0b010, 0b010, 0b010, 0b000]);
+
+  const WATER_LIQUID = 0;
+  const WATER_VAPOR = 1;
+  const WATER_HELD = 2;
+
+  const DEFAULT_CONFIG = Object.freeze({
+    cols: 160,
+    rows: 100,
+    seed: 14,
+    initialSeeds: 1,
+    initialSeedPlacement: "center",
+    initialGenome: DEFAULT_GENOME,
+    forceSeedStalk: true,
+    randomFacing: false,
+    airborneSteps: 40,
+    mutationRate: 0.2,
+    mutationBitFlipWeight: 0.6,
+    mutationDuplicationWeight: 0.2,
+    mutationDeletionWeight: 0.2,
+    maxPlantAge: 1000,
+    starvationTicks: 200,
+    germinationClearRadius: 3,
+    energyExposure: true,
+    energyShade: true,
+    shadeAfterOne: 0.5,
+    shadeAfterTwo: 0.3,
+    shadeAfterThree: 0.1,
+    graduatedAbsorption: false,
+    absorbProbability: 0.6,
+    energyCooldown: 30,
+    trackEnergyStats: false,
+    waterEnabled: true,
+    waterParticles: 1800,
+    initialVaporFraction: 0.15,
+    transpirationRate: 0.2,
+    condensationProbability: 0.2,
+    vaporTimeout: 250,
+    groundEvaporationTimeout: 20,
+    childStartingEnergy: false,
+    distanceBonus: false,
+    distanceBonusFactor: 0.1,
+    frequencyDependence: false,
+    freqDepRadius: 12,
+    freqDepK: 1,
+    freqDepMaxNeighbors: 4,
+  });
+
+  function normalizeConfig(overrides) {
+    const cfg = Object.assign({}, DEFAULT_CONFIG, overrides || {});
+    cfg.cols = Math.max(3, cfg.cols | 0);
+    cfg.rows = Math.max(3, cfg.rows | 0);
+    cfg.seed = Number.isFinite(Number(cfg.seed)) ? Number(cfg.seed) >>> 0 : 14;
+    cfg.initialSeeds = Math.max(0, cfg.initialSeeds | 0);
+    cfg.initialSeedPlacement = String(cfg.initialSeedPlacement || "center");
+    if (!["center", "bottom-center", "random"].includes(cfg.initialSeedPlacement)) {
+      cfg.initialSeedPlacement = "center";
+    }
+    cfg.airborneSteps = Math.max(0, cfg.airborneSteps | 0);
+    cfg.maxPlantAge = Math.max(1, Number(cfg.maxPlantAge));
+    cfg.starvationTicks = Math.max(1, cfg.starvationTicks | 0);
+    cfg.germinationClearRadius = Math.max(0, cfg.germinationClearRadius | 0);
+    cfg.freqDepRadius = Math.max(0, Number(cfg.freqDepRadius));
+    cfg.freqDepK = Math.max(0, Number(cfg.freqDepK));
+    cfg.freqDepMaxNeighbors = Math.max(1, Number(cfg.freqDepMaxNeighbors));
+    cfg.absorbProbability = Math.max(0, Math.min(1, Number(cfg.absorbProbability)));
+    cfg.energyCooldown = Math.max(0, cfg.energyCooldown | 0);
+    cfg.shadeAfterOne = Math.max(0, Math.min(1, Number(cfg.shadeAfterOne)));
+    cfg.shadeAfterTwo = Math.max(0, Math.min(1, Number(cfg.shadeAfterTwo)));
+    cfg.shadeAfterThree = Math.max(0, Math.min(1, Number(cfg.shadeAfterThree)));
+    cfg.waterParticles = Math.max(
+      0,
+      Math.min(cfg.cols * cfg.rows, Number(cfg.waterParticles) | 0)
+    );
+    cfg.initialVaporFraction = Math.max(
+      0,
+      Math.min(1, Number(cfg.initialVaporFraction))
+    );
+    cfg.transpirationRate = Math.max(0, Math.min(1, Number(cfg.transpirationRate)));
+    cfg.condensationProbability = Math.max(
+      0,
+      Math.min(1, Number(cfg.condensationProbability))
+    );
+    cfg.vaporTimeout = Math.max(0, Number(cfg.vaporTimeout) | 0);
+    cfg.groundEvaporationTimeout = Math.max(
+      0,
+      Number(cfg.groundEvaporationTimeout) | 0
+    );
+    cfg.mutationRate = Math.max(0, Math.min(1, Number(cfg.mutationRate)));
+    cfg.mutationBitFlipWeight = Math.max(0, Number(cfg.mutationBitFlipWeight));
+    cfg.mutationDuplicationWeight = Math.max(0, Number(cfg.mutationDuplicationWeight));
+    cfg.mutationDeletionWeight = Math.max(0, Number(cfg.mutationDeletionWeight));
+    if (
+      cfg.mutationBitFlipWeight +
+        cfg.mutationDuplicationWeight +
+        cfg.mutationDeletionWeight <=
+      0
+    ) {
+      throw new Error("At least one mutation operator must have positive weight");
+    }
+    cfg.initialGenome = canonicalGenome(cfg.initialGenome || DEFAULT_GENOME);
+    return cfg;
+  }
+
+  class XorShift32 {
+    constructor(seed) {
+      this.state = (seed >>> 0) || 0x6d2b79f5;
+    }
+    nextUint() {
+      let x = this.state >>> 0;
+      x ^= x << 13;
+      x ^= x >>> 17;
+      x ^= x << 5;
+      this.state = x >>> 0;
+      return this.state;
+    }
+    float() {
+      return this.nextUint() / 0x100000000;
+    }
+    int(n) {
+      if (!(n > 0)) throw new RangeError("PRNG.int requires n > 0");
+      return (this.float() * n) | 0;
+    }
+  }
+
+  class GeneNode {
+    constructor(geneBits) {
+      this.geneBits = geneBits & 7;
+      this.parent = null;
+      this.slotFromParent = -1;
+      this.children = [null, null, null];
+      // Developmental state. Each plant owns its decoded tree.
+      this.cell = null;
+      this.grownMask = 0;
+    }
+  }
+
+  function toGenomeArray(genome) {
+    if (genome instanceof Uint8Array) return genome;
+    if (Array.isArray(genome) || ArrayBuffer.isView(genome)) {
+      return Uint8Array.from(genome, (value) => Number(value) & 7);
+    }
+    throw new TypeError("Genome must be an array-like sequence of 0–7 genes");
+  }
+
+  function decodeGenomeToTree(genomeInput) {
+    const genome = toGenomeArray(genomeInput);
+    let index = 0;
+    function build(parent, slotFromParent) {
+      if (index >= genome.length) return null;
+      const node = new GeneNode(genome[index++]);
+      node.parent = parent || null;
+      node.slotFromParent = slotFromParent == null ? -1 : slotFromParent;
+      for (let slot = 0; slot < 3; slot++) {
+        if (node.geneBits & SLOT_MASKS[slot]) {
+          const child = build(node, slot);
+          if (child) node.children[slot] = child;
+          else node.geneBits &= ~SLOT_MASKS[slot];
+        }
+      }
+      return node;
+    }
+    return build(null, -1) || new GeneNode(0);
+  }
+
+  function encodeTreeToGenome(rootNode) {
+    const genes = [];
+    function visit(node) {
+      if (!node) return;
+      let bits = 0;
+      for (let slot = 0; slot < 3; slot++) {
+        if (node.children[slot]) bits |= SLOT_MASKS[slot];
+      }
+      node.geneBits = bits;
+      genes.push(bits);
+      for (let slot = 0; slot < 3; slot++) visit(node.children[slot]);
+    }
+    visit(rootNode);
+    return new Uint8Array(genes.length ? genes : [0]);
+  }
+
+  function canonicalGenome(genome) {
+    return encodeTreeToGenome(decodeGenomeToTree(genome));
+  }
+
+  function collectNodesPreorder(rootNode) {
+    const nodes = [];
+    (function visit(node) {
+      if (!node) return;
+      nodes.push(node);
+      for (let slot = 0; slot < 3; slot++) visit(node.children[slot]);
+    })(rootNode);
+    return nodes;
+  }
+
+  function genomeHash(genomeInput) {
+    return Array.prototype.join.call(toGenomeArray(genomeInput), ".");
+  }
+
+  function subtreeHashes(genomeInput, includeTerminals) {
+    const genome = canonicalGenome(genomeInput);
+    const spans = [];
+    function scan(start) {
+      if (start >= genome.length) return start;
+      const bits = genome[start];
+      let end = start + 1;
+      for (let slot = 0; slot < 3; slot++) {
+        if (bits & SLOT_MASKS[slot]) end = scan(end);
+      }
+      spans.push([start, end]);
+      return end;
+    }
+    scan(0);
+    const hashes = [];
+    for (let i = 0; i < spans.length; i++) {
+      const start = spans[i][0];
+      const end = spans[i][1];
+      if (includeTerminals || end - start >= 2) {
+        hashes.push(Array.prototype.join.call(genome.subarray(start, end), "."));
+      }
+    }
+    return hashes;
+  }
+
+  function incrementMap(map, key, amount) {
+    const next = (map.get(key) || 0) + amount;
+    if (next) map.set(key, next);
+    else map.delete(key);
+  }
+
+  function mapToSortedObject(map) {
+    const object = Object.create(null);
+    const keys = Array.from(map.keys()).sort();
+    for (let i = 0; i < keys.length; i++) object[keys[i]] = map.get(keys[i]);
+    return object;
+  }
+
+  function biasedNodeIndex(length, rng, forbidRoot) {
+    if (length <= 1) return 0;
+    let index = Math.max(rng.int(length), rng.int(length));
+    if (forbidRoot && index === 0) index = 1 + rng.int(length - 1);
+    return index;
+  }
+
+  function cloneSubtree(source, parent, slotFromParent) {
+    const clone = new GeneNode(source.geneBits);
+    clone.parent = parent || null;
+    clone.slotFromParent = slotFromParent == null ? -1 : slotFromParent;
+    for (let slot = 0; slot < 3; slot++) {
+      if (source.children[slot]) {
+        clone.children[slot] = cloneSubtree(source.children[slot], clone, slot);
+      }
+    }
+    return clone;
+  }
+
+  function mutationResult(root, operator, changed) {
+    return { genome: encodeTreeToGenome(root), operator, changed };
+  }
+
+  function mutateBitFlip(genomeInput, rng, config) {
+    const cfg = config || DEFAULT_CONFIG;
+    const root = decodeGenomeToTree(genomeInput);
+    const nodes = collectNodesPreorder(root);
+    const geneIndex = biasedNodeIndex(nodes.length, rng, cfg.forceSeedStalk);
+    const target = nodes[geneIndex];
+    const slot = rng.int(3);
+    const child = target.children[slot];
+    if (child) target.children[slot] = null;
+    else {
+      const terminal = new GeneNode(0);
+      terminal.parent = target;
+      terminal.slotFromParent = slot;
+      target.children[slot] = terminal;
+    }
+    return mutationResult(root, "bitFlip", true);
+  }
+
+  function mutateSubtreeDuplication(genomeInput, rng) {
+    const root = decodeGenomeToTree(genomeInput);
+    const nodes = collectNodesPreorder(root);
+    const emptySlots = [];
+    for (let i = 0; i < nodes.length; i++) {
+      for (let slot = 0; slot < 3; slot++) {
+        if (!nodes[i].children[slot]) emptySlots.push([nodes[i], slot]);
+      }
+    }
+    if (!emptySlots.length) return mutationResult(root, "duplication", false);
+    const source = nodes[rng.int(nodes.length)];
+    const destination = emptySlots[rng.int(emptySlots.length)];
+    destination[0].children[destination[1]] = cloneSubtree(
+      source,
+      destination[0],
+      destination[1]
+    );
+    return mutationResult(root, "duplication", true);
+  }
+
+  function mutateSubtreeDeletion(genomeInput, rng) {
+    const root = decodeGenomeToTree(genomeInput);
+    const nodes = collectNodesPreorder(root);
+    if (nodes.length <= 1) return mutationResult(root, "deletion", false);
+    // Uniform source/target choice makes duplication and deletion symmetric in
+    // expected subtree size. The newer-node bias remains only on bit flips.
+    const index = 1 + rng.int(nodes.length - 1);
+    const target = nodes[index];
+    target.parent.children[target.slotFromParent] = null;
+    return mutationResult(root, "deletion", true);
+  }
+
+  function mutateGenomeDetailed(genomeInput, rng, config) {
+    const cfg = config || DEFAULT_CONFIG;
+    const bitWeight = Math.max(0, Number(cfg.mutationBitFlipWeight));
+    const duplicationWeight = Math.max(0, Number(cfg.mutationDuplicationWeight));
+    const deletionWeight = Math.max(0, Number(cfg.mutationDeletionWeight));
+    const total = bitWeight + duplicationWeight + deletionWeight;
+    if (!(total > 0)) throw new Error("At least one mutation operator must have positive weight");
+    const roll = rng.float() * total;
+    if (roll < bitWeight) return mutateBitFlip(genomeInput, rng, cfg);
+    if (roll < bitWeight + duplicationWeight) {
+      return mutateSubtreeDuplication(genomeInput, rng);
+    }
+    return mutateSubtreeDeletion(genomeInput, rng);
+  }
+
+  function mutateGenome(genomeInput, rng, config) {
+    return mutateGenomeDetailed(genomeInput, rng, config).genome;
+  }
+
+  function hsvToRgbInt(h, s, v) {
+    const scaled = h * 6;
+    const sector = scaled | 0;
+    const f = scaled - sector;
+    const p = v * (1 - s);
+    const q = v * (1 - f * s);
+    const t = v * (1 - (1 - f) * s);
+    let r = v, g = t, b = p;
+    switch (sector % 6) {
+      case 1: r = q; g = v; b = p; break;
+      case 2: r = p; g = v; b = t; break;
+      case 3: r = p; g = q; b = v; break;
+      case 4: r = t; g = p; b = v; break;
+      case 5: r = v; g = p; b = q; break;
+    }
+    return (((r * 255 + 0.5) | 0) << 16) |
+      (((g * 255 + 0.5) | 0) << 8) |
+      ((b * 255 + 0.5) | 0);
+  }
+
+  function plantColorFromGenome(genome) {
+    let sum = 0;
+    for (let i = 0; i < genome.length; i++) sum += genome[i] + (i % 7);
+    return hsvToRgbInt((sum * 0.01) % 1, 0.78, 0.96);
+  }
+
+  class Plant {
+    constructor(sim, genomeInput, startingEnergy) {
+      this.sim = sim;
+      this.id = sim.nextPlantId++;
+      this.genome = canonicalGenome(genomeInput);
+      this.hash = genomeHash(this.genome);
+      this.subtreeComponents = sim.subtreeComponentsForGenome(this.genome);
+      this.color = plantColorFromGenome(this.genome);
+      this.rootNode = decodeGenomeToTree(this.genome);
+      this.seed = null;
+      this.energy = Number(startingEnergy) || 0;
+      this.freeSproutUsed = false;
+      this.cells = [];
+      this.frontier = [];
+      this.reproPhase = 0;
+      this.childGenome = null;
+      this.childGeneCount = 0;
+      this.age = 0;
+      this.ticksWithoutEnergy = 0;
+      this.dead = false;
+    }
+
+    registerCell(cell) {
+      this.cells.push(cell);
+      if (!cell.node) return;
+      cell.node.cell = cell;
+      for (let slot = 0; slot < 3; slot++) {
+        if (cell.node.children[slot] && !(cell.node.grownMask & (1 << slot))) {
+          this.frontier.push({ node: cell.node, slot });
+        }
+      }
+    }
+
+    removeFrontierAt(index) {
+      const last = this.frontier.length - 1;
+      if (index !== last) this.frontier[index] = this.frontier[last];
+      this.frontier.pop();
+    }
+
+    tryGrowOneStep() {
+      if (this.energy < 1 && this.freeSproutUsed) return false;
+      for (let i = this.frontier.length - 1; i >= 0; i--) {
+        if (this.energy < 1 && this.freeSproutUsed) return false;
+        const entry = this.frontier[i];
+        const node = entry.node;
+        const slot = entry.slot;
+        const parentCell = node.cell;
+        if (!parentCell || !node.children[slot]) {
+          this.removeFrontierAt(i);
+          continue;
+        }
+        const directionIndex = parentCell.facing * 3 + slot;
+        const nx = this.sim.wrapX(parentCell.x + DIR_DX[directionIndex]);
+        const ny = parentCell.y + DIR_DY[directionIndex];
+
+        if (!this.sim.inVerticalBounds(ny) || this.sim.cellAt(nx, ny)) {
+          node.grownMask |= 1 << slot;
+          this.removeFrontierAt(i);
+          continue;
+        }
+
+        let blocked = false;
+        for (let dx = -1; dx <= 1 && !blocked; dx++) {
+          for (let dy = -1; dy <= 1; dy++) {
+            if (dx === 0 && dy === 0) continue;
+            const cy = ny + dy;
+            if (!this.sim.inVerticalBounds(cy)) continue;
+            const neighbor = this.sim.cellAt(this.sim.wrapX(nx + dx), cy);
+            if (neighbor && neighbor.plant !== this) {
+              blocked = true;
+              break;
+            }
+          }
+        }
+
+        node.grownMask |= 1 << slot;
+        this.removeFrontierAt(i);
+        if (blocked) continue;
+
+        const newFacing = ROTATIONS[parentCell.facing * 3 + slot];
+        const child = this.sim.createStemCell(
+          nx,
+          ny,
+          this,
+          node.children[slot],
+          parentCell,
+          newFacing
+        );
+        parentCell.children.push(child);
+        if (this.freeSproutUsed) this.energy -= 1;
+        else this.freeSproutUsed = true;
+        this.sim.stats.growthEvents++;
+        return true;
+      }
+      return false;
+    }
+  }
+
+  class TbtSimulation {
+    constructor(config) {
+      this.config = normalizeConfig(config);
+      this.cols = this.config.cols;
+      this.rows = this.config.rows;
+      this.grid = new Array(this.cols * this.rows).fill(null);
+      this.columnTopY = new Int32Array(this.cols);
+      this.columnTopY.fill(this.rows);
+      this.rng = new XorShift32(this.config.seed);
+      this.tickCount = 0;
+      this.nextPlantId = 1;
+      this.nextCellId = 1;
+      this.plants = [];
+      this.travelingSeeds = [];
+      this.waterParticles = [];
+      this.waterGrid = new Array(this.cols * this.rows).fill(null);
+      this.nextWaterId = 1;
+      this.subtreeCache = new Map();
+      this.liveGenomeCounts = new Map();
+      this.liveSubtreeCounts = new Map();
+      this.rootsByGenome = new Map();
+      this.telemetryEvents = this.newTelemetryEvents();
+      this.stats = {
+        births: 0,
+        deaths: 0,
+        failedSeeds: 0,
+        mutationEvents: 0,
+        mutationOperators: { bitFlip: 0, duplication: 0, deletion: 0, skipped: 0 },
+        growthEvents: 0,
+        energyEvents: 0,
+        energyBySource: { exposure: 0, shade: 0 },
+        waterAbsorbed: 0,
+        waterTranspired: 0,
+        waterCondensed: 0,
+        groundEvaporated: 0,
+        liquidMoves: 0,
+        vaporMoves: 0,
+        freqDepChecks: 0,
+        freqDepRejected: 0,
+      };
+      this.initializeWater();
+      this.initializeSeeds();
+    }
+
+    newTelemetryEvents() {
+      return {
+        births: 0,
+        deaths: 0,
+        genomeBirths: new Map(),
+        genomeDeaths: new Map(),
+        subtreeBirths: new Map(),
+        subtreeDeaths: new Map(),
+        demography: [],
+      };
+    }
+
+    initializeWater() {
+      if (!this.config.waterEnabled || this.config.waterParticles <= 0) return;
+      const area = this.cols * this.rows;
+      const count = Math.min(area, this.config.waterParticles);
+      const sites = new Int32Array(area);
+      for (let i = 0; i < area; i++) sites[i] = i;
+      for (let i = 0; i < count; i++) {
+        const swapIndex = i + this.rng.int(area - i);
+        const site = sites[swapIndex];
+        sites[swapIndex] = sites[i];
+        sites[i] = site;
+        const state = this.rng.float() < this.config.initialVaporFraction
+          ? WATER_VAPOR
+          : WATER_LIQUID;
+        const particle = {
+          id: this.nextWaterId++,
+          state,
+          x: site % this.cols,
+          y: (site / this.cols) | 0,
+          vaporAge: 0,
+          liquidAge: 0,
+          holder: null,
+        };
+        this.waterParticles.push(particle);
+        this.waterGrid[site] = particle;
+      }
+    }
+
+    clearFreeWaterSite(particle) {
+      if (particle.state === WATER_HELD) return;
+      const index = particle.y * this.cols + particle.x;
+      if (this.waterGrid[index] === particle) this.waterGrid[index] = null;
+    }
+
+    moveFreeWater(particle, x, y) {
+      x = this.wrapX(x);
+      if (!this.inVerticalBounds(y)) return false;
+      const nextIndex = y * this.cols + x;
+      const occupant = this.waterGrid[nextIndex];
+      if (occupant && occupant !== particle) return false;
+      this.clearFreeWaterSite(particle);
+      particle.x = x;
+      particle.y = y;
+      this.waterGrid[nextIndex] = particle;
+      return true;
+    }
+
+    holdWater(particle, cell) {
+      if (!particle || !cell || cell.waterParticle || particle.state === WATER_HELD) {
+        return false;
+      }
+      this.clearFreeWaterSite(particle);
+      particle.state = WATER_HELD;
+      particle.x = cell.x;
+      particle.y = cell.y;
+      particle.vaporAge = 0;
+      particle.liquidAge = 0;
+      particle.holder = cell;
+      cell.waterParticle = particle;
+      this.stats.waterAbsorbed++;
+      return true;
+    }
+
+    findEmissionSite(x, y, preferNeighbor) {
+      const start = preferNeighbor ? this.rng.int(4) : 0;
+      if (!preferNeighbor && !this.waterAt(x, y)) return [this.wrapX(x), y];
+      for (let offset = 0; offset < 4; offset++) {
+        const direction = (start + offset) & 3;
+        let nx = x;
+        let ny = y;
+        if (direction === 0) nx = this.wrapX(x - 1);
+        else if (direction === 1) nx = this.wrapX(x + 1);
+        else if (direction === 2) ny = y > 0 ? y - 1 : y;
+        else ny = y < this.rows - 1 ? y + 1 : y;
+        if (!this.waterAt(nx, ny)) return [nx, ny];
+      }
+      return [this.wrapX(x), y];
+    }
+
+    releaseHeldWater(cell, state, preferNeighbor, emissionCell) {
+      const particle = cell && cell.waterParticle;
+      if (!particle) return null;
+      const origin = emissionCell || cell;
+      cell.waterParticle = null;
+      particle.holder = null;
+      particle.state = state;
+      particle.vaporAge = 0;
+      particle.liquidAge = 0;
+      const site = this.findEmissionSite(origin.x, origin.y, !!preferNeighbor);
+      particle.x = site[0];
+      particle.y = site[1];
+      const index = particle.y * this.cols + particle.x;
+      if (this.waterGrid[index] && this.waterGrid[index] !== particle) {
+        if (!this.waterAt(cell.x, cell.y)) {
+          particle.x = cell.x;
+          particle.y = cell.y;
+        } else {
+          // A held particle guarantees at least one free water-layer site.
+          const start = this.rng.int(this.cols * this.rows);
+          for (let offset = 0; offset < this.cols * this.rows; offset++) {
+            const candidate = (start + offset) % (this.cols * this.rows);
+            if (!this.waterGrid[candidate]) {
+              particle.x = candidate % this.cols;
+              particle.y = (candidate / this.cols) | 0;
+              break;
+            }
+          }
+        }
+      }
+      this.waterGrid[particle.y * this.cols + particle.x] = particle;
+      return particle;
+    }
+
+    tryHydrateCellAtSite(cell) {
+      if (!cell || cell.waterParticle) return false;
+      const particle = this.waterAt(cell.x, cell.y);
+      if (particle && particle.state === WATER_LIQUID) {
+        return this.holdWater(particle, cell);
+      }
+      return false;
+    }
+
+    tryAbsorbLiquid(particle) {
+      if (!particle || particle.state !== WATER_LIQUID) return false;
+      const candidates = [];
+      const positions = [
+        [particle.x, particle.y],
+        [particle.x, particle.y + 1],
+        [this.wrapX(particle.x - 1), particle.y],
+        [this.wrapX(particle.x + 1), particle.y],
+        [particle.x, particle.y - 1],
+      ];
+      for (let i = 0; i < positions.length; i++) {
+        const x = positions[i][0];
+        const y = positions[i][1];
+        if (!this.inVerticalBounds(y)) continue;
+        const cell = this.cellAt(x, y);
+        if (cell && !cell.waterParticle) candidates.push(cell);
+      }
+      if (!candidates.length) return false;
+      return this.holdWater(particle, candidates[this.rng.int(candidates.length)]);
+    }
+
+    vaporTouchesSurface(particle) {
+      if (particle.y === 0 || this.cellAt(particle.x, particle.y)) return true;
+      const positions = [
+        [this.wrapX(particle.x - 1), particle.y],
+        [this.wrapX(particle.x + 1), particle.y],
+        [particle.x, particle.y - 1],
+        [particle.x, particle.y + 1],
+      ];
+      for (let i = 0; i < positions.length; i++) {
+        const x = positions[i][0];
+        const y = positions[i][1];
+        if (!this.inVerticalBounds(y)) continue;
+        if (this.cellAt(x, y)) return true;
+        const other = this.waterAt(x, y);
+        if (other && other !== particle) return true;
+      }
+      return false;
+    }
+
+    condenseWater(particle) {
+      if (!particle || particle.state !== WATER_VAPOR) return false;
+      particle.state = WATER_LIQUID;
+      particle.vaporAge = 0;
+      particle.liquidAge = 0;
+      this.stats.waterCondensed++;
+      this.tryAbsorbLiquid(particle);
+      return true;
+    }
+
+    advanceVapor(particle) {
+      particle.vaporAge++;
+      if (
+        this.config.vaporTimeout > 0 &&
+        particle.vaporAge >= this.config.vaporTimeout
+      ) {
+        this.condenseWater(particle);
+        return;
+      }
+      if (
+        this.vaporTouchesSurface(particle) &&
+        this.rng.float() < this.config.condensationProbability
+      ) {
+        this.condenseWater(particle);
+        return;
+      }
+
+      const direction = this.rng.int(4);
+      let nx = particle.x;
+      let ny = particle.y;
+      if (direction === 0) nx = this.wrapX(nx - 1);
+      else if (direction === 1) nx = this.wrapX(nx + 1);
+      else if (direction === 2) ny = ny > 0 ? ny - 1 : Math.min(1, this.rows - 1);
+      else ny = ny < this.rows - 1 ? ny + 1 : Math.max(0, this.rows - 2);
+
+      if (this.cellAt(nx, ny) || this.waterAt(nx, ny)) return;
+      if (this.moveFreeWater(particle, nx, ny)) this.stats.vaporMoves++;
+    }
+
+    advanceLiquid(particle) {
+      if (this.tryAbsorbLiquid(particle)) return;
+      const restAndMaybeEvaporate = () => {
+        const aboveY = particle.y - 1;
+        const aboveWater = aboveY >= 0 ? this.waterAt(particle.x, aboveY) : null;
+        const abovePlant = aboveY >= 0 ? this.cellAt(particle.x, aboveY) : null;
+        const exposedSurface = !abovePlant &&
+          (!aboveWater || aboveWater.state === WATER_VAPOR);
+        if (!exposedSurface) {
+          particle.liquidAge = 0;
+          return;
+        }
+        particle.liquidAge++;
+        if (
+          this.config.groundEvaporationTimeout > 0 &&
+          particle.liquidAge >= this.config.groundEvaporationTimeout
+        ) {
+          particle.state = WATER_VAPOR;
+          particle.vaporAge = 0;
+          particle.liquidAge = 0;
+          this.stats.groundEvaporated++;
+        }
+      };
+      if (particle.y >= this.rows - 1) {
+        restAndMaybeEvaporate();
+        return;
+      }
+      const nx = particle.x;
+      const ny = particle.y + 1;
+      const cellBelow = this.cellAt(nx, ny);
+      if (cellBelow) {
+        if (!cellBelow.waterParticle) this.holdWater(particle, cellBelow);
+        else restAndMaybeEvaporate();
+        return;
+      }
+      if (this.waterAt(nx, ny)) {
+        restAndMaybeEvaporate();
+        return;
+      }
+      if (this.moveFreeWater(particle, nx, ny)) {
+        particle.liquidAge = 0;
+        this.stats.liquidMoves++;
+      }
+    }
+
+    advanceWater() {
+      if (!this.config.waterEnabled) return;
+      for (let i = 0; i < this.waterParticles.length; i++) {
+        const particle = this.waterParticles[i];
+        if (particle.state === WATER_VAPOR) this.advanceVapor(particle);
+        else if (particle.state === WATER_LIQUID) this.advanceLiquid(particle);
+      }
+    }
+
+    subtreeComponentsForGenome(genome) {
+      const hash = genomeHash(genome);
+      let components = this.subtreeCache.get(hash);
+      if (!components) {
+        components = Object.freeze(subtreeHashes(genome, false));
+        this.subtreeCache.set(hash, components);
+      }
+      return components;
+    }
+
+    recordPlantBirth(plant) {
+      let roots = this.rootsByGenome.get(plant.hash);
+      if (!roots) {
+        roots = new Set();
+        this.rootsByGenome.set(plant.hash, roots);
+      }
+      roots.add(plant);
+      incrementMap(this.liveGenomeCounts, plant.hash, 1);
+      incrementMap(this.telemetryEvents.genomeBirths, plant.hash, 1);
+      for (let i = 0; i < plant.subtreeComponents.length; i++) {
+        const hash = plant.subtreeComponents[i];
+        incrementMap(this.liveSubtreeCounts, hash, 1);
+        incrementMap(this.telemetryEvents.subtreeBirths, hash, 1);
+      }
+      this.telemetryEvents.demography.push({
+        op: "birth",
+        genome: plant.hash,
+        subtrees: Array.from(plant.subtreeComponents),
+      });
+      this.telemetryEvents.births++;
+    }
+
+    recordPlantDeath(plant) {
+      const roots = this.rootsByGenome.get(plant.hash);
+      if (roots) {
+        roots.delete(plant);
+        if (!roots.size) this.rootsByGenome.delete(plant.hash);
+      }
+      incrementMap(this.liveGenomeCounts, plant.hash, -1);
+      incrementMap(this.telemetryEvents.genomeDeaths, plant.hash, 1);
+      for (let i = 0; i < plant.subtreeComponents.length; i++) {
+        const hash = plant.subtreeComponents[i];
+        incrementMap(this.liveSubtreeCounts, hash, -1);
+        incrementMap(this.telemetryEvents.subtreeDeaths, hash, 1);
+      }
+      this.telemetryEvents.demography.push({
+        op: "death",
+        genome: plant.hash,
+        subtrees: Array.from(plant.subtreeComponents),
+      });
+      this.telemetryEvents.deaths++;
+    }
+
+    wrapX(x) {
+      if (x < 0) return x + this.cols;
+      if (x >= this.cols) return x - this.cols;
+      return x;
+    }
+
+    inVerticalBounds(y) {
+      return y >= 0 && y < this.rows;
+    }
+
+    cellAt(x, y) {
+      if (!this.inVerticalBounds(y)) return null;
+      return this.grid[y * this.cols + this.wrapX(x)];
+    }
+
+    waterAt(x, y) {
+      if (!this.inVerticalBounds(y)) return null;
+      return this.waterGrid[y * this.cols + this.wrapX(x)];
+    }
+
+    recomputeColumnLayers(x) {
+      x = this.wrapX(x);
+      let top = this.rows;
+      let layers = 0;
+      for (let y = 0; y < this.rows; y++) {
+        const cell = this.grid[y * this.cols + x];
+        if (!cell) continue;
+        if (top === this.rows) top = y;
+        cell.shadeLayersAbove = layers;
+        layers++;
+      }
+      this.columnTopY[x] = top;
+    }
+
+    placeCell(cell) {
+      const index = cell.y * this.cols + cell.x;
+      if (this.grid[index]) throw new Error("Attempted to place a cell on an occupied site");
+      this.grid[index] = cell;
+      this.recomputeColumnLayers(cell.x);
+    }
+
+    removeCell(cell) {
+      const index = cell.y * this.cols + cell.x;
+      if (cell.waterParticle) this.releaseHeldWater(cell, WATER_LIQUID);
+      if (this.grid[index] === cell) this.grid[index] = null;
+      this.recomputeColumnLayers(cell.x);
+    }
+
+    createCell(x, y, plant, node, parent, facing, isSeed) {
+      const cell = {
+        id: this.nextCellId++,
+        x,
+        y,
+        plant,
+        node,
+        parent: parent || null,
+        children: [],
+        facing,
+        isSeed: !!isSeed,
+        exposureCooldown: 0,
+        shadeCooldown: 0,
+        shadeLayersAbove: 0,
+        waterParticle: null,
+        depth: parent ? parent.depth + 1 : 0,
+      };
+      this.placeCell(cell);
+      plant.registerCell(cell);
+      if (this.config.waterEnabled) this.tryHydrateCellAtSite(cell);
+      return cell;
+    }
+
+    createStemCell(x, y, plant, node, parent, facing) {
+      return this.createCell(x, y, plant, node, parent, facing, false);
+    }
+
+    createPlant(genome, x, y, startingEnergy) {
+      x = this.wrapX(x | 0);
+      y |= 0;
+      if (!this.inVerticalBounds(y) || this.cellAt(x, y)) return null;
+      const plant = new Plant(this, genome, startingEnergy);
+      const facing = this.config.randomFacing ? this.rng.int(4) : 0;
+      plant.seed = this.createCell(x, y, plant, plant.rootNode, null, facing, true);
+      this.plants.push(plant);
+      this.stats.births++;
+      this.recordPlantBirth(plant);
+      return plant;
+    }
+
+    initializeSeeds() {
+      const count = this.config.initialSeeds;
+      const halfMutated = (count / 2) | 0;
+      for (let i = 0; i < count; i++) {
+        let x;
+        let y;
+        if (i === 0 && this.config.initialSeedPlacement !== "random") {
+          x = (this.cols / 2) | 0;
+          y = this.config.initialSeedPlacement === "bottom-center"
+            ? this.rows - 1
+            : (this.rows / 2) | 0;
+        } else {
+          let attempts = 0;
+          do {
+            x = this.rng.int(this.cols);
+            y = this.rng.int(this.rows);
+            attempts++;
+          } while (this.cellAt(x, y) && attempts < 1000);
+          if (attempts >= 1000) continue;
+        }
+        const useMutation = i >= count - halfMutated;
+        const genome = useMutation
+          ? mutateGenome(this.config.initialGenome, this.rng, this.config)
+          : new Uint8Array(this.config.initialGenome);
+        this.createPlant(genome, x, y, 0);
+      }
+    }
+
+    removePlantAt(index) {
+      const plant = this.plants[index];
+      if (!plant || plant.dead) return;
+      plant.dead = true;
+      this.recordPlantDeath(plant);
+      for (let i = 0; i < plant.cells.length; i++) {
+        const cell = plant.cells[i];
+        this.removeCell(cell);
+        if (cell.node) cell.node.cell = null;
+      }
+      plant.cells.length = 0;
+      plant.frontier.length = 0;
+      const last = this.plants.length - 1;
+      if (index !== last) this.plants[index] = this.plants[last];
+      this.plants.pop();
+      this.stats.deaths++;
+    }
+
+    exposureYield(cell) {
+      let open = 0;
+      if (!this.cellAt(cell.x, cell.y - 1)) open++;
+      if (!this.cellAt(cell.x + 1, cell.y)) open++;
+      if (!this.cellAt(cell.x, cell.y + 1)) open++;
+      if (!this.cellAt(cell.x - 1, cell.y)) open++;
+      if (!this.config.graduatedAbsorption) return open >= 3 ? 1 : 0;
+      if (open >= 3) return 1.5;
+      if (open === 2) return 1;
+      if (open === 1) return 0.5;
+      return 0;
+    }
+
+    shadeYield(cell) {
+      const layers = cell.shadeLayersAbove | 0;
+      if (layers <= 0) return 1;
+      if (layers === 1) return this.config.shadeAfterOne;
+      if (layers === 2) return this.config.shadeAfterTwo;
+      return this.config.shadeAfterThree;
+    }
+
+    waterSourceCell(cell) {
+      if (cell.waterParticle) return cell;
+      const cells = cell.plant.cells;
+      for (let i = 0; i < cells.length; i++) {
+        if (cells[i].waterParticle) return cells[i];
+      }
+      return null;
+    }
+
+    creditEnergy(cell, baseEnergy, source) {
+      const waterSource = this.config.waterEnabled ? this.waterSourceCell(cell) : null;
+      if (this.config.waterEnabled && !waterSource) return false;
+      let energy = baseEnergy;
+      if (this.config.distanceBonus) {
+        energy *= 1 + cell.depth * this.config.distanceBonusFactor;
+      }
+      cell.plant.energy += energy;
+      cell.plant.ticksWithoutEnergy = 0;
+      if (this.config.trackEnergyStats) {
+        this.stats.energyEvents++;
+        this.stats.energyBySource[source] += energy;
+      }
+      if (
+        this.config.waterEnabled &&
+        waterSource &&
+        this.rng.float() < this.config.transpirationRate
+      ) {
+        this.releaseHeldWater(waterSource, WATER_VAPOR, true, cell);
+        this.stats.waterTranspired++;
+      }
+      return true;
+    }
+
+    advanceEnergy() {
+      for (let p = 0; p < this.plants.length; p++) {
+        const plant = this.plants[p];
+        for (let c = 0; c < plant.cells.length; c++) {
+          const cell = plant.cells[c];
+          if (cell.isSeed) continue;
+          if (this.config.energyExposure) {
+            if (cell.exposureCooldown > 0) cell.exposureCooldown--;
+            else {
+              const amount = this.exposureYield(cell);
+              if (amount > 0 && this.rng.float() < this.config.absorbProbability) {
+                if (this.creditEnergy(cell, amount, "exposure")) {
+                  cell.exposureCooldown = this.config.energyCooldown;
+                }
+              }
+            }
+          }
+          if (this.config.energyShade) {
+            if (cell.shadeCooldown > 0) cell.shadeCooldown--;
+            else {
+              const amount = this.shadeYield(cell);
+              if (amount > 0 && this.rng.float() < this.config.absorbProbability) {
+                if (this.creditEnergy(cell, amount, "shade")) {
+                  cell.shadeCooldown = this.config.energyCooldown;
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+
+    createTravelingSeed(parentPlant, childGenome) {
+      this.travelingSeeds.push({
+        state: 0,
+        parentPlant,
+        childGenome: new Uint8Array(childGenome),
+        currentNode: parentPlant.rootNode,
+        x: 0,
+        y: 0,
+        stepsTaken: 0,
+        dead: false,
+      });
+    }
+
+    advanceReproduction() {
+      const lengthAtStart = this.plants.length;
+      for (let i = 0; i < lengthAtStart; i++) {
+        const plant = this.plants[i];
+        const parentCost = plant.genome.length;
+        if (plant.reproPhase === 0) {
+          if (plant.energy >= parentCost) {
+            if (this.rng.float() < this.config.mutationRate) {
+              const mutation = mutateGenomeDetailed(plant.genome, this.rng, this.config);
+              plant.childGenome = mutation.genome;
+              this.stats.mutationEvents++;
+              this.stats.mutationOperators[mutation.operator]++;
+              if (!mutation.changed) this.stats.mutationOperators.skipped++;
+            } else {
+              plant.childGenome = new Uint8Array(plant.genome);
+            }
+            plant.childGeneCount = plant.childGenome.length;
+            plant.reproPhase = 1;
+          }
+        } else if (plant.energy >= parentCost + plant.childGeneCount) {
+          this.createTravelingSeed(plant, plant.childGenome);
+          plant.energy -= plant.childGeneCount;
+          plant.reproPhase = 0;
+          plant.childGenome = null;
+          plant.childGeneCount = 0;
+        }
+      }
+    }
+
+    germinationSiteClear(x, y) {
+      if (!this.inVerticalBounds(y) || this.cellAt(x, y)) return false;
+      const radius = this.config.germinationClearRadius;
+      for (let dx = -radius; dx <= radius; dx++) {
+        for (let dy = -radius; dy <= radius; dy++) {
+          if (dx === 0 && dy === 0) continue;
+          const cy = y + dy;
+          if (!this.inVerticalBounds(cy)) continue;
+          if (this.cellAt(this.wrapX(x + dx), cy)) return false;
+        }
+      }
+      return true;
+    }
+
+    frequencyFailureProbability(genome, x, y) {
+      if (!this.config.frequencyDependence || this.config.freqDepK <= 0) return 0;
+      const hash = genomeHash(genome);
+      const roots = this.rootsByGenome.get(hash);
+      if (!roots || !roots.size) return 0;
+      const radius = this.config.freqDepRadius;
+      const radiusSquared = radius * radius;
+      let similarCount = 0;
+      for (const plant of roots) {
+        if (plant.dead || !plant.seed) continue;
+        let dx = Math.abs(plant.seed.x - x);
+        dx = Math.min(dx, this.cols - dx);
+        const dy = plant.seed.y - y;
+        if (dx * dx + dy * dy <= radiusSquared) similarCount++;
+      }
+      return Math.min(
+        1,
+        (this.config.freqDepK * similarCount) / this.config.freqDepMaxNeighbors
+      );
+    }
+
+    randomWalkSeed(seed) {
+      const direction = this.rng.int(4);
+      if (direction === 0) seed.x = this.wrapX(seed.x - 1);
+      else if (direction === 1) seed.x = this.wrapX(seed.x + 1);
+      else if (direction === 2) {
+        // Reflect from the sky boundary; never wrap to the bottom.
+        seed.y = seed.y > 0 ? seed.y - 1 : Math.min(1, this.rows - 1);
+      } else {
+        // Reflect from the bottom boundary; never wrap to the top.
+        seed.y = seed.y < this.rows - 1 ? seed.y + 1 : Math.max(0, this.rows - 2);
+      }
+    }
+
+    advanceTravelingSeeds() {
+      for (let i = this.travelingSeeds.length - 1; i >= 0; i--) {
+        const seed = this.travelingSeeds[i];
+        if (seed.dead) continue;
+        if (seed.state === 0) {
+          if (!seed.currentNode.cell || seed.parentPlant.dead) {
+            seed.dead = true;
+            continue;
+          }
+          const grownChildren = [];
+          for (let slot = 0; slot < 3; slot++) {
+            const child = seed.currentNode.children[slot];
+            if (child && child.cell) grownChildren.push(child);
+          }
+          if (grownChildren.length) {
+            seed.currentNode = grownChildren[this.rng.int(grownChildren.length)];
+          } else {
+            seed.state = 1;
+            seed.x = seed.currentNode.cell.x;
+            seed.y = seed.currentNode.cell.y;
+            seed.stepsTaken = 0;
+          }
+        } else if (seed.stepsTaken >= this.config.airborneSteps) {
+          if (this.germinationSiteClear(seed.x, seed.y)) {
+            const failureProbability = this.frequencyFailureProbability(
+              seed.childGenome,
+              seed.x,
+              seed.y
+            );
+            if (failureProbability > 0) {
+              this.stats.freqDepChecks++;
+            }
+            if (failureProbability > 0 && this.rng.float() < failureProbability) {
+              this.stats.failedSeeds++;
+              this.stats.freqDepRejected++;
+            } else {
+              this.createPlant(
+                seed.childGenome,
+                seed.x,
+                seed.y,
+                this.config.childStartingEnergy ? seed.childGenome.length : 0
+              );
+            }
+          } else {
+            this.stats.failedSeeds++;
+          }
+          seed.dead = true;
+        } else {
+          this.randomWalkSeed(seed);
+          seed.stepsTaken++;
+        }
+      }
+
+      for (let i = this.travelingSeeds.length - 1; i >= 0; i--) {
+        if (!this.travelingSeeds[i].dead) continue;
+        const last = this.travelingSeeds.length - 1;
+        if (i !== last) this.travelingSeeds[i] = this.travelingSeeds[last];
+        this.travelingSeeds.pop();
+      }
+    }
+
+    tick() {
+      this.tickCount++;
+      for (let i = this.plants.length - 1; i >= 0; i--) {
+        const plant = this.plants[i];
+        plant.age++;
+        plant.ticksWithoutEnergy++;
+        if (
+          plant.age >= this.config.maxPlantAge * plant.genome.length ||
+          plant.ticksWithoutEnergy >= this.config.starvationTicks
+        ) {
+          this.removePlantAt(i);
+          continue;
+        }
+        plant.tryGrowOneStep();
+      }
+      this.advanceWater();
+      this.advanceEnergy();
+      this.advanceReproduction();
+      this.advanceTravelingSeeds();
+      return this;
+    }
+
+    tickMany(count) {
+      count = Math.max(0, count | 0);
+      for (let i = 0; i < count; i++) this.tick();
+      return this;
+    }
+
+    cellCount() {
+      let count = 0;
+      for (let i = 0; i < this.plants.length; i++) count += this.plants[i].cells.length;
+      return count;
+    }
+
+    waterStateCounts() {
+      let liquid = 0;
+      let vapor = 0;
+      let held = 0;
+      for (let i = 0; i < this.waterParticles.length; i++) {
+        const state = this.waterParticles[i].state;
+        if (state === WATER_LIQUID) liquid++;
+        else if (state === WATER_VAPOR) vapor++;
+        else if (state === WATER_HELD) held++;
+      }
+      return {
+        total: liquid + vapor + held,
+        expected: this.config.waterEnabled ? this.config.waterParticles : 0,
+        liquid,
+        vapor,
+        held,
+      };
+    }
+
+    summary() {
+      const genomeTypes = new Set();
+      let genomeLength = 0;
+      for (let i = 0; i < this.plants.length; i++) {
+        genomeTypes.add(this.plants[i].hash);
+        genomeLength += this.plants[i].genome.length;
+      }
+      return {
+        tick: this.tickCount,
+        seed: this.config.seed,
+        rngState: this.rng.state >>> 0,
+        population: this.plants.length,
+        cells: this.cellCount(),
+        travelingSeeds: this.travelingSeeds.length,
+        genomeTypes: genomeTypes.size,
+        meanGenomeLength: this.plants.length ? genomeLength / this.plants.length : 0,
+        births: this.stats.births,
+        deaths: this.stats.deaths,
+        failedSeeds: this.stats.failedSeeds,
+        mutationEvents: this.stats.mutationEvents,
+        mutationOperators: Object.assign({}, this.stats.mutationOperators),
+        growthEvents: this.stats.growthEvents,
+        energyEvents: this.stats.energyEvents,
+        energyBySource: Object.assign({}, this.stats.energyBySource),
+        water: this.waterStateCounts(),
+        waterAbsorbed: this.stats.waterAbsorbed,
+        waterTranspired: this.stats.waterTranspired,
+        waterCondensed: this.stats.waterCondensed,
+        groundEvaporated: this.stats.groundEvaporated,
+        liquidMoves: this.stats.liquidMoves,
+        vaporMoves: this.stats.vaporMoves,
+        freqDepChecks: this.stats.freqDepChecks,
+        freqDepRejected: this.stats.freqDepRejected,
+      };
+    }
+
+    telemetrySnapshot(resetEvents) {
+      const events = this.telemetryEvents;
+      let genomeLength = 0;
+      for (let i = 0; i < this.plants.length; i++) {
+        genomeLength += this.plants[i].genome.length;
+      }
+      const snapshot = {
+        type: "sample",
+        tick: this.tickCount,
+        pop: this.plants.length,
+        cells: this.cellCount(),
+        travelingSeeds: this.travelingSeeds.length,
+        births: events.births,
+        deaths: events.deaths,
+        meanGenomeLen: this.plants.length ? genomeLength / this.plants.length : 0,
+        genomes: mapToSortedObject(this.liveGenomeCounts),
+        subtrees: mapToSortedObject(this.liveSubtreeCounts),
+        events: {
+          genomeBirths: mapToSortedObject(events.genomeBirths),
+          genomeDeaths: mapToSortedObject(events.genomeDeaths),
+          subtreeBirths: mapToSortedObject(events.subtreeBirths),
+          subtreeDeaths: mapToSortedObject(events.subtreeDeaths),
+          demography: events.demography,
+        },
+        water: this.waterStateCounts(),
+      };
+      if (resetEvents !== false) this.telemetryEvents = this.newTelemetryEvents();
+      return snapshot;
+    }
+
+    stateDigest() {
+      let hash = 0x811c9dc5;
+      function mix(value) {
+        value >>>= 0;
+        for (let i = 0; i < 4; i++) {
+          hash ^= value & 0xff;
+          hash = Math.imul(hash, 0x01000193) >>> 0;
+          value >>>= 8;
+        }
+      }
+      mix(this.tickCount);
+      mix(this.rng.state);
+      mix(this.plants.length);
+      mix(this.travelingSeeds.length);
+      const ordered = this.plants.slice().sort((a, b) => a.id - b.id);
+      for (let i = 0; i < ordered.length; i++) {
+        const plant = ordered[i];
+        mix(plant.id);
+        mix(plant.age);
+        mix(plant.ticksWithoutEnergy);
+        mix(plant.reproPhase);
+        mix(plant.freeSproutUsed ? 1 : 0);
+        mix((plant.energy * 1000000) | 0);
+        mix(plant.genome.length);
+        for (let g = 0; g < plant.genome.length; g++) mix(plant.genome[g]);
+        const cells = plant.cells.slice().sort((a, b) => a.id - b.id);
+        mix(cells.length);
+        for (let c = 0; c < cells.length; c++) {
+          mix(cells[c].x);
+          mix(cells[c].y);
+          mix(cells[c].facing);
+          mix(cells[c].isSeed ? 1 : 0);
+          mix(cells[c].exposureCooldown);
+          mix(cells[c].shadeCooldown);
+          mix(cells[c].shadeLayersAbove);
+          mix(cells[c].waterParticle ? cells[c].waterParticle.id : 0);
+          mix(cells[c].parent ? cells[c].parent.id : 0);
+        }
+      }
+      for (let i = 0; i < this.travelingSeeds.length; i++) {
+        const seed = this.travelingSeeds[i];
+        mix(seed.state);
+        mix(seed.parentPlant ? seed.parentPlant.id : 0);
+        mix(seed.x);
+        mix(seed.y);
+        mix(seed.stepsTaken);
+        mix(seed.childGenome.length);
+        for (let g = 0; g < seed.childGenome.length; g++) mix(seed.childGenome[g]);
+      }
+      const orderedWater = this.waterParticles.slice().sort((a, b) => a.id - b.id);
+      for (let i = 0; i < orderedWater.length; i++) {
+        const particle = orderedWater[i];
+        mix(particle.id);
+        mix(particle.state);
+        mix(particle.x);
+        mix(particle.y);
+        mix(particle.vaporAge);
+        mix(particle.liquidAge);
+        mix(particle.holder ? particle.holder.id : 0);
+      }
+      return hash.toString(16).padStart(8, "0");
+    }
+  }
+
+  return Object.freeze({
+    TbtSimulation,
+    XorShift32,
+    GeneNode,
+    DEFAULT_CONFIG,
+    DEFAULT_GENOME,
+    WATER_LIQUID,
+    WATER_VAPOR,
+    WATER_HELD,
+    SLOT_LEFT,
+    SLOT_UP,
+    SLOT_RIGHT,
+    SLOT_MASKS,
+    DIR_DX,
+    DIR_DY,
+    ROTATIONS,
+    decodeGenomeToTree,
+    encodeTreeToGenome,
+    canonicalGenome,
+    collectNodesPreorder,
+    cloneSubtree,
+    genomeHash,
+    subtreeHashes,
+    incrementMap,
+    mapToSortedObject,
+    mutateBitFlip,
+    mutateSubtreeDuplication,
+    mutateSubtreeDeletion,
+    mutateGenomeDetailed,
+    mutateGenome,
+    plantColorFromGenome,
+  });
+});
+
+</script>
+  <script>
+// Live whole-genome activity diagnostics for the TBT water/light lab.
+(function (root, factory) {
+  if (typeof module === "object" && module.exports) {
+    module.exports = factory(require("./lab-core.js"));
+  } else {
+    root.TbtLiveOee = factory(root.TbtWaterLab);
+  }
+})(typeof globalThis !== "undefined" ? globalThis : this, function (Lab) {
+  "use strict";
+
+  if (!Lab) throw new Error("TbtLiveOee requires TbtWaterLab");
+
+  function increment(map, key, amount) {
+    const next = (map.get(key) || 0) + amount;
+    if (next) map.set(key, next);
+    else map.delete(key);
+  }
+
+  function sumObject(object) {
+    let total = 0;
+    const values = Object.values(object || {});
+    for (let i = 0; i < values.length; i++) total += Number(values[i]) || 0;
+    return total;
+  }
+
+  function median(values) {
+    if (!values.length) return 0;
+    const sorted = values.slice().sort(function (a, b) { return a - b; });
+    const middle = sorted.length >> 1;
+    return sorted.length % 2
+      ? sorted[middle]
+      : (sorted[middle - 1] + sorted[middle]) / 2;
+  }
+
+  class ShadowPopulation {
+    constructor(seed) {
+      this.rng = new Lab.XorShift32(seed);
+      this.instances = [];
+      this.counts = new Map();
+      this.known = [];
+      this.knownSet = new Set();
+    }
+
+    learn(components) {
+      for (let i = 0; i < components.length; i++) {
+        const component = components[i];
+        if (!this.knownSet.has(component)) {
+          this.knownSet.add(component);
+          this.known.push(component);
+        }
+      }
+    }
+
+    addInstance(component) {
+      this.instances.push(component);
+      increment(this.counts, component, 1);
+    }
+
+    addRandomInstances(count) {
+      if (count > 0 && !this.known.length) {
+        throw new Error("Neutral-shadow birth has no known genome pool");
+      }
+      for (let i = 0; i < count; i++) {
+        this.addInstance(this.known[this.rng.int(this.known.length)]);
+      }
+    }
+
+    removeRandomInstances(count) {
+      if (count > this.instances.length) {
+        throw new Error(
+          `Neutral-shadow death requested ${count} of ${this.instances.length} instances`
+        );
+      }
+      for (let i = 0; i < count; i++) {
+        const index = this.rng.int(this.instances.length);
+        const component = this.instances[index];
+        const last = this.instances.length - 1;
+        if (index !== last) this.instances[index] = this.instances[last];
+        this.instances.pop();
+        increment(this.counts, component, -1);
+      }
+    }
+
+    reset(realCounts) {
+      this.instances.length = 0;
+      this.counts.clear();
+      const types = Object.keys(realCounts || {});
+      this.learn(types);
+      for (let i = 0; i < types.length; i++) {
+        const count = Number(realCounts[types[i]]) || 0;
+        for (let j = 0; j < count; j++) this.addInstance(types[i]);
+      }
+    }
+
+    applyDemography(events) {
+      for (let i = 0; i < events.length; i++) {
+        const event = events[i];
+        this.learn([event.genome]);
+        if (event.op === "birth") this.addRandomInstances(1);
+        else if (event.op === "death") this.removeRandomInstances(1);
+        else throw new Error(`Unknown demographic operation: ${event.op}`);
+      }
+    }
+  }
+
+  class ActivityTracker {
+    constructor() {
+      this.realCumulative = new Map();
+      this.normalizedCumulative = new Map();
+      this.firstSeenSample = new Map();
+    }
+
+    learnRealTypes(types, sampleIndex) {
+      for (let i = 0; i < types.length; i++) {
+        if (!this.firstSeenSample.has(types[i])) {
+          this.firstSeenSample.set(types[i], sampleIndex);
+        }
+      }
+    }
+
+    score(snapshot, sampleIndex, shadow, discoveredTypes) {
+      const realCounts = snapshot.genomes || {};
+      const realTypes = Object.keys(realCounts);
+      this.learnRealTypes(discoveredTypes || realTypes, sampleIndex);
+      this.learnRealTypes(realTypes, sampleIndex);
+      const allTypes = new Set([
+        ...this.firstSeenSample.keys(),
+        ...this.realCumulative.keys(),
+        ...this.normalizedCumulative.keys(),
+        ...realTypes,
+        ...shadow.counts.keys(),
+      ]);
+      const normalized = new Map();
+      let totalCumulative = 0;
+
+      for (const type of allTypes) {
+        const realPresent = Number(realCounts[type] || 0) > 0;
+        const shadowPresent = (shadow.counts.get(type) || 0) > 0;
+        const realHistory = (this.realCumulative.get(type) || 0) +
+          (realPresent ? 1 : 0);
+        this.realCumulative.set(type, realHistory);
+        const realActivity = realPresent ? realHistory : 0;
+        const value = (this.normalizedCumulative.get(type) || 0) +
+          (realPresent ? 1 : 0) -
+          (shadowPresent ? 1 : 0);
+        this.normalizedCumulative.set(type, value);
+        normalized.set(type, value);
+        totalCumulative += realActivity;
+      }
+
+      const liveNormalized = [];
+      let totalNormalized = 0;
+      let minimumLiveNormalized = 0;
+      for (let i = 0; i < realTypes.length; i++) {
+        const value = normalized.get(realTypes[i]) || 0;
+        liveNormalized.push(value);
+        totalNormalized += value;
+        if (value < minimumLiveNormalized) minimumLiveNormalized = value;
+      }
+
+      const noiseFloor = Math.abs(minimumLiveNormalized);
+      let newActivityNumerator = 0;
+      let newComponentsAboveNoise = 0;
+      for (let i = 0; i < realTypes.length; i++) {
+        const type = realTypes[i];
+        const value = normalized.get(type) || 0;
+        if ((this.firstSeenSample.get(type) || 0) > 0 && value > noiseFloor) {
+          newActivityNumerator += value;
+          newComponentsAboveNoise++;
+        }
+      }
+
+      return Object.freeze({
+        tick: snapshot.tick,
+        populationInstances: sumObject(realCounts),
+        liveTypes: realTypes.length,
+        knownTypes: this.firstSeenSample.size,
+        totalCumulative,
+        totalNormalized,
+        medianNormalized: median(liveNormalized),
+        newActivity: realTypes.length ? newActivityNumerator / realTypes.length : 0,
+        noiseFloor,
+        newComponentsAboveNoise,
+        shadowInstances: shadow.instances.length,
+        shadowLiveTypes: shadow.counts.size,
+      });
+    }
+  }
+
+  class LiveGenomeOee {
+    constructor(options) {
+      const opts = options || {};
+      this.intervalTicks = Math.max(1, Number(opts.intervalTicks) | 0 || 1000);
+      this.seed = (Number(opts.seed) >>> 0) || 8675309;
+      this.maxRecords = Math.max(20, Number(opts.maxRecords) | 0 || 600);
+      this.records = [];
+      this.totalSamples = 0;
+      this.nextTick = 0;
+      this.sampleIndex = -1;
+      this.shadow = null;
+      this.tracker = null;
+    }
+
+    remember(record) {
+      this.records.push(record);
+      if (this.records.length > this.maxRecords) this.records.shift();
+      this.totalSamples++;
+      return record;
+    }
+
+    start(simulation) {
+      this.records.length = 0;
+      this.totalSamples = 0;
+      this.sampleIndex = 0;
+      this.shadow = new ShadowPopulation(this.seed);
+      this.tracker = new ActivityTracker();
+      const snapshot = simulation.telemetrySnapshot(true);
+      this.shadow.reset(snapshot.genomes);
+      const discovered = snapshot.events.demography.map(function (event) {
+        return event.genome;
+      });
+      const record = this.tracker.score(snapshot, 0, this.shadow, discovered);
+      this.nextTick = simulation.tickCount + this.intervalTicks;
+      return this.remember(record);
+    }
+
+    sample(simulation, force) {
+      if (!this.tracker) return this.start(simulation);
+      if (!force && simulation.tickCount < this.nextTick) return null;
+      const snapshot = simulation.telemetrySnapshot(true);
+      const events = snapshot.events.demography;
+      const discovered = [];
+      for (let i = 0; i < events.length; i++) {
+        if (events[i].op === "birth") discovered.push(events[i].genome);
+      }
+      this.shadow.applyDemography(events);
+      const expectedInstances = sumObject(snapshot.genomes);
+      if (this.shadow.instances.length !== expectedInstances) {
+        throw new Error(
+          `Neutral shadow has ${this.shadow.instances.length} instances; real population has ${expectedInstances}`
+        );
+      }
+      this.sampleIndex++;
+      const record = this.tracker.score(
+        snapshot,
+        this.sampleIndex,
+        this.shadow,
+        discovered
+      );
+      // The control analyzer resets its neutral shadow every 1,000-tick sample.
+      this.shadow.reset(snapshot.genomes);
+      this.nextTick = simulation.tickCount + this.intervalTicks;
+      return this.remember(record);
+    }
+  }
+
+  return Object.freeze({
+    LiveGenomeOee,
+    ShadowPopulation,
+    ActivityTracker,
+  });
+});
+
+</script>
+  <script>
+(function () {
+  "use strict";
+
+  const $ = (id) => document.getElementById(id);
+  const canvas = $("world");
+  const ctx = canvas.getContext("2d", { alpha: false });
+  const panel = $("panel");
+  const showPanelButton = $("showPanel");
+  const statusBox = $("statusBox");
+  const params = new URLSearchParams(location.search);
+
+  const controls = {
+    play: $("play"),
+    step: $("step"),
+    speed: $("speed"),
+    apply: $("apply"),
+    cols: $("cols"),
+    rows: $("rows"),
+    pixelSize: $("pixelSize"),
+    seed: $("seed"),
+    nextSeed: $("nextSeed"),
+    showGenomeColors: $("showGenomeColors"),
+    showLiquid: $("showLiquid"),
+    liquidAlpha: $("liquidAlpha"),
+    showVapor: $("showVapor"),
+    vaporAlpha: $("vaporAlpha"),
+    seedAlpha: $("seedAlpha"),
+    showWetCells: $("showWetCells"),
+    showStatus: $("showStatus"),
+    oeeEnabled: $("oeeEnabled"),
+    oeeCard: $("oeeCard"),
+    oeeSparkline: $("oeeSparkline"),
+    oeeValue: $("oeeValue"),
+    oeeReadout: $("oeeReadout"),
+    exposure: $("exposure"),
+    shade: $("shade"),
+    shade1: $("shade1"),
+    shade2: $("shade2"),
+    shade3: $("shade3"),
+    absorbProbability: $("absorbProbability"),
+    energyCooldown: $("energyCooldown"),
+    waterEnabled: $("waterEnabled"),
+    waterParticles: $("waterParticles"),
+    initialVapor: $("initialVapor"),
+    transpiration: $("transpiration"),
+    condensation: $("condensation"),
+    vaporTimeout: $("vaporTimeout"),
+    groundEvaporation: $("groundEvaporation"),
+    mutationRate: $("mutationRate"),
+    frequencyDependence: $("frequencyDependence"),
+    initialSeeds: $("initialSeeds"),
+    initialSeedPlacement: $("initialSeedPlacement"),
+    maxAge: $("maxAge"),
+    starvation: $("starvation"),
+    seedTravel: $("seedTravel"),
+    clearRadius: $("clearRadius"),
+  };
+
+  let sim = null;
+  let image = null;
+  let running = true;
+  let frameCounter = 0;
+  let nominalPixelSize = 6;
+  let oeeTracker = null;
+  let nextTelemetryFlushTick = 1000;
+  const OEE_INTERVAL_TICKS = 1000;
+
+  function isTrue(value) {
+    return !["0", "off", "false", "no"].includes(String(value).toLowerCase());
+  }
+
+  function setFromParam(key, control, checkbox) {
+    if (!params.has(key)) return;
+    if (checkbox) control.checked = isTrue(params.get(key));
+    else control.value = params.get(key);
+  }
+
+  setFromParam("cols", controls.cols);
+  setFromParam("rows", controls.rows);
+  setFromParam("px", controls.pixelSize);
+  setFromParam("seed", controls.seed);
+  setFromParam("speed", controls.speed);
+  setFromParam("colors", controls.showGenomeColors, true);
+  setFromParam("oee", controls.oeeEnabled, true);
+  setFromParam("liquidA", controls.liquidAlpha);
+  setFromParam("vaporA", controls.vaporAlpha);
+  setFromParam("seedA", controls.seedAlpha);
+  setFromParam("exposure", controls.exposure, true);
+  setFromParam("shade", controls.shade, true);
+  setFromParam("shade1", controls.shade1);
+  setFromParam("shade2", controls.shade2);
+  setFromParam("shade3", controls.shade3);
+  setFromParam("water", controls.waterEnabled, true);
+  setFromParam("waterN", controls.waterParticles);
+  setFromParam("vapor0", controls.initialVapor);
+  setFromParam("transpiration", controls.transpiration);
+  setFromParam("condensation", controls.condensation);
+  setFromParam("vaporTimeout", controls.vaporTimeout);
+  setFromParam("evaporation", controls.groundEvaporation);
+  setFromParam("mutation", controls.mutationRate);
+  setFromParam("freq", controls.frequencyDependence, true);
+  setFromParam("initialN", controls.initialSeeds);
+  setFromParam("start", controls.initialSeedPlacement);
+
+  function numberValue(control, fallback) {
+    const value = Number(control.value);
+    return Number.isFinite(value) ? value : fallback;
+  }
+
+  function clamp(value, minimum, maximum) {
+    return Math.max(minimum, Math.min(maximum, value));
+  }
+
+  function displayAlpha(control) {
+    return clamp(numberValue(control, 1), 0, 1);
+  }
+
+  function readConfig() {
+    const cols = Math.max(12, Math.min(2000, numberValue(controls.cols, 100) | 0));
+    const rows = Math.max(12, Math.min(2000, numberValue(controls.rows, 70) | 0));
+    return {
+      cols,
+      rows,
+      seed: numberValue(controls.seed, 14) >>> 0,
+      initialSeeds: Math.max(1, numberValue(controls.initialSeeds, 1) | 0),
+      initialSeedPlacement: controls.initialSeedPlacement.value,
+      airborneSteps: Math.max(0, numberValue(controls.seedTravel, 40) | 0),
+      mutationRate: numberValue(controls.mutationRate, 0.2),
+      maxPlantAge: Math.max(1, numberValue(controls.maxAge, 1000)),
+      starvationTicks: Math.max(1, numberValue(controls.starvation, 200) | 0),
+      germinationClearRadius: Math.max(0, numberValue(controls.clearRadius, 3) | 0),
+      energyExposure: controls.exposure.checked,
+      energyShade: controls.shade.checked,
+      shadeAfterOne: clamp(numberValue(controls.shade1, 5), 0, 10) / 10,
+      shadeAfterTwo: clamp(numberValue(controls.shade2, 3), 0, 10) / 10,
+      shadeAfterThree: clamp(numberValue(controls.shade3, 1), 0, 10) / 10,
+      absorbProbability: numberValue(controls.absorbProbability, 0.6),
+      energyCooldown: Math.max(0, numberValue(controls.energyCooldown, 30) | 0),
+      trackEnergyStats: false,
+      waterEnabled: controls.waterEnabled.checked,
+      waterParticles: Math.max(0, numberValue(controls.waterParticles, 1800) | 0),
+      initialVaporFraction: numberValue(controls.initialVapor, 0.15),
+      transpirationRate: numberValue(controls.transpiration, 0.2),
+      condensationProbability: numberValue(controls.condensation, 0.2),
+      vaporTimeout: Math.max(0, numberValue(controls.vaporTimeout, 250) | 0),
+      groundEvaporationTimeout: Math.max(
+        0,
+        numberValue(controls.groundEvaporation, 20) | 0
+      ),
+      frequencyDependence: controls.frequencyDependence.checked,
+    };
+  }
+
+  function writeUrl(config) {
+    const query = new URLSearchParams();
+    query.set("cols", config.cols);
+    query.set("rows", config.rows);
+    query.set("px", nominalPixelSize);
+    query.set("seed", config.seed);
+    query.set("speed", controls.speed.value);
+    query.set("colors", controls.showGenomeColors.checked ? 1 : 0);
+    query.set("oee", controls.oeeEnabled.checked ? 1 : 0);
+    query.set("liquidA", displayAlpha(controls.liquidAlpha));
+    query.set("vaporA", displayAlpha(controls.vaporAlpha));
+    query.set("seedA", displayAlpha(controls.seedAlpha));
+    query.set("exposure", config.energyExposure ? 1 : 0);
+    query.set("shade", config.energyShade ? 1 : 0);
+    query.set("shade1", (config.shadeAfterOne * 10).toFixed(1));
+    query.set("shade2", (config.shadeAfterTwo * 10).toFixed(1));
+    query.set("shade3", (config.shadeAfterThree * 10).toFixed(1));
+    query.set("water", config.waterEnabled ? 1 : 0);
+    query.set("waterN", config.waterParticles);
+    query.set("vapor0", config.initialVaporFraction);
+    query.set("transpiration", config.transpirationRate);
+    query.set("condensation", config.condensationProbability);
+    query.set("vaporTimeout", config.vaporTimeout);
+    query.set("evaporation", config.groundEvaporationTimeout);
+    query.set("mutation", config.mutationRate);
+    query.set("freq", config.frequencyDependence ? 1 : 0);
+    query.set("initialN", config.initialSeeds);
+    query.set("start", config.initialSeedPlacement);
+    try {
+      history.replaceState(null, "", `${location.pathname}?${query}`);
+    } catch (_) {
+      // Some local-file viewers do not allow history mutation; the lab still runs.
+    }
+  }
+
+  function scaleCanvas() {
+    if (!sim) return;
+    const desiredWidth = sim.cols * nominalPixelSize;
+    const desiredHeight = sim.rows * nominalPixelSize;
+    const availableWidth = Math.max(1, innerWidth - 2);
+    const availableHeight = Math.max(1, innerHeight - 2);
+    const scale = Math.min(1, availableWidth / desiredWidth, availableHeight / desiredHeight);
+    canvas.style.width = `${Math.max(1, Math.floor(desiredWidth * scale))}px`;
+    canvas.style.height = `${Math.max(1, Math.floor(desiredHeight * scale))}px`;
+  }
+
+  function setPixel(data, index, color) {
+    const offset = index * 4;
+    data[offset] = (color >> 16) & 255;
+    data[offset + 1] = (color >> 8) & 255;
+    data[offset + 2] = color & 255;
+    data[offset + 3] = 255;
+  }
+
+  function pixelColor(data, index) {
+    const offset = index * 4;
+    return (data[offset] << 16) | (data[offset + 1] << 8) | data[offset + 2];
+  }
+
+  function mixColor(a, b, amount) {
+    amount = Math.max(0, Math.min(1, amount));
+    const ar = (a >> 16) & 255;
+    const ag = (a >> 8) & 255;
+    const ab = a & 255;
+    const br = (b >> 16) & 255;
+    const bg = (b >> 8) & 255;
+    const bb = b & 255;
+    return (((ar + (br - ar) * amount) | 0) << 16) |
+      (((ag + (bg - ag) * amount) | 0) << 8) |
+      ((ab + (bb - ab) * amount) | 0);
+  }
+
+  function shadeIntensity(cell) {
+    if (!sim.config.energyShade) return 1;
+    const layers = cell.shadeLayersAbove | 0;
+    if (layers <= 0) return 1;
+    if (layers === 1) return sim.config.shadeAfterOne;
+    if (layers === 2) return sim.config.shadeAfterTwo;
+    return sim.config.shadeAfterThree;
+  }
+
+  function formatMetric(value) {
+    if (!Number.isFinite(value)) return "—";
+    const absolute = Math.abs(value);
+    if (absolute >= 1000000) return `${(value / 1000000).toFixed(1)}m`;
+    if (absolute >= 1000) return `${(value / 1000).toFixed(1)}k`;
+    if (absolute >= 10) return value.toFixed(1);
+    return value.toFixed(2);
+  }
+
+  function formatSigned(value) {
+    if (!Number.isFinite(value)) return "—";
+    if (value === 0) return "0.00";
+    return `${value > 0 ? "+" : "−"}${formatMetric(Math.abs(value))}`;
+  }
+
+  function drawOeeSparkline() {
+    const chart = controls.oeeSparkline;
+    const chartContext = chart.getContext("2d", { alpha: false });
+    const width = chart.width;
+    const height = chart.height;
+    const middle = height / 2;
+    chartContext.fillStyle = "#050c09";
+    chartContext.fillRect(0, 0, width, height);
+    chartContext.strokeStyle = "#6f918144";
+    chartContext.lineWidth = 1;
+    chartContext.beginPath();
+    chartContext.moveTo(0, middle + 0.5);
+    chartContext.lineTo(width, middle + 0.5);
+    chartContext.stroke();
+
+    const records = oeeTracker ? oeeTracker.records : [];
+    const values = records.map(function (record) { return record.medianNormalized; });
+    if (!values.length) return;
+    let bound = 1;
+    for (let i = 0; i < values.length; i++) {
+      bound = Math.max(bound, Math.abs(values[i]));
+    }
+    const xFor = function (index) {
+      return values.length === 1
+        ? width - 7
+        : 6 + (index / (values.length - 1)) * (width - 12);
+    };
+    const yFor = function (value) {
+      return middle - (value / bound) * (middle - 7);
+    };
+
+    if (values.length === 1) {
+      chartContext.fillStyle = values[0] < 0 ? "#f08a78" : "#72d39a";
+      chartContext.beginPath();
+      chartContext.arc(xFor(0), yFor(values[0]), 2.2, 0, Math.PI * 2);
+      chartContext.fill();
+    } else {
+      chartContext.lineWidth = 1.8;
+      chartContext.lineJoin = "round";
+      for (let i = 1; i < values.length; i++) {
+        chartContext.strokeStyle = values[i] < 0 ? "#f08a78" : "#72d39a";
+        chartContext.beginPath();
+        chartContext.moveTo(xFor(i - 1), yFor(values[i - 1]));
+        chartContext.lineTo(xFor(i), yFor(values[i]));
+        chartContext.stroke();
+      }
+    }
+    chart.setAttribute(
+      "aria-label",
+      `Median normalized whole-genome activity, latest ${formatSigned(values[values.length - 1])}`
+    );
+  }
+
+  function updateOee(record) {
+    if (!record || !oeeTracker) return;
+    controls.oeeCard.hidden = false;
+    controls.oeeValue.textContent = formatSigned(record.medianNormalized);
+    controls.oeeValue.style.color = record.medianNormalized < 0 ? "#f08a78" : "#72d39a";
+    const measured = oeeTracker.records.slice(1);
+    const positiveFraction = measured.length
+      ? measured.filter(function (item) { return item.newActivity > 0; }).length /
+        measured.length
+      : 0;
+    controls.oeeReadout.textContent =
+      `tick ${record.tick.toLocaleString()} · total norm (must grow) ${formatSigned(record.totalNormalized)}\n` +
+      `median (must grow) ${formatSigned(record.medianNormalized)} · ` +
+      `new (must stay >0) ${formatMetric(record.newActivity)}\n` +
+      `raw total (must grow) ${formatMetric(record.totalCumulative)} · ${record.liveTypes} live / ` +
+      `${record.knownTypes} known genomes · new-positive ${(positiveFraction * 100).toFixed(0)}%`;
+    drawOeeSparkline();
+  }
+
+  function startOee() {
+    if (!sim) return;
+    try {
+      oeeTracker = new TbtLiveOee.LiveGenomeOee({
+        intervalTicks: OEE_INTERVAL_TICKS,
+        seed: (sim.config.seed ^ 0x9e3779b9) >>> 0,
+      });
+      window.oeeTracker = oeeTracker;
+      const initial = oeeTracker.start(sim);
+      nextTelemetryFlushTick = oeeTracker.nextTick;
+      updateOee(initial);
+    } catch (error) {
+      oeeTracker = null;
+      window.oeeTracker = null;
+      controls.oeeCard.hidden = false;
+      controls.oeeValue.textContent = "error";
+      controls.oeeValue.style.color = "#f08a78";
+      controls.oeeReadout.textContent = `OEE diagnostic stopped: ${error.message}`;
+    }
+  }
+
+  function stopOee() {
+    oeeTracker = null;
+    window.oeeTracker = null;
+    controls.oeeCard.hidden = true;
+    if (sim) {
+      sim.telemetrySnapshot(true);
+      nextTelemetryFlushTick = sim.tickCount + OEE_INTERVAL_TICKS;
+    }
+  }
+
+  function processTelemetry() {
+    if (!sim) return;
+    if (oeeTracker) {
+      if (sim.tickCount < oeeTracker.nextTick) return;
+      try {
+        updateOee(oeeTracker.sample(sim));
+      } catch (error) {
+        oeeTracker = null;
+        window.oeeTracker = null;
+        controls.oeeEnabled.checked = false;
+        controls.oeeCard.hidden = false;
+        controls.oeeValue.textContent = "error";
+        controls.oeeValue.style.color = "#f08a78";
+        controls.oeeReadout.textContent = `OEE diagnostic stopped: ${error.message}`;
+      }
+    } else if (sim.tickCount >= nextTelemetryFlushTick) {
+      // Demographic events are only needed between samples. Flush them even
+      // when metrics are off so long interactive runs do not retain an
+      // ever-growing event list.
+      sim.telemetrySnapshot(true);
+      nextTelemetryFlushTick = sim.tickCount + OEE_INTERVAL_TICKS;
+    }
+  }
+
+  function render(forceStatus) {
+    if (!sim || !image) return;
+    const data = image.data;
+    const background = 0x07100d;
+    const liquidAlpha = displayAlpha(controls.liquidAlpha);
+    const vaporAlpha = displayAlpha(controls.vaporAlpha);
+    const seedAlpha = displayAlpha(controls.seedAlpha);
+    for (let i = 0; i < sim.grid.length; i++) setPixel(data, i, background);
+
+    for (let i = 0; i < sim.waterParticles.length; i++) {
+      const particle = sim.waterParticles[i];
+      if (
+        particle.state === TbtWaterLab.WATER_LIQUID &&
+        controls.showLiquid.checked
+      ) {
+        setPixel(
+          data,
+          particle.y * sim.cols + particle.x,
+          mixColor(background, 0x35a9eb, liquidAlpha)
+        );
+      } else if (
+        particle.state === TbtWaterLab.WATER_VAPOR &&
+        controls.showVapor.checked
+      ) {
+        setPixel(
+          data,
+          particle.y * sim.cols + particle.x,
+          mixColor(background, 0xa7d9e8, vaporAlpha)
+        );
+      }
+    }
+
+    for (let p = 0; p < sim.plants.length; p++) {
+      const plant = sim.plants[p];
+      const stemColor = controls.showGenomeColors.checked
+        ? mixColor(0x2b8f57, plant.color, 0.5)
+        : 0x3aaa67;
+      for (let c = 0; c < plant.cells.length; c++) {
+        const cell = plant.cells[c];
+        let color = stemColor;
+        if (sim.config.energyShade) {
+          color = mixColor(background, color, 0.48 + 0.52 * shadeIntensity(cell));
+        }
+        if (cell.isSeed && seedAlpha > 0) {
+          const ready = Math.min(1, plant.energy / Math.max(1, plant.genome.length));
+          const seedColor = mixColor(
+            0x754621,
+            plant.reproPhase ? 0xf3e9bc : 0xce633f,
+            ready
+          );
+          color = mixColor(color, seedColor, seedAlpha);
+        }
+        if (cell.waterParticle && controls.showWetCells.checked) {
+          color = mixColor(color, 0x46c8f2, 0.58);
+        }
+        setPixel(data, cell.y * sim.cols + cell.x, color);
+      }
+    }
+
+    for (let i = 0; i < sim.travelingSeeds.length; i++) {
+      const seed = sim.travelingSeeds[i];
+      if (seed.state === 1 && seedAlpha > 0) {
+        const index = seed.y * sim.cols + seed.x;
+        setPixel(data, index, mixColor(pixelColor(data, index), 0xf2c14e, seedAlpha));
+      }
+    }
+    ctx.putImageData(image, 0, 0);
+
+    if (forceStatus || frameCounter % 8 === 0) {
+      const summary = sim.summary();
+      const water = summary.water;
+      const conserved = water.total === water.expected;
+      statusBox.classList.toggle("bad", !conserved);
+      statusBox.textContent =
+        `tick ${summary.tick.toLocaleString()} · seed ${summary.seed} · ` +
+        `${summary.population} plants · ` +
+        `${summary.cells} cells · ${summary.genomeTypes} genomes · ` +
+        `genes ${summary.meanGenomeLength.toFixed(1)}\n` +
+        `water ${water.total}/${water.expected} ${conserved ? "✓" : "MISMATCH"} · ` +
+        `liquid ${water.liquid} · vapor ${water.vapor} · held ${water.held}`;
+      statusBox.style.display = controls.showStatus.checked ? "block" : "none";
+    }
+  }
+
+  function reset() {
+    try {
+      const config = readConfig();
+      nominalPixelSize = Math.max(1, Math.min(20, numberValue(controls.pixelSize, 6) | 0));
+      sim = new TbtWaterLab.TbtSimulation(config);
+      controls.waterParticles.value = String(sim.config.waterParticles);
+      controls.cols.value = String(sim.cols);
+      controls.rows.value = String(sim.rows);
+      controls.pixelSize.value = String(nominalPixelSize);
+      controls.seed.value = String(sim.config.seed);
+      controls.initialSeeds.value = String(sim.config.initialSeeds);
+      controls.initialSeedPlacement.value = sim.config.initialSeedPlacement;
+      controls.liquidAlpha.value = String(displayAlpha(controls.liquidAlpha));
+      controls.vaporAlpha.value = String(displayAlpha(controls.vaporAlpha));
+      controls.seedAlpha.value = String(displayAlpha(controls.seedAlpha));
+      controls.shade1.value = String(sim.config.shadeAfterOne * 10);
+      controls.shade2.value = String(sim.config.shadeAfterTwo * 10);
+      controls.shade3.value = String(sim.config.shadeAfterThree * 10);
+      canvas.width = sim.cols;
+      canvas.height = sim.rows;
+      ctx.imageSmoothingEnabled = false;
+      image = ctx.createImageData(sim.cols, sim.rows);
+      window.sim = sim;
+      oeeTracker = null;
+      window.oeeTracker = null;
+      nextTelemetryFlushTick = sim.tickCount + OEE_INTERVAL_TICKS;
+      if (controls.oeeEnabled.checked) startOee();
+      else controls.oeeCard.hidden = true;
+      writeUrl(sim.config);
+      scaleCanvas();
+      render(true);
+    } catch (error) {
+      sim = null;
+      statusBox.classList.add("bad");
+      statusBox.style.display = "block";
+      statusBox.textContent = `Could not start: ${error.message}`;
+    }
+  }
+
+  function toggleRunning() {
+    running = !running;
+    controls.play.textContent = running ? "Pause" : "Play";
+  }
+
+  function stepOnce() {
+    if (!sim) return;
+    if (running) toggleRunning();
+    sim.tick();
+    processTelemetry();
+    render(true);
+  }
+
+  function togglePanel(forceVisible) {
+    const show = typeof forceVisible === "boolean"
+      ? forceVisible
+      : panel.classList.contains("hidden");
+    panel.classList.toggle("hidden", !show);
+    showPanelButton.classList.toggle("visible", !show);
+  }
+
+  controls.play.addEventListener("click", toggleRunning);
+  controls.step.addEventListener("click", stepOnce);
+  controls.apply.addEventListener("click", reset);
+  controls.nextSeed.addEventListener("click", function () {
+    controls.seed.value = String((numberValue(controls.seed, 14) + 1) >>> 0);
+    reset();
+  });
+  controls.seed.addEventListener("keydown", function (event) {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      reset();
+    }
+  });
+  $("hidePanel").addEventListener("click", function () { togglePanel(false); });
+  showPanelButton.addEventListener("click", function () { togglePanel(true); });
+  controls.showGenomeColors.addEventListener("change", function () {
+    if (sim) writeUrl(sim.config);
+    render(true);
+  });
+  controls.showLiquid.addEventListener("change", function () { render(true); });
+  controls.showVapor.addEventListener("change", function () { render(true); });
+  [controls.liquidAlpha, controls.vaporAlpha, controls.seedAlpha].forEach(function (control) {
+    control.addEventListener("input", function () { render(true); });
+    control.addEventListener("change", function () {
+      control.value = String(displayAlpha(control));
+      if (sim) writeUrl(sim.config);
+      render(true);
+    });
+  });
+  controls.showWetCells.addEventListener("change", function () { render(true); });
+  controls.showStatus.addEventListener("change", function () { render(true); });
+  controls.oeeEnabled.addEventListener("change", function () {
+    if (controls.oeeEnabled.checked) startOee();
+    else stopOee();
+    if (sim) writeUrl(sim.config);
+  });
+
+  const oeeHelp = $("oeeHelp");
+  $("oeeHelpButton").addEventListener("click", function () {
+    if (typeof oeeHelp.showModal === "function") oeeHelp.showModal();
+    else oeeHelp.setAttribute("open", "");
+  });
+  $("oeeHelpClose").addEventListener("click", function () { oeeHelp.close(); });
+  oeeHelp.addEventListener("click", function (event) {
+    if (event.target === oeeHelp) oeeHelp.close();
+  });
+
+  document.querySelectorAll("[data-shade]").forEach(function (button) {
+    button.addEventListener("click", function () {
+      const values = button.dataset.shade.split(",");
+      controls.shade1.value = values[0];
+      controls.shade2.value = values[1];
+      controls.shade3.value = values[2];
+    });
+  });
+
+  canvas.addEventListener("click", function () {
+    if (!running) stepOnce();
+  });
+  addEventListener("resize", function () {
+    scaleCanvas();
+    if (oeeTracker) drawOeeSparkline();
+  });
+  addEventListener("keydown", function (event) {
+    const tag = event.target && event.target.tagName;
+    if (tag === "INPUT" || tag === "SELECT") return;
+    if (event.key === "Escape") togglePanel();
+    else if (event.key === " ") {
+      event.preventDefault();
+      toggleRunning();
+    } else if (event.key === ".") stepOnce();
+  });
+
+  function loop() {
+    if (running && sim) {
+      const targetTicks = Math.max(1, Number(controls.speed.value) | 0);
+      const started = performance.now();
+      let completed = 0;
+      while (completed < targetTicks) {
+        const batch = Math.min(20, targetTicks - completed);
+        sim.tickMany(batch);
+        processTelemetry();
+        completed += batch;
+        if (completed < targetTicks && performance.now() - started > 28) break;
+      }
+    }
+    frameCounter++;
+    render(false);
+    requestAnimationFrame(loop);
+  }
+
+  reset();
+  requestAnimationFrame(loop);
+})();
+
+</script>
+</body>
+</html>

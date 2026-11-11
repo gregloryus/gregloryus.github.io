@@ -1,0 +1,2475 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
+  <meta name="theme-color" content="#000000">
+  <title>Loopgarden 04 · Debt Red Queen</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --panel: rgba(7, 10, 13, .88);
+      --line: rgba(255, 255, 255, .18);
+      --text: #eef4ef;
+      --muted: #a8b0aa;
+      --accent: #b9f5c9;
+    }
+    * { box-sizing: border-box; }
+    html, body {
+      width: 100%;
+      height: 100%;
+      height: 100dvh;
+      margin: 0;
+      overflow: hidden;
+      background: #000;
+      color: var(--text);
+      font: 12px/1.35 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      overscroll-behavior: none;
+      touch-action: manipulation;
+    }
+    #world {
+      position: fixed;
+      inset: 0;
+      display: block;
+      width: 100vw;
+      height: 100vh;
+      height: 100dvh;
+      object-fit: contain;
+      image-rendering: pixelated;
+      background: #000;
+      touch-action: none;
+    }
+    .panel {
+      position: fixed;
+      z-index: 4;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--panel);
+      box-shadow: 0 4px 18px rgba(0,0,0,.35);
+      backdrop-filter: blur(8px);
+      -webkit-backdrop-filter: blur(8px);
+    }
+    #controls {
+      top: max(8px, env(safe-area-inset-top));
+      left: max(8px, env(safe-area-inset-left));
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      padding: 5px;
+      max-width: calc(100vw - 16px);
+      white-space: nowrap;
+    }
+    button, select, input {
+      min-height: 28px;
+      border: 1px solid rgba(255,255,255,.22);
+      border-radius: 5px;
+      background: rgba(255,255,255,.07);
+      color: var(--text);
+      font: inherit;
+    }
+    button { padding: 3px 8px; cursor: pointer; }
+    button:active { background: rgba(255,255,255,.18); }
+    select { padding: 2px 4px; }
+    input { width: 78px; padding: 3px 6px; }
+    #readout {
+      min-width: 100px;
+      color: var(--muted);
+      text-align: right;
+    }
+    #moreButton { width: 30px; padding: 0; }
+    #settings {
+      top: max(49px, calc(env(safe-area-inset-top) + 49px));
+      left: max(8px, env(safe-area-inset-left));
+      width: min(360px, calc(100vw - 16px));
+      padding: 9px;
+    }
+    #settings[hidden], #inspector[hidden] { display: none; }
+    .grid {
+      display: grid;
+      grid-template-columns: auto minmax(0,1fr);
+      gap: 7px 10px;
+      align-items: center;
+    }
+    .grid label { color: var(--muted); }
+    .grid select, .grid input { width: 100%; }
+    .row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      align-items: center;
+      margin-top: 9px;
+    }
+    #inspector {
+      left: max(8px, env(safe-area-inset-left));
+      bottom: max(8px, env(safe-area-inset-bottom));
+      width: min(420px, calc(100vw - 16px));
+      max-height: 42vh;
+      overflow: auto;
+      padding: 9px 34px 9px 10px;
+      white-space: pre-wrap;
+    }
+    #closeInspector {
+      position: absolute;
+      top: 4px;
+      right: 4px;
+      min-height: 24px;
+      width: 26px;
+      padding: 0;
+    }
+    #startup, #fatal {
+      position: fixed;
+      z-index: 10;
+      left: 50%;
+      top: 50%;
+      transform: translate(-50%, -50%);
+      width: min(420px, calc(100vw - 32px));
+      padding: 14px;
+      border: 1px solid rgba(255,255,255,.25);
+      border-radius: 9px;
+      background: #090c0a;
+      text-align: center;
+    }
+    #fatal {
+      display: none;
+      color: #ffd9d9;
+      border-color: #d85f5f;
+      background: #230b0b;
+      white-space: pre-wrap;
+      text-align: left;
+    }
+    .swatch {
+      display: inline-block;
+      width: 10px;
+      height: 10px;
+      margin-right: 4px;
+      border: 1px solid rgba(255,255,255,.45);
+      vertical-align: -1px;
+    }
+    @media (max-width: 600px) {
+      #controls { gap: 3px; }
+      button { padding-left: 6px; padding-right: 6px; }
+      #readout { min-width: 84px; font-size: 10px; }
+      #stepButton { display: none; }
+    }
+  </style>
+</head>
+<body>
+  <canvas id="world" width="440" height="735" aria-label="Loopgarden simulation"></canvas>
+  <div id="controls" class="panel">
+    <button id="runButton" type="button">Pause</button>
+    <button id="stepButton" type="button">Step</button>
+    <select id="speedSelect" aria-label="Simulation speed">
+      <option value="1">1×</option>
+      <option value="4">4×</option>
+      <option value="16">16×</option>
+      <option value="64">64×</option>
+      <option value="128" selected>128×</option>
+      <option value="256">256×</option>
+    </select>
+    <span id="readout">t 0 · s 1</span>
+    <button id="moreButton" type="button" aria-label="Settings">•••</button>
+  </div>
+  <div id="settings" class="panel" hidden>
+    <div class="grid">
+      <label for="modeSelect">Mode</label>
+      <select id="modeSelect">
+        <option value="full" selected>Debt Red Queen + grafts</option>
+        <option value="evolution">Debt Red Queen, grafts off</option>
+        <option value="chem-lock">Chemistry locked control</option>
+        <option value="neutral">Traffic-maintained control</option>
+        <option value="ancestor">Ancestor, mutation off</option>
+        <option value="proof">Hand-built flow proof</option>
+      </select>
+      <label for="seedInput">Seed</label>
+      <input id="seedInput" inputmode="numeric" value="1">
+      <label for="overlaySelect">Overlay</label>
+      <select id="overlaySelect">
+        <option value="chemistry" selected>Chemistry</option>
+        <option value="history">Environmental history</option>
+        <option value="debt">Metabolic debt</option>
+        <option value="owners">Plant owners</option>
+        <option value="home">Inherited home</option>
+        <option value="flow">Productive flow</option>
+        <option value="dryness">Bond dryness</option>
+      </select>
+    </div>
+    <div class="row">
+      <button id="restartButton" type="button">Restart</button>
+      <button id="fastForwardButton" type="button">+1m events</button>
+      <button id="exportSceneButton" type="button">Scene JSON</button>
+      <button id="exportCheckpointButton" type="button">Checkpoint</button>
+      <button id="pngButton" type="button">PNG</button>
+      <button id="assertButton" type="button">Check invariants</button>
+      <button id="rareButton" type="button">History-pair assay</button>
+    </div>
+    <div id="leakNote" class="row" style="color:var(--muted)">A carrier can maintain one incoming bond per excursion through free space; growth and reproduction consume matter and also count.</div>
+    <div id="ecologyReadout" class="row" style="color:var(--muted);white-space:pre-line;width:100%">Ecology metrics are warming up.</div>
+    <div id="settingsStatus" class="row" style="color:var(--muted)">Tap the world to inspect matter.</div>
+  </div>
+  <div id="inspector" class="panel" hidden><button id="closeInspector" type="button">×</button><div id="inspectorText"></div></div>
+  <div id="startup">Loopgarden script has not started.</div>
+  <div id="fatal"></div>
+
+<script>
+"use strict";
+(function () {
+  window.__LOOPGARDEN_READY__ = false;
+  window.__LOOPGARDEN_FATAL__ = null;
+  var startup = document.getElementById("startup");
+  var fatalBox = document.getElementById("fatal");
+  startup.textContent = "Loopgarden is starting…";
+
+  function showFatal(error) {
+    var message = error && error.stack ? error.stack : String(error);
+    window.__LOOPGARDEN_FATAL__ = message;
+    fatalBox.textContent = "Loopgarden stopped with an error:\n\n" + message;
+    fatalBox.style.display = "block";
+    startup.style.display = "none";
+  }
+  window.addEventListener("error", function (event) { showFatal(event.error || event.message); });
+  window.addEventListener("unhandledrejection", function (event) { showFatal(event.reason); });
+
+  try {
+
+  /* ================================================================
+     1. CONSTANTS, SCHEMA, AND CENTRAL CONFIGURATION
+     ================================================================ */
+
+  var SCHEMA_VERSION = 2;
+  var BUILD_VERSION = "loopgarden-04-debt-redqueen-2026-08-22";
+  var FP = 256;
+  var EMPTY_MAT = 0;
+  var FREE = 0, CARRIER = 1, BOUND = 2, SEED = 3;
+  var ROLE_ORDINARY = 0, ROLE_TIP = 1, ROLE_FLOWER = 2;
+  var EDGE_ORDINARY = 0, EDGE_GRAFT = 1, EDGE_FLOWER = 2;
+  var NONE = 255;
+  var MODULE_STRIDE = 19;
+  var M_STEPS = 0, M_CURVE = 1, M_BRANCH_STEP = 2;
+  var M_LEFT_MODULE = 3, M_RIGHT_MODULE = 4;
+  var M_LEFT_ANGLE = 5, M_RIGHT_ANGLE = 6, M_NEXT = 7;
+  var M_FLOWER = 8, M_HOME = 9, M_TARGET = 10, M_GATE = 11;
+  var M_TOL = 12, M_ROUTE_KEY = 13, M_ROUTE_NEAR = 14, M_ROUTE_FAR = 15;
+  var M_PETAL_HOME = 16, M_SEED_HOME = 17, M_ACTIVE = 18;
+  var ROUTE_STRAIGHT = 0, ROUTE_LEFT = 1, ROUTE_RIGHT = 2, ROUTE_REVERSE = 3;
+  var ROUTE_ORDERS = [
+    [ROUTE_STRAIGHT, ROUTE_LEFT, ROUTE_RIGHT, ROUTE_REVERSE],
+    [ROUTE_STRAIGHT, ROUTE_RIGHT, ROUTE_LEFT, ROUTE_REVERSE],
+    [ROUTE_LEFT, ROUTE_STRAIGHT, ROUTE_RIGHT, ROUTE_REVERSE],
+    [ROUTE_RIGHT, ROUTE_STRAIGHT, ROUTE_LEFT, ROUTE_REVERSE],
+    [ROUTE_LEFT, ROUTE_RIGHT, ROUTE_STRAIGHT, ROUTE_REVERSE],
+    [ROUTE_RIGHT, ROUTE_LEFT, ROUTE_STRAIGHT, ROUTE_REVERSE]
+  ];
+  var STATE_NAMES = ["FREE", "CARRIER", "BOUND", "SEED"];
+  var ROLE_NAMES = ["ordinary", "active tip", "flower core"];
+  var EDGE_NAMES = ["ordinary", "graft", "flower"];
+  var COMPOUND_NAMES = ["—","RRR","RRG","RRB","RGG","RGB","RBB","GGG","GGB","GBB","BBB"];
+
+  var BASE_CONFIG = Object.freeze({
+    width: 440,
+    height: 735,
+    parcelCount: 18000,
+    founderClones: 16,
+    founderClusters: 4,
+    mode: "full",
+    seed: 1,
+    bucketPx: 4,
+    nodeStepFp: 3 * FP,
+    freeStepFp: 192,
+    seedStepFp: 128,
+    captureRadiusFp: 576,
+    graftRadiusFp: 384,
+    germinationClearanceFp: 2 * FP,
+    maxNodeDegree: 4,
+    maxModules: 12,
+    maxBranchDepth: 8,
+    maxNodesPerPlant: 1024,
+    carrierProgress: 16384,
+    edgeDryWarn: 36,
+    edgeDryBreak: 72,
+    tipFailedLimit: 96,
+    flowerWaitLimit: 1536,
+    flowerSenesceOpportunities: 8,
+    seedMaturation: 8,
+    seedMaxAge: 128,
+    weightFree: 1,
+    weightCarrier: 10,
+    weightTip: 2,
+    weightEdge: 1,
+    weightFlower: 2,
+    weightSeed: 2,
+    pointMutationPerThousand: 220,
+    chemistryMutationPerThousand: 500,
+    structuralMutationPerThousand: 12,
+    historySampleInterval: 100000,
+    historyRegionPx: 32,
+    routineLogSize: 1024,
+    importantLogLimit: 250000,
+    debugAssertions: true,
+    nodeLeakDenominator: 0
+  });
+
+  var DIR_X = new Int16Array([256,237,181,98,0,-98,-181,-237,-256,-237,-181,-98,0,98,181,237]);
+  var DIR_Y = new Int16Array([0,98,181,237,256,237,181,98,0,-98,-181,-237,-256,-237,-181,-98]);
+  var FREE_DX = new Int16Array([192,178,136,74,0,-74,-136,-178,-192,-178,-136,-74,0,74,136,178]);
+  var FREE_DY = new Int16Array([0,74,136,178,192,178,136,74,0,-74,-136,-178,-192,-178,-136,-74]);
+  var SEED_DX = new Int16Array([128,119,91,49,0,-49,-91,-119,-128,-119,-91,-49,0,49,91,119]);
+  var SEED_DY = new Int16Array([0,49,91,119,128,119,91,49,0,-49,-91,-119,-128,-119,-91,-49]);
+
+  /* ================================================================
+     2. DETERMINISTIC INTEGER UTILITIES AND PRNG
+     ================================================================ */
+
+  function rotl(x, k) { return ((x << k) | (x >>> (32 - k))) >>> 0; }
+  function mix32(x) {
+    x = Math.imul(x ^ (x >>> 16), 0x7feb352d);
+    x = Math.imul(x ^ (x >>> 15), 0x846ca68b);
+    return (x ^ (x >>> 16)) >>> 0;
+  }
+  function eventHash(seed, a, b, c) {
+    var x = mix32(seed ^ 0x9e3779b9);
+    x = mix32(x ^ (a >>> 0));
+    x = mix32(x ^ Math.imul(b >>> 0, 0x85ebca6b));
+    return mix32(x ^ Math.imul(c >>> 0, 0xc2b2ae35));
+  }
+  function clamp(v, lo, hi) { return v < lo ? lo : (v > hi ? hi : v); }
+  function fpToPx(v) { return (v + 128) >> 8; }
+  function headingFromVector(dx, dy) {
+    var best = 0, bestDot = -Infinity, i, dot;
+    for (i = 0; i < 16; i++) {
+      dot = dx * DIR_X[i] + dy * DIR_Y[i];
+      if (dot > bestDot) { bestDot = dot; best = i; }
+    }
+    return best;
+  }
+  function signedTurn(from, to) {
+    var d = (to - from) & 15;
+    return d >= 8 ? d - 16 : d;
+  }
+  function turnClass(from, to) {
+    var d = signedTurn(from, to);
+    var ad = d < 0 ? -d : d;
+    if (ad <= 2) return ROUTE_STRAIGHT;
+    if (ad >= 7) return ROUTE_REVERSE;
+    return d > 0 ? ROUTE_RIGHT : ROUTE_LEFT;
+  }
+
+  function RNG(seed) {
+    var x = (seed >>> 0) || 1;
+    this.s0 = mix32(x);
+    this.s1 = mix32(this.s0 + 0x9e3779b9);
+    this.s2 = mix32(this.s1 + 0x9e3779b9);
+    this.s3 = mix32(this.s2 + 0x9e3779b9);
+    if ((this.s0 | this.s1 | this.s2 | this.s3) === 0) this.s3 = 1;
+  }
+  RNG.prototype.next = function () {
+    var result = Math.imul(rotl(Math.imul(this.s1, 5) >>> 0, 7), 9) >>> 0;
+    var t = (this.s1 << 9) >>> 0;
+    this.s2 = (this.s2 ^ this.s0) >>> 0;
+    this.s3 = (this.s3 ^ this.s1) >>> 0;
+    this.s1 = (this.s1 ^ this.s2) >>> 0;
+    this.s0 = (this.s0 ^ this.s3) >>> 0;
+    this.s2 = (this.s2 ^ t) >>> 0;
+    this.s3 = rotl(this.s3, 11);
+    return result;
+  };
+  RNG.prototype.int = function (n) {
+    if (n <= 1) return 0;
+    var range = 4294967296;
+    var limit = range - (range % n);
+    var x;
+    do { x = this.next(); } while (x >= limit);
+    return x % n;
+  };
+  RNG.prototype.chance = function (numerator, denominator) {
+    return numerator > 0 && this.int(denominator) < numerator;
+  };
+  RNG.prototype.exportState = function () { return [this.s0,this.s1,this.s2,this.s3]; };
+  RNG.prototype.importState = function (s) {
+    this.s0=s[0]>>>0; this.s1=s[1]>>>0; this.s2=s[2]>>>0; this.s3=s[3]>>>0;
+  };
+
+  /* ================================================================
+     3. COMPOUND ALGEBRA AND AUDITED RECIPROCAL EXCHANGE
+     ================================================================ */
+
+  var COUNTS = [
+    [0,0,0],
+    [3,0,0], [2,1,0], [2,0,1], [1,2,0], [1,1,1],
+    [1,0,2], [0,3,0], [0,2,1], [0,1,2], [0,0,3]
+  ];
+  var ENCODE = new Int8Array(64);
+  var DIST = new Uint8Array(121);
+  var SWAPS = new Array(11);
+  var NEIGHBORS = new Array(11);
+  var DISPLAY_RGB = new Array(11);
+
+  function encodeCounts(r, g, b) { return ENCODE[r | (g << 2) | (b << 4)]; }
+  function distCompound(a, b) { return DIST[a * 11 + b]; }
+  function buildCompoundTables() {
+    var i,j,a,b,x,y,ar,ag,ab,br,bg,bb,key,seen,list,maxc;
+    for (i = 1; i <= 10; i++) {
+      ENCODE[COUNTS[i][0] | (COUNTS[i][1] << 2) | (COUNTS[i][2] << 4)] = i;
+      maxc = Math.max(COUNTS[i][0], COUNTS[i][1], COUNTS[i][2]);
+      DISPLAY_RGB[i] = [
+        Math.round(255 * COUNTS[i][0] / maxc),
+        Math.round(255 * COUNTS[i][1] / maxc),
+        Math.round(255 * COUNTS[i][2] / maxc)
+      ];
+    }
+    DISPLAY_RGB[0] = [0,0,0];
+    for (a = 0; a <= 10; a++) for (b = 0; b <= 10; b++) {
+      DIST[a * 11 + b] = a && b ?
+        ((Math.abs(COUNTS[a][0]-COUNTS[b][0]) + Math.abs(COUNTS[a][1]-COUNTS[b][1]) + Math.abs(COUNTS[a][2]-COUNTS[b][2])) >> 1) : 3;
+    }
+    for (a = 0; a <= 10; a++) {
+      SWAPS[a] = new Array(11);
+      NEIGHBORS[a] = [];
+      for (b = 0; b <= 10; b++) SWAPS[a][b] = [];
+    }
+    for (a = 1; a <= 10; a++) {
+      for (b = 1; b <= 10; b++) {
+        seen = Object.create(null);
+        list = SWAPS[a][b];
+        for (x = 0; x < 3; x++) for (y = 0; y < 3; y++) {
+          if (x === y || COUNTS[a][x] === 0 || COUNTS[b][y] === 0) continue;
+          ar=COUNTS[a][0]; ag=COUNTS[a][1]; ab=COUNTS[a][2];
+          br=COUNTS[b][0]; bg=COUNTS[b][1]; bb=COUNTS[b][2];
+          if (x===0) ar--; else if (x===1) ag--; else ab--;
+          if (y===0) ar++; else if (y===1) ag++; else ab++;
+          if (y===0) br--; else if (y===1) bg--; else bb--;
+          if (x===0) br++; else if (x===1) bg++; else bb++;
+          i=encodeCounts(ar,ag,ab); j=encodeCounts(br,bg,bb);
+          key=i+"."+j;
+          if (!seen[key]) {
+            seen[key]=1;
+            list.push({carrierAfter:i,nodeAfter:j,give:x,receive:y});
+          }
+        }
+      }
+      for (b = 1; b <= 10; b++) if (DIST[a*11+b] === 1) NEIGHBORS[a].push(b);
+    }
+  }
+  buildCompoundTables();
+
+  function exchangeAtNode(carrierCode, nodeCode, home, target, tieKey) {
+    var list = SWAPS[carrierCode][nodeCode];
+    var restoring = nodeCode !== home;
+    var oldPrimary = restoring ? distCompound(nodeCode, home) : distCompound(carrierCode, target);
+    var bestA = 99, bestB = 99, ties = 0, i, c, a, b, choice;
+    for (i = 0; i < list.length; i++) {
+      c = list[i];
+      a = restoring ? distCompound(c.nodeAfter, home) : distCompound(c.carrierAfter, target);
+      if (a >= oldPrimary) continue;
+      b = restoring ? distCompound(c.carrierAfter, target) : distCompound(c.nodeAfter, home);
+      if (a < bestA || (a === bestA && b < bestB)) { bestA=a; bestB=b; ties=1; }
+      else if (a === bestA && b === bestB) ties++;
+    }
+    if (!ties) return null;
+    choice = tieKey % ties;
+    for (i = 0; i < list.length; i++) {
+      c = list[i];
+      a = restoring ? distCompound(c.nodeAfter, home) : distCompound(c.carrierAfter, target);
+      b = restoring ? distCompound(c.carrierAfter, target) : distCompound(c.nodeAfter, home);
+      if (a === bestA && b === bestB) {
+        if (choice === 0) return c;
+        choice--;
+      }
+    }
+    return null;
+  }
+
+  /* ================================================================
+     4. ACTIVE SETS AND FAIR PERMUTATION SCHEDULER SUPPORT
+     ================================================================ */
+
+  function DenseSet(capacity) {
+    this.capacity = capacity;
+    this.ids = new Int32Array(capacity);
+    this.pos = new Int32Array(capacity);
+    this.pos.fill(-1);
+    this.length = 0;
+  }
+  DenseSet.prototype.has = function (id) { return id >= 0 && id < this.capacity && this.pos[id] >= 0; };
+  DenseSet.prototype.add = function (id) {
+    if (this.pos[id] >= 0) return;
+    this.pos[id] = this.length;
+    this.ids[this.length++] = id;
+  };
+  DenseSet.prototype.remove = function (id) {
+    var p=this.pos[id], last;
+    if (p < 0) return;
+    last=this.ids[--this.length];
+    this.ids[p]=last; this.pos[last]=p; this.pos[id]=-1;
+  };
+  DenseSet.prototype.exportState = function () { return {ids:Array.from(this.ids.slice(0,this.length))}; };
+  DenseSet.prototype.importState = function (s) {
+    var i; this.length=0; this.pos.fill(-1);
+    for (i=0;i<s.ids.length;i++) this.add(s.ids[i]);
+  };
+
+  function FairSet(capacity) {
+    DenseSet.call(this, capacity);
+    this.gen = new Uint32Array(capacity);
+    this.epochIds = new Int32Array(capacity);
+    this.epochGen = new Uint32Array(capacity);
+    this.epochLength = 0;
+    this.cursor = 0;
+  }
+  FairSet.prototype = Object.create(DenseSet.prototype);
+  FairSet.prototype.constructor = FairSet;
+  FairSet.prototype.add = function (id) {
+    if (this.pos[id] >= 0) return;
+    this.gen[id] = (this.gen[id] + 1) >>> 0;
+    if (this.gen[id] === 0) this.gen[id] = 1;
+    DenseSet.prototype.add.call(this,id);
+  };
+  FairSet.prototype.remove = function (id) { DenseSet.prototype.remove.call(this,id); };
+  FairSet.prototype.buildEpoch = function (random) {
+    var i,j,t,tg;
+    this.epochLength=this.length; this.cursor=0;
+    for (i=0;i<this.length;i++) {
+      this.epochIds[i]=this.ids[i];
+      this.epochGen[i]=this.gen[this.ids[i]];
+    }
+    for (i=this.epochLength-1;i>0;i--) {
+      j=random.int(i+1);
+      t=this.epochIds[i]; this.epochIds[i]=this.epochIds[j]; this.epochIds[j]=t;
+      tg=this.epochGen[i]; this.epochGen[i]=this.epochGen[j]; this.epochGen[j]=tg;
+    }
+  };
+  FairSet.prototype.choose = function (random) {
+    var id,g,guard=0;
+    while (guard++ < this.capacity + 2) {
+      if (this.cursor >= this.epochLength) {
+        if (!this.length) return -1;
+        this.buildEpoch(random);
+      }
+      id=this.epochIds[this.cursor]; g=this.epochGen[this.cursor++];
+      if (this.pos[id] >= 0 && this.gen[id] === g) return id;
+    }
+    this.buildEpoch(random);
+    return this.length ? this.epochIds[this.cursor++] : -1;
+  };
+  FairSet.prototype.exportState = function () {
+    return {
+      ids:Array.from(this.ids.slice(0,this.length)),
+      gen:Array.from(this.gen),
+      epochIds:Array.from(this.epochIds.slice(0,this.epochLength)),
+      epochGen:Array.from(this.epochGen.slice(0,this.epochLength)),
+      epochLength:this.epochLength,
+      cursor:this.cursor
+    };
+  };
+  FairSet.prototype.importState = function (s) {
+    var i; this.length=0; this.pos.fill(-1); this.gen.set(s.gen);
+    for (i=0;i<s.ids.length;i++) {
+      this.ids[i]=s.ids[i]; this.pos[s.ids[i]]=i;
+    }
+    this.length=s.ids.length; this.epochLength=s.epochLength; this.cursor=s.cursor;
+    this.epochIds.fill(0); this.epochGen.fill(0);
+    this.epochIds.set(s.epochIds); this.epochGen.set(s.epochGen);
+  };
+
+  /* ================================================================
+     5. WORLD STATE AND TYPED-ARRAY ALLOCATION
+     ================================================================ */
+
+  var cfg, rng, tick=0, paused=false, speed=128, selected=null, overlay="chemistry";
+  var initialTotals=[0,0,0], initialParcelCount=0;
+  var canvas=document.getElementById("world"), ctx=canvas.getContext("2d",{alpha:false});
+  var imageData, pixels, renderFrame=0, lastRenderTick=0;
+  var flashes=[];
+
+  var parcelState,parcelCompound,parcelX,parcelY,parcelHeading,parcelNode,parcelEdge;
+  var parcelEdgeT,parcelEdgeDir,parcelIncoming,parcelGenome,parcelPlant,parcelAge;
+  var parcelFlower,parcelPetalSlot,parcelLastPlant,parcelTransformCount,parcelLastTransformTick,parcelExposed;
+  var freeNext,freePrev,freeBucket;
+  var freeSet,carrierSet,seedSet;
+
+  var nodeAlive,nodeParcel,nodeX,nodeY,nodePlant,nodeGenome,nodeModule,nodeRole;
+  var nodeHome,nodeTarget,nodeGate,nodeGateTolerance,nodeRouteKey,nodeRouteNear,nodeRouteFar;
+  var nodeDegree,nodeNbr,nodeEdge,nodeFlower,nodeTipHead,nodeNext,nodePrev,nodeBucket;
+  var nodeSet,nodeFree,nodeNextId;
+
+  var edgeAlive,edgeA,edgeB,edgeOwnerA,edgeOwnerB,edgeDryMisses,edgePerfused;
+  var edgeFlowCount,edgeLastFlowTick,edgeProductiveCount,edgeLastProductiveTick;
+  var edgeRestorationCount,edgeConstructionCount,edgeReproductionCount;
+  var edgeKind,edgeSet,edgeFree,edgeNextId,bondRaster;
+
+  var tipAlive,tipNode,tipPlant,tipGenome,tipModule,tipStep,tipHeading,tipDepth;
+  var tipFailed,tipNextAtNode,tipSet,tipFree,tipNextId;
+
+  var flowerAlive,flowerCore,flowerPlant,flowerGenome,flowerPetalHome,flowerSeedHome;
+  var flowerStage,flowerOpportunities,flowerPetals,flowerSet,flowerFree,flowerNextId;
+
+  var bucketCols,bucketRows,bucketCount,freeHashHead,nodeHashHead;
+  var plants,genomes,genomeIntern;
+  var importantEvents,routineEvents,routineCursor,parcelHistories,droppedImportantEvents;
+  var stats,exchangeFlux,interactionFlux,ecologyHistory,rareIntroductions,lastEcologyReadoutTick=-1;
+
+  function mergeConfig(options) {
+    var out={},k,area;
+    for (k in BASE_CONFIG) out[k]=BASE_CONFIG[k];
+    options=options||{};
+    for (k in options) if (Object.prototype.hasOwnProperty.call(BASE_CONFIG,k)) out[k]=options[k];
+    out.width=clamp(out.width|0,120,1000);
+    out.height=clamp(out.height|0,160,1200);
+    if (!Object.prototype.hasOwnProperty.call(options,"parcelCount")) {
+      area=out.width*out.height;
+      out.parcelCount=Math.max(1000,Math.round(area*(18000/(440*735))));
+    }
+    out.parcelCount=clamp(out.parcelCount|0,1000,60000);
+    out.founderClones=clamp(out.founderClones|0,1,64);
+    out.founderClusters=clamp(out.founderClusters|0,1,out.founderClones);
+    out.seed=(Number(out.seed)>>>0)||1;
+    if (["full","evolution","chem-lock","neutral","ancestor","proof"].indexOf(out.mode)<0) out.mode="full";
+    out.mutationEnabled=out.mode==="full"||out.mode==="evolution"||out.mode==="chem-lock"||out.mode==="neutral";
+    out.chemistryMutationEnabled=out.mode==="full"||out.mode==="evolution"||out.mode==="neutral";
+    out.graftingEnabled=out.mode==="full"||out.mode==="neutral";
+    out.productiveMaintenance=out.mode!=="neutral";
+    return Object.freeze(out);
+  }
+
+  function allocateWorld(c) {
+    var p=c.parcelCount, n=p, e=p*2, t=p, f=Math.max(64,(p/4)|0), i;
+    parcelState=new Uint8Array(p); parcelState.fill(255);
+    parcelCompound=new Uint8Array(p); parcelX=new Int32Array(p); parcelY=new Int32Array(p);
+    parcelHeading=new Uint8Array(p); parcelNode=new Int32Array(p); parcelNode.fill(-1);
+    parcelEdge=new Int32Array(p); parcelEdge.fill(-1); parcelEdgeT=new Uint16Array(p);
+    parcelEdgeDir=new Uint8Array(p); parcelIncoming=new Int32Array(p); parcelIncoming.fill(-1);
+    parcelGenome=new Int32Array(p); parcelGenome.fill(-1); parcelPlant=new Int32Array(p); parcelPlant.fill(-1);
+    parcelAge=new Uint16Array(p); parcelFlower=new Int32Array(p); parcelFlower.fill(-1);
+    parcelPetalSlot=new Uint8Array(p); parcelPetalSlot.fill(255);
+    parcelLastPlant=new Int32Array(p); parcelLastPlant.fill(-1);
+    parcelTransformCount=new Uint16Array(p);parcelLastTransformTick=new Uint32Array(p);parcelExposed=new Uint8Array(p);
+    freeNext=new Int32Array(p); freeNext.fill(-1); freePrev=new Int32Array(p); freePrev.fill(-1);
+    freeBucket=new Int32Array(p); freeBucket.fill(-1);
+    freeSet=new FairSet(p); carrierSet=new FairSet(p); seedSet=new FairSet(p);
+
+    nodeAlive=new Uint8Array(n); nodeParcel=new Int32Array(n); nodeParcel.fill(-1);
+    nodeX=new Int32Array(n); nodeY=new Int32Array(n); nodePlant=new Int32Array(n); nodePlant.fill(-1);
+    nodeGenome=new Int32Array(n); nodeGenome.fill(-1); nodeModule=new Uint8Array(n);
+    nodeRole=new Uint8Array(n); nodeHome=new Uint8Array(n); nodeTarget=new Uint8Array(n);
+    nodeGate=new Uint8Array(n); nodeGateTolerance=new Uint8Array(n); nodeRouteKey=new Uint8Array(n);
+    nodeRouteNear=new Uint8Array(n); nodeRouteFar=new Uint8Array(n); nodeDegree=new Uint8Array(n);
+    nodeNbr=[new Int32Array(n),new Int32Array(n),new Int32Array(n),new Int32Array(n)];
+    nodeEdge=[new Int32Array(n),new Int32Array(n),new Int32Array(n),new Int32Array(n)];
+    for(i=0;i<4;i++){nodeNbr[i].fill(-1);nodeEdge[i].fill(-1);}
+    nodeFlower=new Int32Array(n);nodeFlower.fill(-1);nodeTipHead=new Int32Array(n);nodeTipHead.fill(-1);
+    nodeNext=new Int32Array(n);nodeNext.fill(-1);nodePrev=new Int32Array(n);nodePrev.fill(-1);
+    nodeBucket=new Int32Array(n);nodeBucket.fill(-1);
+    nodeSet=new DenseSet(n);nodeFree=[];nodeNextId=0;
+
+    edgeAlive=new Uint8Array(e);edgeA=new Int32Array(e);edgeA.fill(-1);edgeB=new Int32Array(e);edgeB.fill(-1);
+    edgeOwnerA=new Int32Array(e);edgeOwnerA.fill(-1);edgeOwnerB=new Int32Array(e);edgeOwnerB.fill(-1);
+    edgeDryMisses=new Uint16Array(e);edgePerfused=new Uint8Array(e);edgeFlowCount=new Uint32Array(e);
+    edgeLastFlowTick=new Uint32Array(e);edgeProductiveCount=new Uint32Array(e);edgeLastProductiveTick=new Uint32Array(e);
+    edgeRestorationCount=new Uint32Array(e);edgeConstructionCount=new Uint32Array(e);edgeReproductionCount=new Uint32Array(e);
+    edgeKind=new Uint8Array(e);
+    edgeSet=new FairSet(e);edgeFree=[];edgeNextId=0;
+
+    tipAlive=new Uint8Array(t);tipNode=new Int32Array(t);tipNode.fill(-1);tipPlant=new Int32Array(t);tipPlant.fill(-1);
+    tipGenome=new Int32Array(t);tipGenome.fill(-1);tipModule=new Uint8Array(t);tipStep=new Uint8Array(t);
+    tipHeading=new Uint8Array(t);tipDepth=new Uint8Array(t);tipFailed=new Uint16Array(t);
+    tipNextAtNode=new Int32Array(t);tipNextAtNode.fill(-1);tipSet=new FairSet(t);tipFree=[];tipNextId=0;
+
+    flowerAlive=new Uint8Array(f);flowerCore=new Int32Array(f);flowerCore.fill(-1);
+    flowerPlant=new Int32Array(f);flowerPlant.fill(-1);flowerGenome=new Int32Array(f);flowerGenome.fill(-1);
+    flowerPetalHome=new Uint8Array(f);flowerSeedHome=new Uint8Array(f);flowerStage=new Uint8Array(f);
+    flowerOpportunities=new Uint16Array(f);flowerPetals=[
+      new Int32Array(f),new Int32Array(f),new Int32Array(f),new Int32Array(f)
+    ];
+    for(i=0;i<4;i++)flowerPetals[i].fill(-1);
+    flowerSet=new FairSet(f);flowerFree=[];flowerNextId=0;
+
+    bucketCols=Math.ceil(c.width/c.bucketPx);bucketRows=Math.ceil(c.height/c.bucketPx);
+    bucketCount=bucketCols*bucketRows;
+    freeHashHead=new Int32Array(bucketCount);freeHashHead.fill(-1);
+    nodeHashHead=new Int32Array(bucketCount);nodeHashHead.fill(-1);
+    bondRaster=new Int32Array(c.width*c.height);
+
+    plants=[];genomes=[];genomeIntern=new Map();
+    importantEvents=[];routineEvents=new Array(c.routineLogSize);routineCursor=0;
+    parcelHistories=new Map();droppedImportantEvents=0;
+    exchangeFlux=new Uint32Array(121);interactionFlux=new Map();ecologyHistory=[];rareIntroductions=[];lastEcologyReadoutTick=-1;
+    stats={
+      scheduled:[0,0,0,0,0,0],captures:0,releases:0,exchanges:0,discharges:0,restorations:0,
+      sameLineageRestorations:0,foreignRestorations:0,sameChemotypeRestorations:0,foreignChemotypeRestorations:0,productiveMaintenance:0,
+      productiveRestorations:0,productiveGrowth:0,productiveReproduction:0,productiveGrafts:0,
+      nodesGrown:0,edgesMade:0,edgesBroken:0,grafts:0,selfGrafts:0,
+      flowersStarted:0,flowersCompleted:0,flowersFailed:0,flowerReblooms:0,seedsMade:0,germinations:0,
+      mutations:0,chemistryMutations:0,births:0,extinctions:0,introductions:0,
+      historySamples:0,safetyRejects:0
+    };
+    canvas.width=c.width;canvas.height=c.height;
+    imageData=ctx.createImageData(c.width,c.height);pixels=imageData.data;
+  }
+
+  /* ================================================================
+     6. SPATIAL HASHES, PARCEL TRANSITIONS, AND EVENT RECORDING
+     ================================================================ */
+
+  function bucketFor(x,y) {
+    var px=clamp(fpToPx(x),0,cfg.width-1), py=clamp(fpToPx(y),0,cfg.height-1);
+    return ((py/cfg.bucketPx)|0)*bucketCols+((px/cfg.bucketPx)|0);
+  }
+  function freeHashInsert(id) {
+    var b=bucketFor(parcelX[id],parcelY[id]),h=freeHashHead[b];
+    freeBucket[id]=b;freePrev[id]=-1;freeNext[id]=h;
+    if(h>=0)freePrev[h]=id;freeHashHead[b]=id;
+  }
+  function freeHashRemove(id) {
+    var b=freeBucket[id],p=freePrev[id],n=freeNext[id];
+    if(b<0)return;
+    if(p>=0)freeNext[p]=n;else freeHashHead[b]=n;
+    if(n>=0)freePrev[n]=p;
+    freeBucket[id]=-1;freePrev[id]=-1;freeNext[id]=-1;
+  }
+  function nodeHashInsert(id) {
+    var b=bucketFor(nodeX[id],nodeY[id]),h=nodeHashHead[b];
+    nodeBucket[id]=b;nodePrev[id]=-1;nodeNext[id]=h;
+    if(h>=0)nodePrev[h]=id;nodeHashHead[b]=id;
+  }
+  function nodeHashRemove(id) {
+    var b=nodeBucket[id],p=nodePrev[id],n=nodeNext[id];
+    if(b<0)return;
+    if(p>=0)nodeNext[p]=n;else nodeHashHead[b]=n;
+    if(n>=0)nodePrev[n]=p;
+    nodeBucket[id]=-1;nodePrev[id]=-1;nodeNext[id]=-1;
+  }
+  function forNearbyNodes(x,y,radius,visitor) {
+    var minX=clamp(((fpToPx(x-radius)/cfg.bucketPx)|0),0,bucketCols-1);
+    var maxX=clamp(((fpToPx(x+radius)/cfg.bucketPx)|0),0,bucketCols-1);
+    var minY=clamp(((fpToPx(y-radius)/cfg.bucketPx)|0),0,bucketRows-1);
+    var maxY=clamp(((fpToPx(y+radius)/cfg.bucketPx)|0),0,bucketRows-1);
+    var bx,by,id;
+    for(by=minY;by<=maxY;by++)for(bx=minX;bx<=maxX;bx++){
+      id=nodeHashHead[by*bucketCols+bx];
+      while(id>=0){if(visitor(id)===false)return false;id=nodeNext[id];}
+    }
+    return true;
+  }
+
+  function logEvent(type,entityId,localIds,data,important) {
+    var ev={schema:1,tick:tick,type:type,entityId:entityId,causeEventId:tick,localIds:localIds||[]};
+    var k;if(data)for(k in data)ev[k]=data[k];
+    if(important){
+      if(importantEvents.length<cfg.importantLogLimit)importantEvents.push(ev);else droppedImportantEvents++;
+    }else{
+      routineEvents[routineCursor%routineEvents.length]=ev;routineCursor++;
+    }
+    return ev;
+  }
+  function recordParcel(id,ev) {
+    var h=parcelHistories.get(id);
+    if(!h){h=[];parcelHistories.set(id,h);}
+    h.push(ev);
+  }
+  function removeParcelFromActive(id,oldState) {
+    if(oldState===FREE){freeHashRemove(id);freeSet.remove(id);}
+    else if(oldState===CARRIER)carrierSet.remove(id);
+    else if(oldState===SEED)seedSet.remove(id);
+  }
+  function setParcelState(id,newState,opt) {
+    var old=parcelState[id],ev;
+    opt=opt||{};
+    if(old<=SEED)removeParcelFromActive(id,old);
+    parcelState[id]=newState;
+    parcelNode[id]=-1;parcelEdge[id]=-1;parcelEdgeT[id]=0;parcelIncoming[id]=-1;
+    parcelGenome[id]=-1;parcelPlant[id]=-1;parcelAge[id]=0;parcelFlower[id]=-1;parcelPetalSlot[id]=255;
+    if(opt.x!==undefined)parcelX[id]=opt.x|0;if(opt.y!==undefined)parcelY[id]=opt.y|0;
+    if(opt.heading!==undefined)parcelHeading[id]=opt.heading&15;
+    if(newState===FREE){
+      parcelExposed[id]=1;
+      freeSet.add(id);freeHashInsert(id);
+    }else if(newState===CARRIER){
+      if(old===FREE)parcelExposed[id]=1;
+      parcelNode[id]=opt.node===undefined?-1:opt.node;
+      parcelEdge[id]=opt.edge===undefined?-1:opt.edge;
+      parcelEdgeT[id]=opt.edgeT||0;parcelEdgeDir[id]=opt.edgeDir||0;
+      parcelIncoming[id]=opt.incoming===undefined?-1:opt.incoming;
+      carrierSet.add(id);
+    }else if(newState===BOUND){
+      parcelExposed[id]=0;
+      parcelNode[id]=opt.node===undefined?-1:opt.node;
+      parcelFlower[id]=opt.flower===undefined?-1:opt.flower;
+      parcelPetalSlot[id]=opt.petalSlot===undefined?255:opt.petalSlot;
+    }else if(newState===SEED){
+      parcelExposed[id]=0;
+      parcelGenome[id]=opt.genome;parcelPlant[id]=opt.plant===undefined?-1:opt.plant;
+      parcelAge[id]=opt.age||0;seedSet.add(id);
+    }
+    ev=logEvent("parcel-state",id,[id],{from:old<=SEED?STATE_NAMES[old]:"UNASSIGNED",to:STATE_NAMES[newState],compound:COMPOUND_NAMES[parcelCompound[id]]},true);
+    recordParcel(id,ev);
+  }
+
+  function isCapturePort(n) {
+    return nodeAlive[n] && (nodeTipHead[n]>=0 || nodeFlower[n]>=0 || nodeDegree[n]<=1);
+  }
+  function nearestCapturePort(pid) {
+    var x=parcelX[pid],y=parcelY[pid],r=cfg.captureRadiusFp,r2=r*r;
+    var best=-1,bestD=Infinity,bestTie=Infinity,offset=eventHash(cfg.seed,tick,pid,0)%cfg.parcelCount;
+    forNearbyNodes(x,y,r,function(n){
+      var dx=nodeX[n]-x,dy=nodeY[n]-y,d=dx*dx+dy*dy,tie;
+      if(d<=r2&&isCapturePort(n)){
+        tie=(n+offset)%cfg.parcelCount;
+        if(d<bestD||(d===bestD&&tie<bestTie)){best=n;bestD=d;bestTie=tie;}
+      }
+    });
+    return best;
+  }
+  function nearestGraftNode(from,x,y) {
+    var r=cfg.graftRadiusFp,r2=r*r,best=-1,bestD=Infinity,bestTie=Infinity;
+    var offset=eventHash(cfg.seed,tick,from,0x4746)%cfg.parcelCount;
+    forNearbyNodes(x,y,r,function(n){
+      var dx,dy,d,tie;
+      if(n===from||!nodeAlive[n]||nodeDegree[n]>=cfg.maxNodeDegree||hasNeighbor(from,n))return;
+      dx=nodeX[n]-x;dy=nodeY[n]-y;d=dx*dx+dy*dy;tie=(n+offset)%cfg.parcelCount;
+      if(d<=r2&&(d<bestD||(d===bestD&&tie<bestTie))){best=n;bestD=d;bestTie=tie;}
+    });
+    return best;
+  }
+  function locationClear(x,y,r,excludeNode) {
+    var clear=true,r2=r*r;
+    forNearbyNodes(x,y,r,function(n){
+      var dx,dy;
+      if(n===excludeNode)return;
+      dx=nodeX[n]-x;dy=nodeY[n]-y;
+      if(dx*dx+dy*dy<r2){clear=false;return false;}
+    });
+    if(!clear)return false;
+    var px=fpToPx(x),py=fpToPx(y);
+    if(px<0||py<0||px>=cfg.width||py>=cfg.height)return false;
+    return bondRaster[py*cfg.width+px]===0;
+  }
+
+  /* ================================================================
+     7. GRAPH ALLOCATION, ADJACENCY, AND BOND RASTER
+     ================================================================ */
+
+  function allocNodeId(){if(nodeFree.length)return nodeFree.pop();if(nodeNextId>=nodeAlive.length)return-1;return nodeNextId++;}
+  function allocEdgeId(){if(edgeFree.length)return edgeFree.pop();if(edgeNextId>=edgeAlive.length)return-1;return edgeNextId++;}
+  function allocTipId(){if(tipFree.length)return tipFree.pop();if(tipNextId>=tipAlive.length)return-1;return tipNextId++;}
+  function allocFlowerId(){if(flowerFree.length)return flowerFree.pop();if(flowerNextId>=flowerAlive.length)return-1;return flowerNextId++;}
+
+  function moduleOffset(moduleId,field){return moduleId*MODULE_STRIDE+field;}
+  function genomeGene(genomeId,moduleId,field){
+    var g=genomes[genomeId];
+    if(!g||moduleId>=cfg.maxModules)return field===M_ACTIVE?0:NONE;
+    return g.bytes[moduleOffset(moduleId,field)];
+  }
+  function setNodeChemFromModule(n,genomeId,moduleId) {
+    nodeHome[n]=genomeGene(genomeId,moduleId,M_HOME);
+    nodeTarget[n]=genomeGene(genomeId,moduleId,M_TARGET);
+    /* A two-trait physiology: admission follows home, routing follows product. */
+    nodeGate[n]=nodeHome[n];
+    nodeGateTolerance[n]=1;
+    nodeRouteKey[n]=nodeTarget[n];
+    nodeRouteNear[n]=genomeGene(genomeId,moduleId,M_ROUTE_NEAR)%ROUTE_ORDERS.length;
+    nodeRouteFar[n]=genomeGene(genomeId,moduleId,M_ROUTE_FAR)%ROUTE_ORDERS.length;
+  }
+  function createNodeFromParcel(pid,x,y,plantId,genomeId,moduleId,chem) {
+    var n=allocNodeId(),i;
+    if(n<0)return-1;
+    setParcelState(pid,BOUND,{node:n,x:x,y:y});
+    nodeAlive[n]=1;nodeParcel[n]=pid;nodeX[n]=x;nodeY[n]=y;nodePlant[n]=plantId;
+    nodeGenome[n]=genomeId;nodeModule[n]=moduleId;nodeRole[n]=ROLE_ORDINARY;nodeDegree[n]=0;
+    nodeFlower[n]=-1;nodeTipHead[n]=-1;
+    for(i=0;i<4;i++){nodeNbr[i][n]=-1;nodeEdge[i][n]=-1;}
+    if(chem){
+      nodeHome[n]=chem.home;nodeTarget[n]=chem.target;nodeGate[n]=chem.gate;
+      nodeGateTolerance[n]=chem.tolerance;nodeRouteKey[n]=chem.routeKey;
+      nodeRouteNear[n]=chem.routeNear||0;nodeRouteFar[n]=chem.routeFar||0;
+    }else setNodeChemFromModule(n,genomeId,moduleId);
+    nodeSet.add(n);nodeHashInsert(n);
+    if(plants[plantId])plants[plantId].nodes++;
+    return n;
+  }
+  function adjacencySlot(n,neighbor) {
+    var i;for(i=0;i<nodeDegree[n];i++)if(nodeNbr[i][n]===neighbor)return i;return-1;
+  }
+  function hasNeighbor(a,b){return adjacencySlot(a,b)>=0;}
+  function addAdjacency(n,other,e) {
+    var d=nodeDegree[n];if(d>=4)return false;
+    nodeNbr[d][n]=other;nodeEdge[d][n]=e;nodeDegree[n]=d+1;return true;
+  }
+  function removeAdjacency(n,e) {
+    var d=nodeDegree[n],i,last;
+    for(i=0;i<d;i++)if(nodeEdge[i][n]===e){
+      last=d-1;nodeNbr[i][n]=nodeNbr[last][n];nodeEdge[i][n]=nodeEdge[last][n];
+      nodeNbr[last][n]=-1;nodeEdge[last][n]=-1;nodeDegree[n]=last;return true;
+    }
+    return false;
+  }
+  function visitLinePixels(x0,y0,x1,y1,includeEnds,fn) {
+    var dx=Math.abs(x1-x0),sx=x0<x1?1:-1,dy=-Math.abs(y1-y0),sy=y0<y1?1:-1;
+    var err=dx+dy,e2,first=true;
+    while(true){
+      if((includeEnds||(!first&&(x0!==x1||y0!==y1)))&&fn(x0,y0)===false)return false;
+      if(x0===x1&&y0===y1)break;
+      e2=2*err;if(e2>=dy){err+=dy;x0+=sx;}if(e2<=dx){err+=dx;y0+=sy;}first=false;
+      if(!includeEnds&&x0===x1&&y0===y1)break;
+    }
+    return true;
+  }
+  function bondPathClear(a,b) {
+    var x0=fpToPx(nodeX[a]),y0=fpToPx(nodeY[a]),x1=fpToPx(nodeX[b]),y1=fpToPx(nodeY[b]);
+    return visitLinePixels(x0,y0,x1,y1,false,function(x,y){
+      if(x<0||y<0||x>=cfg.width||y>=cfg.height)return false;
+      return bondRaster[y*cfg.width+x]===0;
+    });
+  }
+  function markBondRaster(e,value) {
+    var a=edgeA[e],b=edgeB[e],x0=fpToPx(nodeX[a]),y0=fpToPx(nodeY[a]),x1=fpToPx(nodeX[b]),y1=fpToPx(nodeY[b]);
+    visitLinePixels(x0,y0,x1,y1,false,function(x,y){
+      var idx=y*cfg.width+x;
+      if(value)bondRaster[idx]=e+1;else if(bondRaster[idx]===e+1)bondRaster[idx]=0;
+    });
+  }
+  function createEdge(a,b,kind) {
+    var e;
+    if(a<0||b<0||!nodeAlive[a]||!nodeAlive[b]||a===b||hasNeighbor(a,b))return-1;
+    if(nodeDegree[a]>=cfg.maxNodeDegree||nodeDegree[b]>=cfg.maxNodeDegree||!bondPathClear(a,b))return-1;
+    e=allocEdgeId();if(e<0)return-1;
+    edgeAlive[e]=1;edgeA[e]=a;edgeB[e]=b;edgeOwnerA[e]=nodePlant[a];edgeOwnerB[e]=nodePlant[b];
+    edgeDryMisses[e]=0;edgePerfused[e]=0;edgeFlowCount[e]=0;edgeLastFlowTick[e]=tick>>>0;
+    edgeProductiveCount[e]=0;edgeLastProductiveTick[e]=tick>>>0;edgeRestorationCount[e]=0;
+    edgeConstructionCount[e]=0;edgeReproductionCount[e]=0;edgeKind[e]=kind||0;
+    addAdjacency(a,b,e);addAdjacency(b,a,e);edgeSet.add(e);markBondRaster(e,1);
+    stats.edgesMade++;
+    return e;
+  }
+  function refreshNodeRole(n) {
+    if(!nodeAlive[n])return;
+    if(nodeFlower[n]>=0)nodeRole[n]=ROLE_FLOWER;
+    else if(nodeTipHead[n]>=0)nodeRole[n]=ROLE_TIP;
+    else nodeRole[n]=ROLE_ORDINARY;
+  }
+  function maybeReleaseIsolatedNode(n,heading) {
+    if(n>=0&&nodeAlive[n]&&nodeDegree[n]===0&&nodeTipHead[n]<0&&nodeFlower[n]<0)releaseNode(n,heading);
+  }
+  function releaseNode(n,heading) {
+    var pid,plantId;
+    if(!nodeAlive[n]||nodeDegree[n]!==0)return false;
+    while(nodeTipHead[n]>=0)destroyTip(nodeTipHead[n],false);
+    if(nodeFlower[n]>=0)destroyFlower(nodeFlower[n],true);
+    pid=nodeParcel[n];plantId=nodePlant[n];
+    nodeHashRemove(n);nodeSet.remove(n);nodeAlive[n]=0;nodeParcel[n]=-1;nodePlant[n]=-1;nodeGenome[n]=-1;
+    nodeFlower[n]=-1;nodeTipHead[n]=-1;nodeFree.push(n);
+    if(plants[plantId]){
+      plants[plantId].nodes=Math.max(0,plants[plantId].nodes-1);
+      if(plants[plantId].nodes===0&&plants[plantId].deathTick<0){
+        plants[plantId].deathTick=tick;stats.extinctions++;
+        if(genomes[plants[plantId].genomeId])genomes[plants[plantId].genomeId].extantPlants=Math.max(0,genomes[plants[plantId].genomeId].extantPlants-1);
+        logEvent("plant-extinction",plantId,[plantId],{genomeId:plants[plantId].genomeId},true);
+      }
+    }
+    if(pid>=0){
+      setParcelState(pid,FREE,{x:nodeX[n],y:nodeY[n],heading:heading&15});
+      stats.releases++;logEvent("tissue-release",pid,[pid,n],{plantId:plantId},true);
+    }
+    return true;
+  }
+  function carrierPositionOnEdge(pid) {
+    var e=parcelEdge[pid],a=edgeA[e],b=edgeB[e],from=parcelEdgeDir[pid]===0?a:b,to=from===a?b:a;
+    var t=parcelEdgeT[pid],x=nodeX[from]+Math.trunc((nodeX[to]-nodeX[from])*t/65535);
+    var y=nodeY[from]+Math.trunc((nodeY[to]-nodeY[from])*t/65535);
+    return [x,y,headingFromVector(nodeX[to]-nodeX[from],nodeY[to]-nodeY[from])];
+  }
+  function breakEdge(e) {
+    var a,b,i,pid,pos;
+    if(!edgeAlive[e])return;
+    a=edgeA[e];b=edgeB[e];
+    for(i=carrierSet.length-1;i>=0;i--){
+      pid=carrierSet.ids[i];
+      if(parcelEdge[pid]===e){
+        pos=carrierPositionOnEdge(pid);releaseCarrier(pid,pos[0],pos[1],pos[2],"edge-break");
+      }
+    }
+    markBondRaster(e,0);removeAdjacency(a,e);removeAdjacency(b,e);
+    edgeSet.remove(e);edgeAlive[e]=0;edgeA[e]=-1;edgeB[e]=-1;edgeFree.push(e);stats.edgesBroken++;
+    logEvent("edge-break",e,[e,a,b],{},true);
+    maybeReleaseIsolatedNode(a,headingFromVector(nodeX[a]-nodeX[b],nodeY[a]-nodeY[b]));
+    maybeReleaseIsolatedNode(b,headingFromVector(nodeX[b]-nodeX[a],nodeY[b]-nodeY[a]));
+  }
+
+  /* ================================================================
+     8. IMMUTABLE DEVELOPMENTAL GENOMES, HEREDITY, AND LINEAGES
+     ================================================================ */
+
+  function blankGenomeBytes() {
+    var b=new Uint8Array(cfg.maxModules*MODULE_STRIDE),m;
+    b.fill(NONE);
+    for(m=0;m<cfg.maxModules;m++){
+      b[moduleOffset(m,M_ACTIVE)]=0;
+      b[moduleOffset(m,M_CURVE)]=1;
+      b[moduleOffset(m,M_FLOWER)]=0;
+      b[moduleOffset(m,M_TOL)]=1;
+      b[moduleOffset(m,M_ROUTE_NEAR)]=0;
+      b[moduleOffset(m,M_ROUTE_FAR)]=0;
+    }
+    return b;
+  }
+  function writeModule(b,m,o) {
+    b[moduleOffset(m,M_ACTIVE)]=1;
+    b[moduleOffset(m,M_STEPS)]=o.steps;
+    b[moduleOffset(m,M_CURVE)]=(o.curve||0)+1;
+    b[moduleOffset(m,M_BRANCH_STEP)]=o.branchStep===undefined?NONE:o.branchStep;
+    b[moduleOffset(m,M_LEFT_MODULE)]=o.leftModule===undefined?NONE:o.leftModule;
+    b[moduleOffset(m,M_RIGHT_MODULE)]=o.rightModule===undefined?NONE:o.rightModule;
+    b[moduleOffset(m,M_LEFT_ANGLE)]=o.leftAngle||2;
+    b[moduleOffset(m,M_RIGHT_ANGLE)]=o.rightAngle||2;
+    b[moduleOffset(m,M_NEXT)]=o.nextModule===undefined?NONE:o.nextModule;
+    b[moduleOffset(m,M_FLOWER)]=o.flower?1:0;
+    b[moduleOffset(m,M_HOME)]=o.home||5;
+    b[moduleOffset(m,M_TARGET)]=o.target||5;
+    b[moduleOffset(m,M_GATE)]=o.gate||5;
+    b[moduleOffset(m,M_TOL)]=o.tolerance===undefined?1:o.tolerance;
+    b[moduleOffset(m,M_ROUTE_KEY)]=o.routeKey||5;
+    b[moduleOffset(m,M_ROUTE_NEAR)]=o.routeNear||0;
+    b[moduleOffset(m,M_ROUTE_FAR)]=o.routeFar||0;
+    b[moduleOffset(m,M_PETAL_HOME)]=o.petalHome||5;
+    b[moduleOffset(m,M_SEED_HOME)]=o.seedHome||5;
+  }
+  function makeAncestorGenome() {
+    var b=blankGenomeBytes();
+    writeModule(b,0,{steps:3,branchStep:2,leftModule:1,rightModule:2,leftAngle:2,rightAngle:2,flower:true,home:5,target:5,gate:5,tolerance:1,petalHome:5,seedHome:5});
+    writeModule(b,1,{steps:3,flower:true,home:5,target:5,gate:5,tolerance:1,petalHome:5,seedHome:5});
+    writeModule(b,2,{steps:3,flower:true,home:5,target:5,gate:5,tolerance:1,petalHome:5,seedHome:5});
+    return b;
+  }
+  function genomeHash(bytes) {
+    var h=2166136261>>>0,i;
+    for(i=0;i<bytes.length;i++){h^=bytes[i];h=Math.imul(h,16777619)>>>0;}
+    return ("00000000"+h.toString(16)).slice(-8);
+  }
+  function equalBytes(a,b) {
+    var i;if(a.length!==b.length)return false;
+    for(i=0;i<a.length;i++)if(a[i]!==b[i])return false;
+    return true;
+  }
+  function internGenome(bytes,parentGenome,originPlant,originSeed,description) {
+    var hash=genomeHash(bytes),bucket=genomeIntern.get(hash),i,id,g;
+    if(bucket)for(i=0;i<bucket.length;i++)if(equalBytes(genomes[bucket[i]].bytes,bytes))return bucket[i];
+    id=genomes.length;
+    g={
+      id:id,hash:hash,bytes:new Uint8Array(bytes),parentGenome:parentGenome,
+      originPlant:originPlant,originSeed:originSeed,birthTick:tick,
+      mutation:description||"founder",firstTick:tick,lastTick:tick,births:0,extantPlants:0
+    };
+    genomes.push(g);if(!bucket){bucket=[];genomeIntern.set(hash,bucket);}bucket.push(id);
+    return id;
+  }
+  function activeModules(bytes) {
+    var a=[],m;for(m=0;m<cfg.maxModules;m++)if(bytes[moduleOffset(m,M_ACTIVE)])a.push(m);return a;
+  }
+  function mutateCompound(code) {
+    var n=NEIGHBORS[code];return n.length?n[rng.int(n.length)]:code;
+  }
+  function mutatePoint(bytes,descriptions) {
+    var active=activeModules(bytes),m,choice,field,off,v;
+    if(!active.length)return;
+    m=active[rng.int(active.length)];choice=rng.int(8);
+    if(choice===0){
+      off=moduleOffset(m,M_STEPS);v=bytes[off];bytes[off]=clamp(v+(rng.int(2)?1:-1),1,12);
+      descriptions.push("module "+m+" steps "+v+"→"+bytes[off]);
+    }else if(choice===1){
+      off=moduleOffset(m,M_CURVE);v=bytes[off];bytes[off]=clamp(v+(rng.int(2)?1:-1),0,2);
+      descriptions.push("module "+m+" curve");
+    }else if(choice===2){
+      off=moduleOffset(m,M_BRANCH_STEP);v=bytes[off];
+      if(v===NONE)bytes[off]=rng.int(Math.max(1,bytes[moduleOffset(m,M_STEPS)]));
+      else if(rng.int(4)===0)bytes[off]=NONE;
+      else bytes[off]=clamp(v+(rng.int(2)?1:-1),0,bytes[moduleOffset(m,M_STEPS)]-1);
+      descriptions.push("module "+m+" branch step");
+    }else if(choice===3){
+      field=rng.int(2)?M_LEFT_ANGLE:M_RIGHT_ANGLE;off=moduleOffset(m,field);v=bytes[off];
+      bytes[off]=clamp(v+(rng.int(2)?1:-1),1,4);descriptions.push("module "+m+" branch angle");
+    }else if(choice===4){
+      field=[M_LEFT_MODULE,M_RIGHT_MODULE,M_NEXT][rng.int(3)];off=moduleOffset(m,field);v=bytes[off];
+      if(v===NONE)bytes[off]=clamp(m+(rng.int(2)?1:-1),0,cfg.maxModules-1);
+      else if(rng.int(5)===0)bytes[off]=NONE;
+      else bytes[off]=clamp(v+(rng.int(2)?1:-1),0,cfg.maxModules-1);
+      descriptions.push("module "+m+" reference");
+    }else if(choice===5){
+      field=rng.int(2)?M_ROUTE_NEAR:M_ROUTE_FAR;off=moduleOffset(m,field);v=bytes[off];
+      bytes[off]=(v+(rng.int(2)?1:ROUTE_ORDERS.length-1))%ROUTE_ORDERS.length;
+      descriptions.push("module "+m+" route order");
+    }else if(choice===6){
+      off=moduleOffset(m,M_FLOWER);bytes[off]=bytes[off]?0:1;descriptions.push("module "+m+" terminal flower");
+    }else{
+      field=rng.int(2)?M_LEFT_MODULE:M_RIGHT_MODULE;off=moduleOffset(m,field);
+      bytes[off]=bytes[off]===NONE?active[rng.int(active.length)]:NONE;
+      descriptions.push("module "+m+" branch reference");
+    }
+  }
+  function mutateChemistry(bytes,descriptions) {
+    var active=activeModules(bytes),m,field,off,before,after;
+    if(!active.length)return;
+    m=active[rng.int(active.length)];field=rng.int(2)?M_HOME:M_TARGET;off=moduleOffset(m,field);
+    before=bytes[off];after=mutateCompound(before);bytes[off]=after;
+    descriptions.push("module "+m+" "+(field===M_HOME?"home ":"product ")+COMPOUND_NAMES[before]+"→"+COMPOUND_NAMES[after]);
+  }
+  function mutateStructural(bytes,descriptions) {
+    var active=activeModules(bytes),unused=[],m,source,target,refModule,refField,i,referenced=false;
+    for(m=0;m<cfg.maxModules;m++)if(!bytes[moduleOffset(m,M_ACTIVE)])unused.push(m);
+    if(unused.length&&active.length&&rng.int(2)===0){
+      source=active[rng.int(active.length)];target=unused[rng.int(unused.length)];
+      bytes.set(bytes.slice(source*MODULE_STRIDE,(source+1)*MODULE_STRIDE),target*MODULE_STRIDE);
+      refModule=active[rng.int(active.length)];refField=[M_LEFT_MODULE,M_RIGHT_MODULE,M_NEXT][rng.int(3)];
+      bytes[moduleOffset(refModule,refField)]=target;
+      descriptions.push("duplicated module "+source+" as "+target);
+      return;
+    }
+    if(active.length>1&&rng.int(3)===0){
+      target=active[rng.int(active.length)];
+      if(target!==0){
+        for(m=0;m<cfg.maxModules;m++)if(bytes[moduleOffset(m,M_ACTIVE)]){
+          if(bytes[moduleOffset(m,M_LEFT_MODULE)]===target||bytes[moduleOffset(m,M_RIGHT_MODULE)]===target||bytes[moduleOffset(m,M_NEXT)]===target)referenced=true;
+        }
+        if(!referenced){bytes[moduleOffset(target,M_ACTIVE)]=0;descriptions.push("deleted module "+target);return;}
+      }
+    }
+    if(active.length){
+      m=active[rng.int(active.length)];refField=rng.int(2)?M_LEFT_MODULE:M_RIGHT_MODULE;
+      bytes[moduleOffset(m,refField)]=bytes[moduleOffset(m,refField)]===NONE?active[rng.int(active.length)]:NONE;
+      descriptions.push("changed branch structure in module "+m);
+    }
+  }
+  function offspringGenome(parentId,originPlant,seedParcel) {
+    if(!cfg.mutationEnabled)return parentId;
+    var bytes=new Uint8Array(genomes[parentId].bytes),desc=[],pointCount=0,id,chemistryChanged=false;
+    if(rng.int(1000)<cfg.pointMutationPerThousand){
+      pointCount=1;
+      if(rng.int(6)===0)pointCount++;
+      if(rng.int(24)===0)pointCount++;
+    }
+    while(pointCount-->0)mutatePoint(bytes,desc);
+    if(cfg.chemistryMutationEnabled&&rng.int(1000)<cfg.chemistryMutationPerThousand){mutateChemistry(bytes,desc);chemistryChanged=true;}
+    if(rng.int(1000)<cfg.structuralMutationPerThousand)mutateStructural(bytes,desc);
+    if(!desc.length)return parentId;
+    id=internGenome(bytes,parentId,originPlant,seedParcel,desc.join("; "));
+    if(id!==parentId){stats.mutations++;if(chemistryChanged)stats.chemistryMutations++;logEvent("mutation",id,[parentId,id,seedParcel],{description:desc.join("; "),chemistryChanged:chemistryChanged},true);}
+    return id;
+  }
+  function createPlantRecord(genomeId,parentPlant,parentGenome,seedParcel,parentFlower,originCluster,introduced) {
+    var id=plants.length,p={
+      id:id,genomeId:genomeId,parentPlant:parentPlant,parentGenome:parentGenome,
+      seedParcel:seedParcel,parentFlower:parentFlower,birthTick:tick,deathTick:-1,
+      originCluster:originCluster===undefined?(parentPlant>=0&&plants[parentPlant]?plants[parentPlant].originCluster:-1):originCluster,
+      introduced:!!introduced,nodes:0,births:0,flowers:0,productiveInputs:0,restorations:0,foreignRestorations:0
+    };
+    plants.push(p);genomes[genomeId].extantPlants++;genomes[genomeId].lastTick=tick;
+    return id;
+  }
+
+  /* ================================================================
+     9. TIPS, RECURSIVE MERISTEM DEVELOPMENT, GROWTH, AND GRAFTING
+     ================================================================ */
+
+  function linkTipToNode(t,n) {
+    tipNode[t]=n;tipNextAtNode[t]=nodeTipHead[n];nodeTipHead[n]=t;refreshNodeRole(n);
+  }
+  function unlinkTipFromNode(t) {
+    var n=tipNode[t],cur,prev=-1;
+    if(n<0||!nodeAlive[n])return;
+    cur=nodeTipHead[n];
+    while(cur>=0){
+      if(cur===t){if(prev<0)nodeTipHead[n]=tipNextAtNode[cur];else tipNextAtNode[prev]=tipNextAtNode[cur];break;}
+      prev=cur;cur=tipNextAtNode[cur];
+    }
+    tipNextAtNode[t]=-1;refreshNodeRole(n);
+  }
+  function createTip(n,plantId,genomeId,moduleId,heading,depth) {
+    var t;
+    if(moduleId===NONE||moduleId>=cfg.maxModules||!genomeGene(genomeId,moduleId,M_ACTIVE))return-1;
+    if(depth>cfg.maxBranchDepth){stats.safetyRejects++;logEvent("safety-reject",-1,[plantId],{kind:"branch-depth"},true);return-1;}
+    t=allocTipId();if(t<0)return-1;
+    tipAlive[t]=1;tipPlant[t]=plantId;tipGenome[t]=genomeId;tipModule[t]=moduleId;tipStep[t]=0;
+    tipHeading[t]=heading&15;tipDepth[t]=depth;tipFailed[t]=0;tipNextAtNode[t]=-1;
+    tipSet.add(t);linkTipToNode(t,n);return t;
+  }
+  function destroyTip(t,releaseIfIsolated) {
+    var n;
+    if(t<0||!tipAlive[t])return;
+    n=tipNode[t];unlinkTipFromNode(t);tipSet.remove(t);tipAlive[t]=0;tipNode[t]=-1;tipPlant[t]=-1;tipGenome[t]=-1;
+    tipFree.push(t);
+    if(releaseIfIsolated)maybeReleaseIsolatedNode(n,tipHeading[t]);
+  }
+  function moveTipToNode(t,n) {unlinkTipFromNode(t);linkTipToNode(t,n);}
+  function compatibleTipAtNode(n,compound,pid) {
+    var cur=nodeTipHead[n],matches=0,chosen=-1,index;
+    while(cur>=0){
+      if(tipAlive[cur]&&distCompound(genomeGene(tipGenome[cur],tipModule[cur],M_HOME),compound)<=1)matches++;
+      cur=tipNextAtNode[cur];
+    }
+    if(!matches)return-1;
+    index=eventHash(cfg.seed,tick,n,pid)%matches;cur=nodeTipHead[n];
+    while(cur>=0){
+      if(tipAlive[cur]&&distCompound(genomeGene(tipGenome[cur],tipModule[cur],M_HOME),compound)<=1){
+        if(index===0){chosen=cur;break;}index--;
+      }
+      cur=tipNextAtNode[cur];
+    }
+    return chosen;
+  }
+  function bondPathClearCoords(x0fp,y0fp,x1fp,y1fp) {
+    var x0=fpToPx(x0fp),y0=fpToPx(y0fp),x1=fpToPx(x1fp),y1=fpToPx(y1fp);
+    return visitLinePixels(x0,y0,x1,y1,false,function(x,y){
+      if(x<0||y<0||x>=cfg.width||y>=cfg.height)return false;
+      return bondRaster[y*cfg.width+x]===0;
+    });
+  }
+  function finishGrowthStep(t,newNode) {
+    var g=tipGenome[t],m=tipModule[t],step,curve,branchStep,lm,rm,baseHeading,next,flower;
+    tipFailed[t]=0;tipStep[t]++;step=tipStep[t];
+    curve=genomeGene(g,m,M_CURVE)-1;tipHeading[t]=(tipHeading[t]+curve+16)&15;
+    branchStep=genomeGene(g,m,M_BRANCH_STEP);
+    if(branchStep!==NONE&&step===branchStep){
+      lm=genomeGene(g,m,M_LEFT_MODULE);rm=genomeGene(g,m,M_RIGHT_MODULE);baseHeading=tipHeading[t];
+      if(lm!==NONE)createTip(newNode,tipPlant[t],g,lm,(baseHeading-genomeGene(g,m,M_LEFT_ANGLE)+16)&15,tipDepth[t]+1);
+      if(rm!==NONE)createTip(newNode,tipPlant[t],g,rm,(baseHeading+genomeGene(g,m,M_RIGHT_ANGLE))&15,tipDepth[t]+1);
+    }
+    if(step>=genomeGene(g,m,M_STEPS)){
+      next=genomeGene(g,m,M_NEXT);flower=genomeGene(g,m,M_FLOWER);
+      if(flower)createFlower(newNode,tipPlant[t],g,m);
+      if(next!==NONE&&genomeGene(g,next,M_ACTIVE)){
+        tipModule[t]=next;tipStep[t]=0;
+      }else destroyTip(t,true);
+    }
+  }
+  function attemptGrowth(t,pid) {
+    var from=tipNode[t],heading=tipHeading[t],x,y,target,e,newNode,plantId=tipPlant[t],g=tipGenome[t],m=tipModule[t],kind;
+    var deliveringEdge=parcelIncoming[pid];
+    if(!tipAlive[t]||!nodeAlive[from])return false;
+    if(plants[plantId]&&plants[plantId].nodes>=cfg.maxNodesPerPlant){
+      stats.safetyRejects++;tipFailed[t]++;logEvent("safety-reject",t,[t,plantId],{kind:"plant-node-cap"},true);return false;
+    }
+    x=nodeX[from]+Math.trunc(DIR_X[heading]*cfg.nodeStepFp/FP);
+    y=nodeY[from]+Math.trunc(DIR_Y[heading]*cfg.nodeStepFp/FP);
+    if(x<0||y<0||x>(cfg.width-1)*FP||y>(cfg.height-1)*FP){tipFailed[t]++;return false;}
+    target=nearestGraftNode(from,x,y);
+    if(cfg.graftingEnabled&&target>=0){
+      e=createEdge(from,target,EDGE_GRAFT);
+      if(e>=0){
+        kind=nodePlant[from]===nodePlant[target]?"self":"foreign";
+        if(kind==="self")stats.selfGrafts++;else stats.grafts++;
+        if(parcelExposed[pid]&&creditProductiveEdge(deliveringEdge,"graft",plantId))parcelExposed[pid]=0;
+        logEvent("graft",e,[e,from,target,pid],{graftKind:kind,ownerA:nodePlant[from],ownerB:nodePlant[target]},true);
+        destroyTip(t,false);
+        if(distCompound(parcelCompound[pid],nodeGate[target])<=nodeGateTolerance[target])sendCarrierOnEdge(pid,e,from);
+        else releaseCarrier(pid,nodeX[from],nodeY[from],heading,"graft-gate-rejection");
+        return true;
+      }
+    }
+    if(target>=0||!locationClear(x,y,FP,from)||!bondPathClearCoords(nodeX[from],nodeY[from],x,y)){tipFailed[t]++;return false;}
+    newNode=createNodeFromParcel(pid,x,y,plantId,g,m,null);
+    if(newNode<0){tipFailed[t]++;return false;}
+    e=createEdge(from,newNode,EDGE_ORDINARY);
+    if(e<0){
+      /* The carrier was already rebound as tissue; after rollback it is FREE and must not be routed as a carrier. */
+      releaseNode(newNode,heading);tipFailed[t]++;return true;
+    }
+    moveTipToNode(t,newNode);stats.nodesGrown++;
+    creditProductiveEdge(deliveringEdge,"growth",plantId);
+    parcelExposed[pid]=0;
+    logEvent("growth",newNode,[pid,from,newNode,e,t],{plantId:plantId,genomeId:g,moduleId:m},true);
+    finishGrowthStep(t,newNode);
+    return true;
+  }
+  function processTipOpportunity(t) {
+    var n;
+    if(!tipAlive[t])return;
+    tipFailed[t]++;
+    if(tipFailed[t]>=cfg.tipFailedLimit){
+      n=tipNode[t];logEvent("tip-abandoned",t,[t,n],{failedOpportunities:tipFailed[t]},true);
+      destroyTip(t,true);
+    }
+  }
+
+  /* ================================================================
+     10. FLOWERS, PHYSICAL SEEDS, SENESCENCE, AND GERMINATION
+     ================================================================ */
+
+  function createFlower(core,plantId,genomeId,moduleId) {
+    var f=allocFlowerId(),i;
+    if(f<0||nodeFlower[core]>=0)return-1;
+    flowerAlive[f]=1;flowerCore[f]=core;flowerPlant[f]=plantId;flowerGenome[f]=genomeId;
+    /* Reproductive demand is coupled to the same two-trait metabolism. */
+    flowerPetalHome[f]=nodeTarget[core];
+    flowerSeedHome[f]=nodeHome[core];
+    flowerStage[f]=0;flowerOpportunities[f]=0;
+    for(i=0;i<4;i++)flowerPetals[i][f]=-1;
+    flowerSet.add(f);nodeFlower[core]=f;refreshNodeRole(core);
+    if(plants[plantId]){plants[plantId].flowers++;}stats.flowersStarted++;
+    logEvent("flower-start",f,[f,core,plantId],{petalHome:COMPOUND_NAMES[flowerPetalHome[f]],seedHome:COMPOUND_NAMES[flowerSeedHome[f]]},true);
+    return f;
+  }
+  function petalPosition(f,slot) {
+    var core=flowerCore[f],dx=[0,FP,0,-FP][slot],dy=[-FP,0,FP,0][slot];
+    return [nodeX[core]+dx,nodeY[core]+dy];
+  }
+  function petalSpotClear(f,slot) {
+    var pos=petalPosition(f,slot),clear=true,i,p;
+    forNearbyNodes(pos[0],pos[1],FP>>1,function(n){if(n!==flowerCore[f]){clear=false;return false;}});
+    if(!clear)return false;
+    for(i=0;i<4;i++){p=flowerPetals[i][f];if(p>=0&&parcelX[p]===pos[0]&&parcelY[p]===pos[1])return false;}
+    return pos[0]>=0&&pos[1]>=0&&pos[0]<(cfg.width*FP)&&pos[1]<(cfg.height*FP);
+  }
+  function releasePetal(pid,slot) {
+    if(pid<0||parcelState[pid]!==BOUND)return;
+    setParcelState(pid,FREE,{x:parcelX[pid],y:parcelY[pid],heading:(slot*4+12)&15});
+    stats.releases++;
+  }
+  function destroyFlower(f,releasePetals,allowCoreRelease) {
+    var core,i,p;
+    if(f<0||!flowerAlive[f])return;
+    core=flowerCore[f];
+    if(releasePetals)for(i=0;i<4;i++){p=flowerPetals[i][f];if(p>=0)releasePetal(p,i);flowerPetals[i][f]=-1;}
+    flowerSet.remove(f);flowerAlive[f]=0;flowerCore[f]=-1;flowerFree.push(f);
+    if(core>=0&&nodeAlive[core]&&nodeFlower[core]===f){nodeFlower[core]=-1;refreshNodeRole(core);}
+    if(allowCoreRelease)maybeReleaseIsolatedNode(core,0);
+  }
+  function offerCarrierToFlower(f,pid) {
+    var stage=flowerStage[f],pos,owner,parentGenome,newGenome,heading,incoming;
+    if(!flowerAlive[f])return false;
+    if(stage<4){
+      if(parcelCompound[pid]!==flowerPetalHome[f]||!petalSpotClear(f,stage))return false;
+      pos=petalPosition(f,stage);
+      creditProductiveEdge(parcelIncoming[pid],"reproduction",flowerPlant[f]);
+      setParcelState(pid,BOUND,{flower:f,petalSlot:stage,x:pos[0],y:pos[1]});
+      flowerPetals[stage][f]=pid;flowerStage[f]=stage+1;flowerOpportunities[f]=0;
+      logEvent("flower-petal",f,[f,pid,flowerCore[f]],{slot:stage,compound:COMPOUND_NAMES[parcelCompound[pid]]},true);
+      return true;
+    }
+    if(stage===4&&parcelCompound[pid]===flowerSeedHome[f]){
+      owner=flowerPlant[f];parentGenome=flowerGenome[f];newGenome=offspringGenome(parentGenome,owner,pid);
+      incoming=parcelIncoming[pid];heading=parcelHeading[pid];
+      if(incoming>=0&&edgeAlive[incoming]){
+        var other=edgeA[incoming]===flowerCore[f]?edgeB[incoming]:edgeA[incoming];
+        heading=headingFromVector(nodeX[flowerCore[f]]-nodeX[other],nodeY[flowerCore[f]]-nodeY[other]);
+      }
+      creditProductiveEdge(incoming,"reproduction",owner);
+      setParcelState(pid,SEED,{genome:newGenome,plant:owner,x:nodeX[flowerCore[f]],y:nodeY[flowerCore[f]],heading:heading});
+      flowerStage[f]=5;flowerOpportunities[f]=0;stats.seedsMade++;stats.births++;stats.flowersCompleted++;
+      if(plants[owner])plants[owner].births++;if(genomes[parentGenome])genomes[parentGenome].births++;
+      logEvent("seed-created",pid,[pid,f,owner,parentGenome,newGenome],{
+        parentPlant:owner,parentGenome:parentGenome,offspringGenome:newGenome,
+        foreignLastProcessor:parcelLastPlant[pid]>=0&&parcelLastPlant[pid]!==owner
+      },true);
+      return true;
+    }
+    return false;
+  }
+  function processFlowerOpportunity(f) {
+    var core,i,p;
+    if(!flowerAlive[f])return;
+    flowerOpportunities[f]++;
+    if(flowerStage[f]===5&&flowerOpportunities[f]>=cfg.flowerSenesceOpportunities){
+      core=flowerCore[f];
+      if(core>=0&&nodeAlive[core]&&nodeDegree[core]>0){
+        for(i=0;i<4;i++){p=flowerPetals[i][f];if(p>=0)releasePetal(p,i);flowerPetals[i][f]=-1;}
+        flowerStage[f]=0;flowerOpportunities[f]=0;stats.flowerReblooms++;
+        logEvent("flower-rebloom",f,[f,core],{completed:true},true);
+      }else{
+        logEvent("flower-senescence",f,[f,core],{completed:true,detached:true},true);
+        destroyFlower(f,true,true);
+      }
+    }else if(flowerStage[f]<5&&flowerOpportunities[f]>=cfg.flowerWaitLimit){
+      stats.flowersFailed++;logEvent("flower-senescence",f,[f,flowerCore[f]],{completed:false,stage:flowerStage[f]},true);
+      destroyFlower(f,true,true);
+    }
+  }
+  function germinateSeed(pid) {
+    var g=parcelGenome[pid],parent=parcelPlant[pid],x=parcelX[pid],y=parcelY[pid],heading=parcelHeading[pid],plantId,n,t;
+    if(!locationClear(x,y,cfg.germinationClearanceFp,-1))return false;
+    plantId=createPlantRecord(g,parent,parent>=0&&plants[parent]?plants[parent].genomeId:-1,pid,-1);
+    n=createNodeFromParcel(pid,x,y,plantId,g,0,null);
+    if(n<0)return false;
+    t=createTip(n,plantId,g,0,heading,0);
+    stats.germinations++;
+    logEvent("germination",plantId,[pid,plantId,n,t],{genomeId:g,parentPlant:parent},true);
+    if(t<0)maybeReleaseIsolatedNode(n,heading);
+    return true;
+  }
+
+  /* ================================================================
+     11. FREE MOTION, CAPTURE, CARRIER EXCHANGE, ROUTING, AND FLOW
+     ================================================================ */
+
+  function moveWithReflection(id,dxTable,dyTable) {
+    var h=parcelHeading[id],turn=rng.int(16),x,y,maxX=(cfg.width-1)*FP,maxY=(cfg.height-1)*FP;
+    if(turn===0)h=(h+15)&15;else if(turn===1)h=(h+1)&15;
+    x=parcelX[id]+dxTable[h];y=parcelY[id]+dyTable[h];
+    if(x<0){x=-x;h=(8-h)&15;}else if(x>maxX){x=maxX-(x-maxX);h=(8-h)&15;}
+    if(y<0){y=-y;h=(16-h)&15;}else if(y>maxY){y=maxY-(y-maxY);h=(16-h)&15;}
+    parcelX[id]=clamp(x,0,maxX);parcelY[id]=clamp(y,0,maxY);parcelHeading[id]=h;
+  }
+  function processFree(pid) {
+    var port;
+    if(parcelState[pid]!==FREE)return;
+    freeHashRemove(pid);moveWithReflection(pid,FREE_DX,FREE_DY);freeHashInsert(pid);
+    port=nearestCapturePort(pid);
+    if(port>=0){
+      setParcelState(pid,CARRIER,{node:port,incoming:-1,x:nodeX[port],y:nodeY[port],heading:parcelHeading[pid]});
+      stats.captures++;
+      logEvent("capture",pid,[pid,port],{compound:COMPOUND_NAMES[parcelCompound[pid]],plantId:nodePlant[port]},true);
+    }
+  }
+  function releaseCarrier(pid,x,y,heading,reason) {
+    var fromNode=parcelNode[pid],incoming=parcelIncoming[pid];
+    setParcelState(pid,FREE,{x:x,y:y,heading:heading});
+    stats.releases++;
+    logEvent("carrier-release",pid,[pid,fromNode,incoming],{reason:reason||"no-route",compound:COMPOUND_NAMES[parcelCompound[pid]]},true);
+  }
+  function sendCarrierOnEdge(pid,e,fromNode) {
+    var dir=edgeA[e]===fromNode?0:1;
+    parcelNode[pid]=-1;parcelEdge[pid]=e;parcelEdgeT[pid]=0;parcelEdgeDir[pid]=dir;
+    parcelX[pid]=nodeX[fromNode];parcelY[pid]=nodeY[fromNode];
+    logEvent("route",pid,[pid,e,fromNode],{toward:dir===0?edgeB[e]:edgeA[e]},false);
+  }
+  function incomingHeadingAtNode(pid,n) {
+    var e=parcelIncoming[pid],other;
+    if(e>=0&&edgeAlive[e]){
+      other=edgeA[e]===n?edgeB[e]:edgeA[e];
+      return headingFromVector(nodeX[n]-nodeX[other],nodeY[n]-nodeY[other]);
+    }
+    return parcelHeading[pid];
+  }
+  function chooseOutgoingEdge(pid,n) {
+    var incoming=parcelIncoming[pid],inHeading=incomingHeadingAtNode(pid,n),near=distCompound(parcelCompound[pid],nodeRouteKey[n])<=1;
+    var order=ROUTE_ORDERS[near?nodeRouteNear[n]:nodeRouteFar[n]],eligible=[],i,e,other,h,cls,hasAlternative=false;
+    var rank,best=-1,bestRank=99,bestChem=99,bestTie=Infinity,chem,tie;
+    for(i=0;i<nodeDegree[n];i++){
+      e=nodeEdge[i][n];if(!edgeAlive[e])continue;other=edgeA[e]===n?edgeB[e]:edgeA[e];
+      if(distCompound(parcelCompound[pid],nodeGate[other])>nodeGateTolerance[other])continue;
+      if(e!==incoming)hasAlternative=true;
+      eligible.push([e,other]);
+    }
+    for(i=0;i<eligible.length;i++){
+      e=eligible[i][0];other=eligible[i][1];if(hasAlternative&&e===incoming)continue;
+      h=headingFromVector(nodeX[other]-nodeX[n],nodeY[other]-nodeY[n]);cls=turnClass(inHeading,h);
+      for(rank=0;rank<4;rank++)if(order[rank]===cls)break;
+      chem=distCompound(parcelCompound[pid],nodeGate[other]);
+      tie=eventHash(cfg.seed,tick,pid,e);
+      if(rank<bestRank||(rank===bestRank&&(chem<bestChem||(chem===bestChem&&tie<bestTie)))){
+        best=e;bestRank=rank;bestChem=chem;bestTie=tie;
+      }
+    }
+    return best;
+  }
+  function creditProductiveEdge(e,kind,plantId) {
+    if(e<0||!edgeAlive[e])return false;
+    edgePerfused[e]=1;edgeProductiveCount[e]++;edgeLastProductiveTick[e]=tick>>>0;
+    stats.productiveMaintenance++;
+    if(kind==="restoration"){edgeRestorationCount[e]++;stats.productiveRestorations++;}
+    else if(kind==="growth"){edgeConstructionCount[e]++;stats.productiveGrowth++;}
+    else if(kind==="graft"){edgeConstructionCount[e]++;stats.productiveGrafts++;}
+    else if(kind==="reproduction"){edgeReproductionCount[e]++;stats.productiveReproduction++;}
+    if(plantId>=0&&plants[plantId])plants[plantId].productiveInputs++;
+    return true;
+  }
+  function performExchange(pid,n) {
+    var np=nodeParcel[n],carrierBefore=parcelCompound[pid],nodeBefore=parcelCompound[np];
+    var restoring=nodeBefore!==nodeHome[n],previousProcessor=parcelLastPlant[pid];
+    var choice=exchangeAtNode(carrierBefore,nodeBefore,nodeHome[n],nodeTarget[n],eventHash(cfg.seed,tick,n,pid)),ev,plantId=nodePlant[n];
+    if(!choice)return false;
+    parcelCompound[pid]=choice.carrierAfter;parcelCompound[np]=choice.nodeAfter;
+    stats.exchanges++;if(restoring)stats.restorations++;else stats.discharges++;
+    parcelTransformCount[pid]++;parcelTransformCount[np]++;
+    parcelLastTransformTick[pid]=tick>>>0;parcelLastTransformTick[np]=tick>>>0;
+    if(restoring){
+      if(parcelExposed[pid]&&creditProductiveEdge(parcelIncoming[pid],"restoration",plantId))parcelExposed[pid]=0;
+      if(plants[plantId])plants[plantId].restorations++;
+      if(previousProcessor>=0&&previousProcessor!==plantId){stats.foreignRestorations++;if(plants[plantId])plants[plantId].foreignRestorations++;}
+      else stats.sameLineageRestorations++;
+      if(previousProcessor>=0&&plants[previousProcessor]&&plants[plantId]){
+        var sourceChem=chemistrySignature(plants[previousProcessor].genomeId),targetChem=chemistrySignature(plants[plantId].genomeId),interactionKey=sourceChem+" → "+targetChem;
+        interactionFlux.set(interactionKey,(interactionFlux.get(interactionKey)||0)+1);
+        if(sourceChem===targetChem)stats.sameChemotypeRestorations++;else stats.foreignChemotypeRestorations++;
+      }
+    }
+    exchangeFlux[carrierBefore*11+choice.carrierAfter]++;
+    ev=logEvent("exchange",pid,[pid,n,np],{
+      carrierParcel:pid,nodeParcel:np,carrierBefore:COMPOUND_NAMES[carrierBefore],
+      carrierAfter:COMPOUND_NAMES[choice.carrierAfter],nodeBefore:COMPOUND_NAMES[nodeBefore],
+      nodeAfter:COMPOUND_NAMES[choice.nodeAfter],home:COMPOUND_NAMES[nodeHome[n]],
+      target:COMPOUND_NAMES[nodeTarget[n]],plantId:nodePlant[n],genomeId:nodeGenome[n],
+      restorative:restoring
+    },true);
+    recordParcel(pid,ev);recordParcel(np,ev);
+    parcelLastPlant[pid]=plantId;parcelLastPlant[np]=plantId;
+    if(speed<64)flashes.push({x:nodeX[n],y:nodeY[n],until:tick+12});
+    return true;
+  }
+  function advanceCarrier(pid) {
+    var e=parcelEdge[pid],t,arrive,from,to;
+    if(e<0||!edgeAlive[e]){releaseCarrier(pid,parcelX[pid],parcelY[pid],parcelHeading[pid],"invalid-edge");return;}
+    t=parcelEdgeT[pid]+cfg.carrierProgress;
+    if(!cfg.productiveMaintenance)edgePerfused[e]=1;
+    edgeFlowCount[e]++;edgeLastFlowTick[e]=tick>>>0;
+    from=parcelEdgeDir[pid]===0?edgeA[e]:edgeB[e];to=from===edgeA[e]?edgeB[e]:edgeA[e];
+    if(t>=65535){
+      parcelEdge[pid]=-1;parcelEdgeT[pid]=0;parcelNode[pid]=to;parcelIncoming[pid]=e;
+      parcelX[pid]=nodeX[to];parcelY[pid]=nodeY[to];
+      parcelHeading[pid]=headingFromVector(nodeX[to]-nodeX[from],nodeY[to]-nodeY[from]);
+      logEvent("arrival",pid,[pid,e,to],{},false);
+    }else{
+      parcelEdgeT[pid]=t;
+      parcelX[pid]=nodeX[from]+Math.trunc((nodeX[to]-nodeX[from])*t/65535);
+      parcelY[pid]=nodeY[from]+Math.trunc((nodeY[to]-nodeY[from])*t/65535);
+    }
+  }
+  function processCarrierAtNode(pid) {
+    var n=parcelNode[pid],t,f,e,h;
+    if(n<0||!nodeAlive[n]){releaseCarrier(pid,parcelX[pid],parcelY[pid],parcelHeading[pid],"invalid-node");return;}
+    performExchange(pid,n);
+    t=compatibleTipAtNode(n,parcelCompound[pid],pid);
+    if(t>=0&&attemptGrowth(t,pid))return;
+    f=nodeFlower[n];
+    if(f>=0&&offerCarrierToFlower(f,pid))return;
+    if(cfg.nodeLeakDenominator>0&&rng.int(cfg.nodeLeakDenominator)===0){
+      releaseCarrier(pid,nodeX[n],nodeY[n],incomingHeadingAtNode(pid,n),"universal-leak");return;
+    }
+    e=chooseOutgoingEdge(pid,n);
+    if(e>=0){sendCarrierOnEdge(pid,e,n);return;}
+    h=incomingHeadingAtNode(pid,n);releaseCarrier(pid,nodeX[n],nodeY[n],h,"no-admitted-route");
+  }
+  function processCarrier(pid) {
+    if(parcelState[pid]!==CARRIER)return;
+    if(parcelEdge[pid]>=0)advanceCarrier(pid);else processCarrierAtNode(pid);
+  }
+  function processEdgeMaintenance(e) {
+    if(!edgeAlive[e])return;
+    if(edgePerfused[e]){edgePerfused[e]=0;edgeDryMisses[e]=0;}
+    else{
+      edgeDryMisses[e]++;
+      if(edgeDryMisses[e]>=cfg.edgeDryBreak)breakEdge(e);
+    }
+  }
+  function processSeed(pid) {
+    if(parcelState[pid]!==SEED)return;
+    moveWithReflection(pid,SEED_DX,SEED_DY);parcelAge[pid]++;
+    if(parcelAge[pid]>=cfg.seedMaturation&&germinateSeed(pid))return;
+    if(parcelAge[pid]>=cfg.seedMaxAge){
+      logEvent("seed-failed",pid,[pid],{genomeId:parcelGenome[pid]},true);
+      setParcelState(pid,FREE,{x:parcelX[pid],y:parcelY[pid],heading:parcelHeading[pid]});stats.releases++;
+    }
+  }
+
+  /* ================================================================
+     12. EXACT INITIALIZATION AND HAND-AUTHORED FLOW-PROOF MODE
+     ================================================================ */
+
+  var freeCompoundCursor=0;
+  function initializeParcelInventory() {
+    var p=cfg.parcelCount,bag=new Uint8Array(p*3),i,j,tmp,r,g,b,code,maxX=(cfg.width-1)*FP,maxY=(cfg.height-1)*FP;
+    for(i=0;i<p;i++){bag[i]=0;bag[p+i]=1;bag[2*p+i]=2;}
+    for(i=bag.length-1;i>0;i--){j=rng.int(i+1);tmp=bag[i];bag[i]=bag[j];bag[j]=tmp;}
+    initialTotals=[0,0,0];
+    for(i=0;i<p;i++){
+      r=g=b=0;
+      if(bag[i*3]===0)r++;else if(bag[i*3]===1)g++;else b++;
+      if(bag[i*3+1]===0)r++;else if(bag[i*3+1]===1)g++;else b++;
+      if(bag[i*3+2]===0)r++;else if(bag[i*3+2]===1)g++;else b++;
+      code=encodeCounts(r,g,b);parcelCompound[i]=code;
+      initialTotals[0]+=r;initialTotals[1]+=g;initialTotals[2]+=b;
+      parcelState[i]=FREE;parcelExposed[i]=1;parcelX[i]=rng.int(maxX+1);parcelY[i]=rng.int(maxY+1);parcelHeading[i]=rng.int(16);
+      freeSet.add(i);freeHashInsert(i);
+    }
+    initialParcelCount=p;freeCompoundCursor=0;
+  }
+  function takeFreeCompound(code) {
+    var p=cfg.parcelCount,k,id;
+    for(k=0;k<p;k++){id=(freeCompoundCursor+k)%p;if(parcelState[id]===FREE&&parcelCompound[id]===code){freeCompoundCursor=(id+1)%p;return id;}}
+    for(k=0;k<p;k++){id=(freeCompoundCursor+k)%p;if(parcelState[id]===FREE){freeCompoundCursor=(id+1)%p;return id;}}
+    return-1;
+  }
+  function initializeFounders(ancestorId) {
+    var count=cfg.founderClones,clusters=Math.min(cfg.founderClusters,count);
+    var cols=Math.ceil(Math.sqrt(clusters*cfg.width/cfg.height)),rows=Math.ceil(clusters/cols);
+    var i,c,local,col,row,cx,cy,x,y,pid,plantId,n,heading,angle,radius,margin=46*FP;
+    for(i=0;i<count;i++){
+      c=i%clusters;local=(i/clusters)|0;col=c%cols;row=(c/cols)|0;
+      cx=margin+Math.trunc((cfg.width*FP-2*margin)*(col+0.5)/cols);
+      cy=margin+Math.trunc((cfg.height*FP-2*margin)*(row+0.5)/rows);
+      angle=(local*5+(eventHash(cfg.seed,c,local,0x434c)&3))&15;radius=(7+((local/8)|0)*5)*FP;
+      x=clamp(cx+Math.trunc(DIR_X[angle]*radius/FP),2*FP,(cfg.width-3)*FP);
+      y=clamp(cy+Math.trunc(DIR_Y[angle]*radius/FP),2*FP,(cfg.height-3)*FP);
+      pid=takeFreeCompound(5);if(pid<0)break;
+      plantId=createPlantRecord(ancestorId,-1,-1,pid,-1,c,false);
+      n=createNodeFromParcel(pid,x,y,plantId,ancestorId,0,null);
+      heading=(angle+8+(eventHash(cfg.seed,i,0xabc,0)%5)-2)&15;
+      createTip(n,plantId,ancestorId,0,heading,0);
+      logEvent("founder",plantId,[plantId,pid,n],{genomeId:ancestorId,cluster:c},true);
+    }
+  }
+  function manualNode(plantId,genomeId,xpx,ypx,compound,chem) {
+    var pid=takeFreeCompound(compound);
+    return createNodeFromParcel(pid,xpx*FP,ypx*FP,plantId,genomeId,0,chem);
+  }
+  function initializeProof(ancestorId) {
+    var pa=createPlantRecord(ancestorId,-1,-1,-1,-1),pb=createPlantRecord(ancestorId,-1,-1,-1,-1);
+    var ca={home:2,target:5,gate:2,tolerance:1,routeKey:2,routeNear:2,routeFar:0};
+    var cb={home:8,target:5,gate:8,tolerance:1,routeKey:8,routeNear:3,routeFar:1};
+    var ax=[130,140,150,160,170,160,160,160],ay=[365,365,365,355,365,375,345,385],an=[],i;
+    var bx=[180,190,200,210,200,230,200,200],by=[365,365,355,365,375,365,345,385],bn=[],f;
+    for(i=0;i<ax.length;i++)an.push(manualNode(pa,ancestorId,ax[i],ay[i],2,ca));
+    for(i=0;i<bx.length;i++)bn.push(manualNode(pb,ancestorId,bx[i],by[i],8,cb));
+    createEdge(an[0],an[1],0);createEdge(an[1],an[2],0);createEdge(an[2],an[3],0);
+    createEdge(an[3],an[4],0);createEdge(an[4],an[5],0);createEdge(an[5],an[2],0);
+    createEdge(an[3],an[6],0);createEdge(an[5],an[7],0);
+    createEdge(bn[0],bn[1],0);createEdge(bn[1],bn[2],0);createEdge(bn[2],bn[3],0);
+    createEdge(bn[3],bn[4],0);createEdge(bn[4],bn[1],0);createEdge(bn[3],bn[5],0);
+    createEdge(bn[2],bn[6],0);createEdge(bn[4],bn[7],0);
+    var graft=createEdge(an[4],bn[0],EDGE_GRAFT);
+    if(graft>=0)stats.grafts++;
+    f=createFlower(bn[5],pb,ancestorId,1);
+    if(f>=0){flowerPetalHome[f]=5;flowerSeedHome[f]=5;}
+    logEvent("proof-ready",-1,an.concat(bn),{owners:[pa,pb],graft:graft},true);
+  }
+
+  function dominantGenomeId() {
+    var counts=new Map(),best=0,bestCount=-1,i,p,c;
+    for(i=0;i<plants.length;i++){
+      p=plants[i];if(p.deathTick>=0||p.nodes<=0)continue;c=(counts.get(p.genomeId)||0)+1;counts.set(p.genomeId,c);
+      if(c>bestCount||(c===bestCount&&p.genomeId<best)){best=p.genomeId;bestCount=c;}
+    }
+    return best;
+  }
+  function nearestClearFreeCompound(code,x,y) {
+    var best=-1,bestD=Infinity,i,p,dx,dy,d;
+    for(i=0;i<freeSet.length;i++){
+      p=freeSet.ids[i];if(parcelCompound[p]!==code||!locationClear(parcelX[p],parcelY[p],cfg.germinationClearanceFp,-1))continue;
+      dx=parcelX[p]-x;dy=parcelY[p]-y;d=dx*dx+dy*dy;
+      if(d<bestD||(d===bestD&&p<best)){best=p;bestD=d;}
+    }
+    return best;
+  }
+  function localTransformedFree(x,y,radiusFp) {
+    var r2=radiusFp*radiusFp,total=0,i,p,dx,dy;
+    for(i=0;i<freeSet.length;i++){
+      p=freeSet.ids[i];if(!parcelTransformCount[p])continue;dx=parcelX[p]-x;dy=parcelY[p]-y;
+      if(dx*dx+dy*dy<=r2)total++;
+    }
+    return total;
+  }
+  function localLiveNodes(x,y,radiusFp) {
+    var r2=radiusFp*radiusFp,total=0,i,n,dx,dy;
+    for(i=0;i<nodeSet.length;i++){n=nodeSet.ids[i];dx=nodeX[n]-x;dy=nodeY[n]-y;if(dx*dx+dy*dy<=r2)total++;}
+    return total;
+  }
+  function introduceRareVariant(options) {
+    options=options||{};
+    var parent=options.parentGenome===undefined?dominantGenomeId():options.parentGenome|0;
+    if(!genomes[parent])return {ok:false,reason:"no-parent-genome"};
+    var bytes=new Uint8Array(genomes[parent].bytes),active=activeModules(bytes),baseTarget=bytes[moduleOffset(0,M_TARGET)];
+    var candidates=NEIGHBORS[baseTarget],target=options.targetCode|0,m,pid,plantId,n,t,gid,x,y;
+    if(target<1||target>10)target=candidates[eventHash(cfg.seed,tick,parent,0x52415245)%candidates.length];
+    for(m=0;m<active.length;m++)bytes[moduleOffset(active[m],M_TARGET)]=target;
+    gid=internGenome(bytes,parent,-1,-1,"introduced rare product "+COMPOUND_NAMES[baseTarget]+"→"+COMPOUND_NAMES[target]);
+    x=options.x===undefined?Math.trunc(cfg.width*FP/2):Math.trunc(Number(options.x)*FP);
+    y=options.y===undefined?Math.trunc(cfg.height*FP/2):Math.trunc(Number(options.y)*FP);
+    pid=nearestClearFreeCompound(bytes[moduleOffset(0,M_HOME)],x,y);
+    if(pid<0)return {ok:false,reason:"no-clear-local-matter",genomeId:gid};
+    plantId=createPlantRecord(gid,-1,parent,pid,-1,-1,true);
+    n=createNodeFromParcel(pid,parcelX[pid],parcelY[pid],plantId,gid,0,null);
+    t=createTip(n,plantId,gid,0,eventHash(cfg.seed,tick,plantId,0x494e56)%16,0);
+    var localHistory=localTransformedFree(nodeX[n],nodeY[n],cfg.historyRegionPx*FP),localNodes=Math.max(0,localLiveNodes(nodeX[n],nodeY[n],cfg.historyRegionPx*FP)-1);
+    stats.introductions++;rareIntroductions.push({tick:tick,label:options.label||"rare",plantId:plantId,genomeId:gid,parentGenome:parent,target:target,x:fpToPx(nodeX[n]),y:fpToPx(nodeY[n]),localHistoryAtIntroduction:localHistory,neighborNodesAtIntroduction:localNodes});
+    logEvent("rare-introduction",plantId,[plantId,gid,pid,n,t],{label:options.label||"rare",parentGenome:parent,target:COMPOUND_NAMES[target],localHistoryAtIntroduction:localHistory,neighborNodesAtIntroduction:localNodes},true);
+    return {ok:true,tick:tick,label:options.label||"rare",plantId:plantId,genomeId:gid,parentGenome:parent,home:COMPOUND_NAMES[nodeHome[n]],target:COMPOUND_NAMES[target],x:fpToPx(nodeX[n]),y:fpToPx(nodeY[n]),localHistoryAtIntroduction:localHistory,neighborNodesAtIntroduction:localNodes};
+  }
+  function introduceHistoryPair(options) {
+    options=options||{};
+    var parent=options.parentGenome===undefined?dominantGenomeId():options.parentGenome|0;
+    if(!genomes[parent])return {ok:false,reason:"no-parent-genome"};
+    var baseTarget=genomes[parent].bytes[moduleOffset(0,M_TARGET)],neighbors=NEIGHBORS[baseTarget];
+    var target=options.targetCode|0;if(target<1||target>10)target=neighbors[eventHash(cfg.seed,tick,parent,0x50414952)%neighbors.length];
+    var size=cfg.historyRegionPx,radius=size*FP,candidates=[],rich=null,poor=null,i,p,x,y,h,nodes,d,score,bestScore=Infinity;
+    var home=genomes[parent].bytes[moduleOffset(0,M_HOME)],offset=freeSet.length?eventHash(cfg.seed,tick,parent,0x53495445)%freeSet.length:0;
+    for(i=0;i<freeSet.length&&candidates.length<256;i++){
+      p=freeSet.ids[(offset+i)%freeSet.length];
+      if(parcelCompound[p]!==home||!locationClear(parcelX[p],parcelY[p],cfg.germinationClearanceFp,-1))continue;
+      x=fpToPx(parcelX[p]);y=fpToPx(parcelY[p]);h=localTransformedFree(parcelX[p],parcelY[p],radius);nodes=localLiveNodes(parcelX[p],parcelY[p],radius);
+      candidates.push({parcelId:p,x:x,y:y,history:h,nodes:nodes});
+      if(!rich||h>rich.history||(h===rich.history&&nodes>rich.nodes))rich={parcelId:p,x:x,y:y,history:h,nodes:nodes};
+    }
+    if(!rich)return {ok:false,reason:"no-matched-sites"};
+    for(i=0;i<candidates.length;i++){
+      d=(candidates[i].x-rich.x)*(candidates[i].x-rich.x)+(candidates[i].y-rich.y)*(candidates[i].y-rich.y);
+      if(d<(size*3)*(size*3))continue;
+      score=Math.abs(candidates[i].nodes-rich.nodes)*1000+candidates[i].history*100-d/1000000;
+      if(score<bestScore){bestScore=score;poor=candidates[i];}
+    }
+    if(!poor)poor=candidates[candidates.length-1];
+    var a=introduceRareVariant({parentGenome:parent,targetCode:target,x:rich.x,y:rich.y,label:"history-rich"});
+    var b=introduceRareVariant({parentGenome:parent,targetCode:target,x:poor.x,y:poor.y,label:"history-matched-low"});
+    return {ok:!!a.ok&&!!b.ok,tick:tick,target:COMPOUND_NAMES[target],rich:a,poor:b};
+  }
+
+  /* ================================================================
+     13. ATOMIC EVENT SCHEDULER
+     ================================================================ */
+
+  function scheduledStep() {
+    var counts=[freeSet.length,carrierSet.length,tipSet.length,edgeSet.length,flowerSet.length,seedSet.length];
+    var weights=[cfg.weightFree,cfg.weightCarrier,cfg.weightTip,cfg.weightEdge,cfg.weightFlower,cfg.weightSeed];
+    var total=0,i,r,id;
+    for(i=0;i<6;i++)total+=counts[i]*weights[i];
+    if(total<=0)return false;
+    tick++;r=rng.int(total);
+    for(i=0;i<6;i++){r-=counts[i]*weights[i];if(r<0)break;}
+    if(i>=6)i=5;stats.scheduled[i]++;
+    if(i===0){id=freeSet.choose(rng);if(id>=0)processFree(id);}
+    else if(i===1){id=carrierSet.choose(rng);if(id>=0)processCarrier(id);}
+    else if(i===2){id=tipSet.choose(rng);if(id>=0)processTipOpportunity(id);}
+    else if(i===3){id=edgeSet.choose(rng);if(id>=0)processEdgeMaintenance(id);}
+    else if(i===4){id=flowerSet.choose(rng);if(id>=0)processFlowerOpportunity(id);}
+    else {id=seedSet.choose(rng);if(id>=0)processSeed(id);}
+    if(cfg.historySampleInterval>0&&tick%cfg.historySampleInterval===0)sampleEcologyHistory();
+    return true;
+  }
+  function stepMany(n) {var i;for(i=0;i<n;i++)if(!scheduledStep())break;return tick;}
+
+  /* ================================================================
+     14. INVARIANTS, PURE SELF-TESTS, METRICS, AND STATE HASHING
+     ================================================================ */
+
+  function runPureSelfTests() {
+    var errors=[],a,b,i,c,before,after,r1=new RNG(12345),r2=new RNG(12345);
+    for(i=0;i<1000;i++)if(r1.next()!==r2.next()){errors.push("PRNG determinism failed");break;}
+    for(a=1;a<=10;a++)for(b=1;b<=10;b++)for(i=0;i<SWAPS[a][b].length;i++){
+      c=SWAPS[a][b][i];
+      before=[COUNTS[a][0]+COUNTS[b][0],COUNTS[a][1]+COUNTS[b][1],COUNTS[a][2]+COUNTS[b][2]];
+      after=[COUNTS[c.carrierAfter][0]+COUNTS[c.nodeAfter][0],COUNTS[c.carrierAfter][1]+COUNTS[c.nodeAfter][1],COUNTS[c.carrierAfter][2]+COUNTS[c.nodeAfter][2]];
+      if(before[0]!==after[0]||before[1]!==after[1]||before[2]!==after[2])errors.push("Nonconserving swap "+a+","+b);
+      if(c.give===c.receive)errors.push("Like-token swap");
+    }
+    if(encodeCounts(1,1,1)!==5||distCompound(1,10)!==3)errors.push("Compound table failed");
+    return {ok:errors.length===0,errors:errors,tests:"PRNG + exhaustive 10×10 reciprocal-swap algebra"};
+  }
+
+  function assertInvariants(level) {
+    var errors=[],tot=[0,0,0],stateCounts=[0,0,0,0],p,n,e,i,j,pid,other,slot;
+    var seenNodeParcel=new Uint8Array(cfg.parcelCount);
+    for(p=0;p<cfg.parcelCount;p++){
+      if(parcelState[p]>SEED){errors.push("Parcel "+p+" has invalid state");continue;}
+      stateCounts[parcelState[p]]++;
+      if(parcelCompound[p]<1||parcelCompound[p]>10){errors.push("Parcel "+p+" has invalid compound");continue;}
+      tot[0]+=COUNTS[parcelCompound[p]][0];tot[1]+=COUNTS[parcelCompound[p]][1];tot[2]+=COUNTS[parcelCompound[p]][2];
+      if(parcelState[p]===FREE){
+        if(!freeSet.has(p)||parcelNode[p]>=0||parcelEdge[p]>=0)errors.push("FREE parcel sentinel/set mismatch "+p);
+      }else if(parcelState[p]===CARRIER){
+        if(!carrierSet.has(p)||((parcelNode[p]>=0)===(parcelEdge[p]>=0)))errors.push("CARRIER location mismatch "+p);
+      }else if(parcelState[p]===SEED){
+        if(!seedSet.has(p)||parcelGenome[p]<0)errors.push("SEED metadata mismatch "+p);
+      }else if(parcelState[p]===BOUND){
+        if(parcelNode[p]>=0){
+          n=parcelNode[p];
+          if(!nodeAlive[n]||nodeParcel[n]!==p)errors.push("BOUND node backlink mismatch "+p);
+        }else if(parcelFlower[p]>=0){
+          var fl=parcelFlower[p],ps=parcelPetalSlot[p];
+          if(!flowerAlive[fl]||ps>3||flowerPetals[ps][fl]!==p)errors.push("BOUND petal backlink mismatch "+p);
+        }else errors.push("BOUND parcel without embodiment "+p);
+      }
+      if(errors.length>200)break;
+    }
+    if(tot[0]!==initialTotals[0]||tot[1]!==initialTotals[1]||tot[2]!==initialTotals[2])errors.push("Elemental conservation failed: "+tot.join("/")+" expected "+initialTotals.join("/"));
+    if(stateCounts[0]!==freeSet.length||stateCounts[1]!==carrierSet.length||stateCounts[3]!==seedSet.length)errors.push("Active parcel counts disagree");
+    for(i=0;i<nodeSet.length;i++){
+      n=nodeSet.ids[i];
+      if(!nodeAlive[n]){errors.push("Dead node in node set "+n);continue;}
+      pid=nodeParcel[n];
+      if(pid<0||parcelState[pid]!==BOUND||parcelNode[pid]!==n)errors.push("Node parcel mismatch "+n);
+      else if(seenNodeParcel[pid])errors.push("Duplicate node parcel "+pid);else seenNodeParcel[pid]=1;
+      if(nodeDegree[n]>cfg.maxNodeDegree)errors.push("Degree cap exceeded "+n);
+      for(j=0;j<nodeDegree[n];j++){
+        other=nodeNbr[j][n];e=nodeEdge[j][n];
+        if(other<0||!nodeAlive[other]||e<0||!edgeAlive[e])errors.push("Dead adjacency at node "+n);
+        else if(adjacencySlot(other,n)<0)errors.push("Asymmetric adjacency "+n+"-"+other);
+      }
+    }
+    for(i=0;i<edgeSet.length;i++){
+      e=edgeSet.ids[i];
+      if(!edgeAlive[e]||!nodeAlive[edgeA[e]]||!nodeAlive[edgeB[e]])errors.push("Invalid live edge "+e);
+      else if(adjacencySlot(edgeA[e],edgeB[e])<0||adjacencySlot(edgeB[e],edgeA[e])<0)errors.push("Edge missing adjacency "+e);
+    }
+    if(level==="full"){
+      var rasterCheck=new Int32Array(bondRaster.length),collision=false;
+      for(i=0;i<edgeSet.length;i++){
+        e=edgeSet.ids[i];
+        visitLinePixels(fpToPx(nodeX[edgeA[e]]),fpToPx(nodeY[edgeA[e]]),fpToPx(nodeX[edgeB[e]]),fpToPx(nodeY[edgeB[e]]),false,function(x,y){
+          var idx=y*cfg.width+x;
+          if(rasterCheck[idx]&&rasterCheck[idx]!==e+1)collision=true;
+          rasterCheck[idx]=e+1;
+        });
+      }
+      if(collision)errors.push("Forbidden bond crossing/overlap");
+      for(i=0;i<bondRaster.length;i++)if(rasterCheck[i]!==bondRaster[i]){errors.push("Bond raster mismatch at "+i);break;}
+    }
+    return {ok:errors.length===0,errors:errors,totals:{R:tot[0],G:tot[1],B:tot[2]},parcelStates:{free:stateCounts[0],carrier:stateCounts[1],bound:stateCounts[2],seed:stateCounts[3]},tick:tick};
+  }
+
+  function compoundAbundanceByState() {
+    var out=[],s,c,p;
+    for(s=0;s<4;s++){out[s]=new Array(11).fill(0);}
+    for(p=0;p<cfg.parcelCount;p++)out[parcelState[p]][parcelCompound[p]]++;
+    var named={};
+    for(s=0;s<4;s++){named[STATE_NAMES[s]]={};for(c=1;c<=10;c++)named[STATE_NAMES[s]][COMPOUND_NAMES[c]]=out[s][c];}
+    return named;
+  }
+  function chemistrySignature(genomeId) {
+    var g=genomes[genomeId],seen=Object.create(null),pairs=[],m,key;
+    if(!g)return "none";
+    for(m=0;m<cfg.maxModules;m++)if(g.bytes[moduleOffset(m,M_ACTIVE)]){
+      key=COMPOUND_NAMES[g.bytes[moduleOffset(m,M_HOME)]]+">"+COMPOUND_NAMES[g.bytes[moduleOffset(m,M_TARGET)]];
+      if(!seen[key]){seen[key]=1;pairs.push(key);}
+    }
+    pairs.sort();return pairs.join("+")||"inactive";
+  }
+  function nearestCompoundForMix(r,g,b,total) {
+    var best=5,bestD=Infinity,c,dr,dg,db,d;
+    if(total<=0)return best;
+    for(c=1;c<=10;c++){
+      dr=COUNTS[c][0]/3-r/total;dg=COUNTS[c][1]/3-g/total;db=COUNTS[c][2]/3-b/total;
+      d=dr*dr+dg*dg+db*db;if(d<bestD){bestD=d;best=c;}
+    }
+    return best;
+  }
+  function regionalHistoryDetails(includeRegions) {
+    var size=cfg.historyRegionPx,cols=Math.ceil(cfg.width/size),rows=Math.ceil(cfg.height/size),count=cols*rows;
+    var parcels=new Uint16Array(count),rSum=new Uint32Array(count),gSum=new Uint32Array(count),bSum=new Uint32Array(count);
+    var lastTick=new Uint32Array(count),i,p,x,y,k,c,globalR=0,globalG=0,globalB=0,totalParcels=0,transforms=0;
+    for(i=0;i<freeSet.length;i++){
+      p=freeSet.ids[i];if(!parcelTransformCount[p])continue;
+      x=clamp((fpToPx(parcelX[p])/size)|0,0,cols-1);y=clamp((fpToPx(parcelY[p])/size)|0,0,rows-1);k=y*cols+x;c=parcelCompound[p];
+      parcels[k]++;rSum[k]+=COUNTS[c][0];gSum[k]+=COUNTS[c][1];bSum[k]+=COUNTS[c][2];
+      if(parcelLastTransformTick[p]>lastTick[k])lastTick[k]=parcelLastTransformTick[p];
+      globalR+=COUNTS[c][0];globalG+=COUNTS[c][1];globalB+=COUNTS[c][2];totalParcels++;transforms+=parcelTransformCount[p];
+    }
+    var active=0,pairs=0,numerator=0,denominator=0,bias=0,regions=[],globalTotal=globalR+globalG+globalB;
+    var devR=new Float64Array(count),devG=new Float64Array(count),devB=new Float64Array(count),total,rr,gg,bb,j,dot;
+    if(globalTotal>0)for(k=0;k<count;k++)if(parcels[k]){
+      total=rSum[k]+gSum[k]+bSum[k];rr=rSum[k]/total;gg=gSum[k]/total;bb=bSum[k]/total;
+      devR[k]=rr-globalR/globalTotal;devG[k]=gg-globalG/globalTotal;devB[k]=bb-globalB/globalTotal;
+      denominator+=devR[k]*devR[k]+devG[k]*devG[k]+devB[k]*devB[k];
+      bias+=(Math.max(rSum[k],gSum[k],bSum[k])-Math.min(rSum[k],gSum[k],bSum[k]))/total;active++;
+      if(includeRegions)regions.push({x:(k%cols)*size+size/2,y:((k/cols)|0)*size+size/2,parcels:parcels[k],compound:nearestCompoundForMix(rSum[k],gSum[k],bSum[k],total),lastTransformTick:lastTick[k]});
+    }
+    for(k=0;k<count;k++)if(parcels[k]){
+      if(k%cols<cols-1&&parcels[k+1]){j=k+1;dot=devR[k]*devR[j]+devG[k]*devG[j]+devB[k]*devB[j];numerator+=dot;pairs++;}
+      if(k+cols<count&&parcels[k+cols]){j=k+cols;dot=devR[k]*devR[j]+devG[k]*devG[j]+devB[k]*devB[j];numerator+=dot;pairs++;}
+    }
+    return {transformedFreeParcels:totalParcels,transformEvents:transforms,activeRegions:active,meanRegionalBias:active?bias/active:0,neighborAutocorrelation:denominator&&pairs?active*numerator/(pairs*denominator):0,regions:regions};
+  }
+  function computeEcology(includeRegions) {
+    var chemCounts=new Map(),live=0,dominant=0,i,p,n,sig,c,entropy=0,debtNodes=0,debtDistance=0;
+    for(i=0;i<plants.length;i++){
+      p=plants[i];if(p.deathTick>=0||p.nodes<=0)continue;live++;sig=chemistrySignature(p.genomeId);c=(chemCounts.get(sig)||0)+1;chemCounts.set(sig,c);if(c>dominant)dominant=c;
+    }
+    chemCounts.forEach(function(value){var q=value/Math.max(1,live);entropy-=q*Math.log(q);});
+    for(i=0;i<nodeSet.length;i++){n=nodeSet.ids[i];c=distCompound(parcelCompound[nodeParcel[n]],nodeHome[n]);if(c){debtNodes++;debtDistance+=c;}}
+    var regional=regionalHistoryDetails(!!includeRegions),known=stats.foreignRestorations+stats.sameLineageRestorations;
+    var knownChem=stats.foreignChemotypeRestorations+stats.sameChemotypeRestorations;
+    var interactions=Array.from(interactionFlux.entries()).sort(function(a,b){return b[1]-a[1]||String(a[0]).localeCompare(String(b[0]));});
+    var roleMap=new Map(),parts,source,target,entry,roles=[];
+    for(i=0;i<interactions.length;i++){
+      parts=String(interactions[i][0]).split(" → ");source=parts[0];target=parts[1];if(!target||source===target)continue;
+      entry=roleMap.get(source)||{chemotype:source,exports:0,imports:0};entry.exports+=interactions[i][1];roleMap.set(source,entry);
+      entry=roleMap.get(target)||{chemotype:target,exports:0,imports:0};entry.imports+=interactions[i][1];roleMap.set(target,entry);
+    }
+    chemCounts.forEach(function(_,key){
+      var v=roleMap.get(key)||{chemotype:key,exports:0,imports:0},total=v.exports+v.imports;
+      v.role=total<5?"unresolved":(v.exports>v.imports*2?"source-biased":(v.imports>v.exports*2?"sink-biased":"reciprocal"));roles.push(v);
+    });
+    roles.sort(function(a,b){return b.exports+b.imports-(a.exports+a.imports)||String(a.chemotype).localeCompare(String(b.chemotype));});
+    return {
+      tick:tick,livePlants:live,chemotypes:chemCounts.size,effectiveChemotypes:live?Math.exp(entropy):0,dominantChemotypeFrequency:live?dominant/live:0,
+      births:stats.births,extinctions:stats.extinctions,edgesBroken:stats.edgesBroken,
+      debt:{nodes:debtNodes,fraction:nodeSet.length?debtNodes/nodeSet.length:0,meanDistance:debtNodes?debtDistance/debtNodes:0},
+      productive:{total:stats.productiveMaintenance,restoration:stats.productiveRestorations,growth:stats.productiveGrowth,reproduction:stats.productiveReproduction,graft:stats.productiveGrafts},
+      coupling:{foreignRestorations:stats.foreignRestorations,knownRestorations:known,foreignFraction:known?stats.foreignRestorations/known:0,foreignChemotypeRestorations:stats.foreignChemotypeRestorations,knownChemotypeRestorations:knownChem,foreignChemotypeFraction:knownChem?stats.foreignChemotypeRestorations/knownChem:0,topChemotypeInteractions:interactions.slice(0,12)},
+      environment:regional,
+      chemotypeCounts:Array.from(chemCounts.entries()).sort(function(a,b){return b[1]-a[1]||String(a[0]).localeCompare(String(b[0]));}),interactionRoles:roles
+    };
+  }
+  function sampleEcologyHistory() {
+    var e=computeEcology(false);
+    ecologyHistory.push({tick:tick,livePlants:e.livePlants,chemotypes:e.chemotypes,effectiveChemotypes:e.effectiveChemotypes,topChemotypes:e.chemotypeCounts.slice(0,6),births:e.births,extinctions:e.extinctions,edgesBroken:e.edgesBroken,foreignRestorations:e.coupling.foreignRestorations,foreignChemotypeRestorations:e.coupling.foreignChemotypeRestorations,productive:e.productive.total,transformedFree:e.environment.transformedFreeParcels,autocorrelation:e.environment.neighborAutocorrelation});
+    if(ecologyHistory.length>256)ecologyHistory.shift();stats.historySamples++;
+  }
+  function getEcology() {
+    var out=computeEcology(true);
+    out.history=ecologyHistory.slice();
+    out.introductions=rareIntroductions.map(function(item){var p=plants[item.plantId];return Object.assign({},item,{alive:!!p&&p.deathTick<0&&p.nodes>0,nodes:p?p.nodes:0,births:p?p.births:0,productiveInputs:p?p.productiveInputs:0,restorations:p?p.restorations:0,foreignRestorations:p?p.foreignRestorations:0});});
+    return out;
+  }
+  function getStats() {
+    var extantPlants=0,extantGenomes=0,i,copy={},k;
+    for(i=0;i<plants.length;i++)if(plants[i].deathTick<0&&plants[i].nodes>0)extantPlants++;
+    for(i=0;i<genomes.length;i++)if(genomes[i].extantPlants>0)extantGenomes++;
+    for(k in stats)copy[k]=Array.isArray(stats[k])?stats[k].slice():stats[k];
+    return {
+      schemaVersion:SCHEMA_VERSION,buildVersion:BUILD_VERSION,seed:cfg.seed,mode:cfg.mode,tick:tick,
+      parcels:{total:cfg.parcelCount,free:freeSet.length,carrier:carrierSet.length,bound:cfg.parcelCount-freeSet.length-carrierSet.length-seedSet.length,seed:seedSet.length},
+      graph:{nodes:nodeSet.length,edges:edgeSet.length,tips:tipSet.length,flowers:flowerSet.length},
+      evolution:{plantsTotal:plants.length,plantsExtant:extantPlants,genomesTotal:genomes.length,genomesExtant:extantGenomes},
+      events:copy,ecology:computeEcology(false),compounds:compoundAbundanceByState(),droppedImportantEvents:droppedImportantEvents
+    };
+  }
+
+  function physiologicalComponents() {
+    var visited=new Uint8Array(nodeAlive.length),components=[],queue=new Int32Array(Math.max(1,nodeSet.length));
+    var ii,n,head,tail,v,j,o,edges,owners,genomeIds,minX,minY,maxX,maxY,compNodes;
+    for(ii=0;ii<nodeSet.length;ii++){
+      n=nodeSet.ids[ii];if(visited[n])continue;
+      head=0;tail=0;queue[tail++]=n;visited[n]=1;edges=0;owners=new Set();genomeIds=new Set();
+      minX=minY=Infinity;maxX=maxY=-Infinity;compNodes=[];
+      while(head<tail){
+        v=queue[head++];compNodes.push(v);owners.add(nodePlant[v]);genomeIds.add(nodeGenome[v]);
+        minX=Math.min(minX,nodeX[v]);maxX=Math.max(maxX,nodeX[v]);minY=Math.min(minY,nodeY[v]);maxY=Math.max(maxY,nodeY[v]);
+        edges+=nodeDegree[v];
+        for(j=0;j<nodeDegree[v];j++){o=nodeNbr[j][v];if(!visited[o]){visited[o]=1;queue[tail++]=o;}}
+      }
+      edges>>=1;
+      components.push({
+        id:components.length,nodeIds:compNodes,ownerIds:Array.from(owners).sort(function(a,b){return a-b;}),
+        genomeIds:Array.from(genomeIds).sort(function(a,b){return a-b;}),nodeCount:compNodes.length,
+        edgeCount:edges,cycleRank:edges-compNodes.length+1,
+        boundsPx:{x0:fpToPx(minX),y0:fpToPx(minY),x1:fpToPx(maxX),y1:fpToPx(maxY)}
+      });
+    }
+    return components;
+  }
+  function morphologySummaries() {
+    var map=new Map(),i,n,p,e,a,b,item,out=[];
+    for(i=0;i<nodeSet.length;i++){
+      n=nodeSet.ids[i];p=nodePlant[n];
+      item=map.get(p);
+      if(!item){item={plantId:p,genomeId:nodeGenome[n],nodes:0,edges:0,terminals:0,junctions:0,foreignGrafts:0,minX:Infinity,minY:Infinity,maxX:-Infinity,maxY:-Infinity};map.set(p,item);}
+      item.nodes++;if(nodeDegree[n]<=1)item.terminals++;if(nodeDegree[n]>=3)item.junctions++;
+      item.minX=Math.min(item.minX,nodeX[n]);item.maxX=Math.max(item.maxX,nodeX[n]);item.minY=Math.min(item.minY,nodeY[n]);item.maxY=Math.max(item.maxY,nodeY[n]);
+    }
+    for(i=0;i<edgeSet.length;i++){
+      e=edgeSet.ids[i];a=nodePlant[edgeA[e]];b=nodePlant[edgeB[e]];
+      if(map.has(a))map.get(a).edges+=a===b?1:0.5;if(map.has(b)&&b!==a)map.get(b).edges+=0.5;
+      if(a!==b){if(map.has(a))map.get(a).foreignGrafts++;if(map.has(b))map.get(b).foreignGrafts++;}
+    }
+    map.forEach(function(v){v.widthPx=fpToPx(v.maxX-v.minX);v.heightPx=fpToPx(v.maxY-v.minY);delete v.minX;delete v.minY;delete v.maxX;delete v.maxY;out.push(v);});
+    out.sort(function(a,b){return a.plantId-b.plantId;});return out;
+  }
+
+  function hashMix(h,v){h^=v>>>0;h=Math.imul(h,16777619)>>>0;return h;}
+  function hashText(h,textValue) {
+    var i;for(i=0;i<textValue.length;i++)h=hashMix(h,textValue.charCodeAt(i));return h;
+  }
+  function hashFairSet(h,set) {
+    var i;h=hashMix(h,set.length);h=hashMix(h,set.cursor);h=hashMix(h,set.epochLength);
+    for(i=0;i<set.length;i++){h=hashMix(h,set.ids[i]);h=hashMix(h,set.gen[set.ids[i]]);}
+    for(i=0;i<set.gen.length;i++)h=hashMix(h,set.gen[i]);
+    for(i=set.cursor;i<set.epochLength;i++){h=hashMix(h,set.epochIds[i]);h=hashMix(h,set.epochGen[i]);}
+    return h;
+  }
+  function stateHash() {
+    var h=2166136261>>>0,i,j,n,e,g,s=rng.exportState(),keys=Object.keys(cfg).sort(),key,plant;
+    for(i=0;i<keys.length;i++){
+      key=keys[i];h=hashText(h,key);
+      if(typeof cfg[key]==="string")h=hashText(h,cfg[key]);else if(typeof cfg[key]==="boolean")h=hashMix(h,cfg[key]?1:0);else h=hashMix(h,cfg[key]);
+    }
+    h=hashMix(h,tick);for(i=0;i<4;i++)h=hashMix(h,s[i]);
+    for(i=0;i<cfg.parcelCount;i++){
+      h=hashMix(h,parcelState[i]);h=hashMix(h,parcelCompound[i]);h=hashMix(h,parcelX[i]);h=hashMix(h,parcelY[i]);
+      h=hashMix(h,parcelHeading[i]);h=hashMix(h,parcelNode[i]);h=hashMix(h,parcelEdge[i]);h=hashMix(h,parcelEdgeT[i]);
+      h=hashMix(h,parcelEdgeDir[i]);h=hashMix(h,parcelIncoming[i]);h=hashMix(h,parcelGenome[i]);h=hashMix(h,parcelPlant[i]);h=hashMix(h,parcelAge[i]);
+      h=hashMix(h,parcelFlower[i]);h=hashMix(h,parcelPetalSlot[i]);h=hashMix(h,parcelLastPlant[i]);h=hashMix(h,parcelTransformCount[i]);h=hashMix(h,parcelLastTransformTick[i]);h=hashMix(h,parcelExposed[i]);
+    }
+    for(i=0;i<nodeSet.length;i++){
+      n=nodeSet.ids[i];h=hashMix(h,n);h=hashMix(h,nodeParcel[n]);h=hashMix(h,nodeX[n]);h=hashMix(h,nodeY[n]);
+      h=hashMix(h,nodePlant[n]);h=hashMix(h,nodeGenome[n]);h=hashMix(h,nodeModule[n]);h=hashMix(h,nodeHome[n]);h=hashMix(h,nodeTarget[n]);
+      h=hashMix(h,nodeGate[n]);h=hashMix(h,nodeGateTolerance[n]);h=hashMix(h,nodeRouteKey[n]);h=hashMix(h,nodeRouteNear[n]);h=hashMix(h,nodeRouteFar[n]);
+      h=hashMix(h,nodeDegree[n]);h=hashMix(h,nodeFlower[n]);h=hashMix(h,nodeTipHead[n]);
+      for(j=0;j<nodeDegree[n];j++){h=hashMix(h,nodeNbr[j][n]);h=hashMix(h,nodeEdge[j][n]);}
+    }
+    for(i=0;i<edgeSet.length;i++){
+      e=edgeSet.ids[i];h=hashMix(h,e);h=hashMix(h,edgeA[e]);h=hashMix(h,edgeB[e]);h=hashMix(h,edgeDryMisses[e]);
+      h=hashMix(h,edgePerfused[e]);h=hashMix(h,edgeFlowCount[e]);h=hashMix(h,edgeProductiveCount[e]);h=hashMix(h,edgeLastProductiveTick[e]);
+      h=hashMix(h,edgeRestorationCount[e]);h=hashMix(h,edgeConstructionCount[e]);h=hashMix(h,edgeReproductionCount[e]);h=hashMix(h,edgeKind[e]);
+    }
+    for(i=0;i<tipSet.length;i++){n=tipSet.ids[i];h=hashMix(h,n);h=hashMix(h,tipNode[n]);h=hashMix(h,tipPlant[n]);h=hashMix(h,tipGenome[n]);h=hashMix(h,tipModule[n]);h=hashMix(h,tipStep[n]);h=hashMix(h,tipHeading[n]);h=hashMix(h,tipDepth[n]);h=hashMix(h,tipFailed[n]);h=hashMix(h,tipNextAtNode[n]);}
+    for(i=0;i<flowerSet.length;i++){n=flowerSet.ids[i];h=hashMix(h,n);h=hashMix(h,flowerCore[n]);h=hashMix(h,flowerPlant[n]);h=hashMix(h,flowerGenome[n]);h=hashMix(h,flowerPetalHome[n]);h=hashMix(h,flowerSeedHome[n]);h=hashMix(h,flowerStage[n]);h=hashMix(h,flowerOpportunities[n]);for(j=0;j<4;j++)h=hashMix(h,flowerPetals[j][n]);}
+    for(i=0;i<genomes.length;i++){g=genomes[i];h=hashMix(h,g.id);for(j=0;j<g.bytes.length;j++)h=hashMix(h,g.bytes[j]);}
+    for(i=0;i<plants.length;i++){plant=plants[i];h=hashMix(h,plant.id);h=hashMix(h,plant.genomeId);h=hashMix(h,plant.nodes);h=hashMix(h,plant.deathTick);h=hashMix(h,plant.births);h=hashMix(h,plant.flowers);h=hashMix(h,plant.originCluster);h=hashMix(h,plant.introduced?1:0);h=hashMix(h,plant.productiveInputs);h=hashMix(h,plant.restorations);h=hashMix(h,plant.foreignRestorations);}
+    h=hashMix(h,nodeNextId);for(i=0;i<nodeFree.length;i++)h=hashMix(h,nodeFree[i]);
+    h=hashMix(h,edgeNextId);for(i=0;i<edgeFree.length;i++)h=hashMix(h,edgeFree[i]);
+    h=hashMix(h,tipNextId);for(i=0;i<tipFree.length;i++)h=hashMix(h,tipFree[i]);
+    h=hashMix(h,flowerNextId);for(i=0;i<flowerFree.length;i++)h=hashMix(h,flowerFree[i]);
+    h=hashFairSet(h,freeSet);h=hashFairSet(h,carrierSet);h=hashFairSet(h,seedSet);h=hashFairSet(h,tipSet);h=hashFairSet(h,edgeSet);h=hashFairSet(h,flowerSet);
+    return ("00000000"+h.toString(16)).slice(-8);
+  }
+
+  /* ================================================================
+     15. AI-READABLE SCENES, TRACES, EVENTS, AND CHECKPOINTS
+     ================================================================ */
+
+  function recentRoutineEvents() {
+    var count=Math.min(routineCursor,routineEvents.length),out=[],start=Math.max(0,routineCursor-count),i,ev;
+    for(i=start;i<routineCursor;i++){ev=routineEvents[i%routineEvents.length];if(ev)out.push(ev);}
+    return out;
+  }
+  function exportScene(options) {
+    options=options||{};
+    var nodes=[],edges=[],carriers=[],seeds=[],flowers=[],i,n,e,p,f;
+    for(i=0;i<nodeSet.length;i++){
+      n=nodeSet.ids[i];p=nodeParcel[n];
+      nodes.push({id:n,parcelId:p,xFp:nodeX[n],yFp:nodeY[n],x:fpToPx(nodeX[n]),y:fpToPx(nodeY[n]),plantId:nodePlant[n],genomeId:nodeGenome[n],moduleId:nodeModule[n],role:ROLE_NAMES[nodeRole[n]],degree:nodeDegree[n],compound:COMPOUND_NAMES[parcelCompound[p]],home:COMPOUND_NAMES[nodeHome[n]],target:COMPOUND_NAMES[nodeTarget[n]],debtDistance:distCompound(parcelCompound[p],nodeHome[n]),gate:COMPOUND_NAMES[nodeGate[n]],gateTolerance:nodeGateTolerance[n],routeKey:COMPOUND_NAMES[nodeRouteKey[n]],flowerId:nodeFlower[n]});
+    }
+    for(i=0;i<edgeSet.length;i++){
+      e=edgeSet.ids[i];edges.push({id:e,a:edgeA[e],b:edgeB[e],kind:EDGE_NAMES[edgeKind[e]],ownerA:edgeOwnerA[e],ownerB:edgeOwnerB[e],dryMisses:edgeDryMisses[e],productivelyMaintained:!!edgePerfused[e],flowCount:edgeFlowCount[e],lastFlowTick:edgeLastFlowTick[e],productiveCount:edgeProductiveCount[e],lastProductiveTick:edgeLastProductiveTick[e],restorations:edgeRestorationCount[e],construction:edgeConstructionCount[e],reproduction:edgeReproductionCount[e]});
+    }
+    for(i=0;i<carrierSet.length;i++){
+      p=carrierSet.ids[i];carriers.push({parcelId:p,compound:COMPOUND_NAMES[parcelCompound[p]],xFp:parcelX[p],yFp:parcelY[p],x:fpToPx(parcelX[p]),y:fpToPx(parcelY[p]),nodeId:parcelNode[p],edgeId:parcelEdge[p],edgeProgress:parcelEdgeT[p],incomingEdge:parcelIncoming[p],lastTissuePlant:parcelLastPlant[p],transformCount:parcelTransformCount[p],lastTransformTick:parcelLastTransformTick[p],environmentallyExposed:!!parcelExposed[p]});
+    }
+    for(i=0;i<seedSet.length;i++){p=seedSet.ids[i];seeds.push({parcelId:p,compound:COMPOUND_NAMES[parcelCompound[p]],x:fpToPx(parcelX[p]),y:fpToPx(parcelY[p]),heading:parcelHeading[p],genomeId:parcelGenome[p],parentPlant:parcelPlant[p],age:parcelAge[p]});}
+    for(i=0;i<flowerSet.length;i++){
+      f=flowerSet.ids[i];flowers.push({id:f,coreNode:flowerCore[f],plantId:flowerPlant[f],genomeId:flowerGenome[f],petalHome:COMPOUND_NAMES[flowerPetalHome[f]],seedHome:COMPOUND_NAMES[flowerSeedHome[f]],stage:flowerStage[f],opportunities:flowerOpportunities[f],petalParcels:[flowerPetals[0][f],flowerPetals[1][f],flowerPetals[2][f],flowerPetals[3][f]]});
+    }
+    return {
+      schemaVersion:SCHEMA_VERSION,buildVersion:BUILD_VERSION,configuration:Object.assign({},cfg),
+      seed:cfg.seed,tick:tick,prngState:rng.exportState(),stateHash:stateHash(),
+      inventory:{initialTotals:{R:initialTotals[0],G:initialTotals[1],B:initialTotals[2]},current:assertInvariants("fast").totals,states:getStats().parcels,compounds:compoundAbundanceByState()},
+      renderer:{background:"black",paletteRule:"normalize largest compound channel to 255",brightness:{free:0.18,bond:"0.36–0.64 by dryness",bound:0.82,carrier:1,seed:1}},
+      nodes:nodes,edges:edges,carriers:carriers,seeds:seeds,flowers:flowers,
+      physiologicalComponents:physiologicalComponents(),morphology:morphologySummaries(),
+      plants:plants.map(function(x){return Object.assign({},x);}),
+      genomes:genomes.map(function(x){return {id:x.id,hash:x.hash,parentGenome:x.parentGenome,originPlant:x.originPlant,originSeed:x.originSeed,birthTick:x.birthTick,mutation:x.mutation,firstTick:x.firstTick,lastTick:x.lastTick,births:x.births,extantPlants:x.extantPlants,bytes:Array.from(x.bytes)};}),
+      metrics:getStats(),ecology:getEcology(),recentImportantEvents:importantEvents.slice(-(options.eventCount||200)),recentRoutineEvents:recentRoutineEvents().slice(-(options.routineEventCount||200))
+    };
+  }
+  function traceParcel(id) {
+    if(id<0||id>=cfg.parcelCount)return null;
+    return {
+      parcelId:id,state:STATE_NAMES[parcelState[id]],compound:COMPOUND_NAMES[parcelCompound[id]],
+      counts:COUNTS[parcelCompound[id]].slice(),xFp:parcelX[id],yFp:parcelY[id],
+      nodeId:parcelNode[id],edgeId:parcelEdge[id],genomeId:parcelGenome[id],plantId:parcelPlant[id],
+      transformCount:parcelTransformCount[id],lastTransformTick:parcelLastTransformTick[id],lastProcessor:parcelLastPlant[id],environmentallyExposed:!!parcelExposed[id],
+      history:(parcelHistories.get(id)||[]).slice(),historyRetentionComplete:droppedImportantEvents===0
+    };
+  }
+
+  var TYPED_ARRAY_NAMES=[
+    "parcelState","parcelCompound","parcelX","parcelY","parcelHeading","parcelNode","parcelEdge","parcelEdgeT","parcelEdgeDir","parcelIncoming","parcelGenome","parcelPlant","parcelAge","parcelFlower","parcelPetalSlot","parcelLastPlant","parcelTransformCount","parcelLastTransformTick","parcelExposed",
+    "nodeAlive","nodeParcel","nodeX","nodeY","nodePlant","nodeGenome","nodeModule","nodeRole","nodeHome","nodeTarget","nodeGate","nodeGateTolerance","nodeRouteKey","nodeRouteNear","nodeRouteFar","nodeDegree","nodeFlower","nodeTipHead",
+    "edgeAlive","edgeA","edgeB","edgeOwnerA","edgeOwnerB","edgeDryMisses","edgePerfused","edgeFlowCount","edgeLastFlowTick","edgeProductiveCount","edgeLastProductiveTick","edgeRestorationCount","edgeConstructionCount","edgeReproductionCount","edgeKind",
+    "tipAlive","tipNode","tipPlant","tipGenome","tipModule","tipStep","tipHeading","tipDepth","tipFailed","tipNextAtNode",
+    "flowerAlive","flowerCore","flowerPlant","flowerGenome","flowerPetalHome","flowerSeedHome","flowerStage","flowerOpportunities",
+    "exchangeFlux"
+  ];
+  function typedArrayRegistry() {
+    return {
+      parcelState:parcelState,parcelCompound:parcelCompound,parcelX:parcelX,parcelY:parcelY,
+      parcelHeading:parcelHeading,parcelNode:parcelNode,parcelEdge:parcelEdge,parcelEdgeT:parcelEdgeT,
+      parcelEdgeDir:parcelEdgeDir,parcelIncoming:parcelIncoming,parcelGenome:parcelGenome,
+      parcelPlant:parcelPlant,parcelAge:parcelAge,parcelFlower:parcelFlower,
+      parcelPetalSlot:parcelPetalSlot,parcelLastPlant:parcelLastPlant,
+      parcelTransformCount:parcelTransformCount,parcelLastTransformTick:parcelLastTransformTick,parcelExposed:parcelExposed,
+      nodeAlive:nodeAlive,nodeParcel:nodeParcel,nodeX:nodeX,nodeY:nodeY,nodePlant:nodePlant,
+      nodeGenome:nodeGenome,nodeModule:nodeModule,nodeRole:nodeRole,nodeHome:nodeHome,
+      nodeTarget:nodeTarget,nodeGate:nodeGate,nodeGateTolerance:nodeGateTolerance,
+      nodeRouteKey:nodeRouteKey,nodeRouteNear:nodeRouteNear,nodeRouteFar:nodeRouteFar,
+      nodeDegree:nodeDegree,nodeFlower:nodeFlower,nodeTipHead:nodeTipHead,
+      edgeAlive:edgeAlive,edgeA:edgeA,edgeB:edgeB,edgeOwnerA:edgeOwnerA,edgeOwnerB:edgeOwnerB,
+      edgeDryMisses:edgeDryMisses,edgePerfused:edgePerfused,edgeFlowCount:edgeFlowCount,
+      edgeLastFlowTick:edgeLastFlowTick,edgeProductiveCount:edgeProductiveCount,edgeLastProductiveTick:edgeLastProductiveTick,
+      edgeRestorationCount:edgeRestorationCount,edgeConstructionCount:edgeConstructionCount,edgeReproductionCount:edgeReproductionCount,edgeKind:edgeKind,
+      tipAlive:tipAlive,tipNode:tipNode,tipPlant:tipPlant,tipGenome:tipGenome,
+      tipModule:tipModule,tipStep:tipStep,tipHeading:tipHeading,tipDepth:tipDepth,
+      tipFailed:tipFailed,tipNextAtNode:tipNextAtNode,
+      flowerAlive:flowerAlive,flowerCore:flowerCore,flowerPlant:flowerPlant,
+      flowerGenome:flowerGenome,flowerPetalHome:flowerPetalHome,flowerSeedHome:flowerSeedHome,
+      flowerStage:flowerStage,flowerOpportunities:flowerOpportunities,
+      exchangeFlux:exchangeFlux
+    };
+  }
+  function typedArraysToObject() {
+    var out={},i,name,registry=typedArrayRegistry();
+    for(i=0;i<TYPED_ARRAY_NAMES.length;i++){name=TYPED_ARRAY_NAMES[i];out[name]=Array.from(registry[name]);}
+    out.nodeNbr=nodeNbr.map(function(a){return Array.from(a);});out.nodeEdge=nodeEdge.map(function(a){return Array.from(a);});
+    out.flowerPetals=flowerPetals.map(function(a){return Array.from(a);});return out;
+  }
+  function restoreTypedArrays(obj) {
+    var i,name,target,registry=typedArrayRegistry();
+    for(i=0;i<TYPED_ARRAY_NAMES.length;i++){name=TYPED_ARRAY_NAMES[i];target=registry[name];target.set(obj[name]);}
+    for(i=0;i<4;i++){nodeNbr[i].set(obj.nodeNbr[i]);nodeEdge[i].set(obj.nodeEdge[i]);flowerPetals[i].set(obj.flowerPetals[i]);}
+  }
+  function checkpointObject() {
+    return {
+      kind:"loopgarden-checkpoint",schemaVersion:SCHEMA_VERSION,buildVersion:BUILD_VERSION,config:Object.assign({},cfg),
+      tick:tick,prng:rng.exportState(),initialTotals:initialTotals.slice(),initialParcelCount:initialParcelCount,
+      arrays:typedArraysToObject(),
+      sets:{free:freeSet.exportState(),carrier:carrierSet.exportState(),seed:seedSet.exportState(),nodes:nodeSet.exportState(),edges:edgeSet.exportState(),tips:tipSet.exportState(),flowers:flowerSet.exportState()},
+      allocators:{nodeFree:nodeFree.slice(),nodeNextId:nodeNextId,edgeFree:edgeFree.slice(),edgeNextId:edgeNextId,tipFree:tipFree.slice(),tipNextId:tipNextId,flowerFree:flowerFree.slice(),flowerNextId:flowerNextId,freeCompoundCursor:freeCompoundCursor},
+      plants:plants.map(function(x){return Object.assign({},x);}),
+      genomes:genomes.map(function(x){var y=Object.assign({},x);y.bytes=Array.from(x.bytes);return y;}),
+      stats:JSON.parse(JSON.stringify(stats)),importantEvents:importantEvents.slice(),routineEvents:recentRoutineEvents(),
+      routineCursor:routineCursor,droppedImportantEvents:droppedImportantEvents,
+      parcelHistories:Array.from(parcelHistories.entries()),interactionFlux:Array.from(interactionFlux.entries()),ecologyHistory:ecologyHistory.slice(),rareIntroductions:rareIntroductions.slice()
+    };
+  }
+  function exportCheckpoint() {
+    return new Blob([JSON.stringify(checkpointObject())],{type:"application/json"});
+  }
+  function rebuildDerivedIndexes() {
+    var i,id;
+    freeHashHead.fill(-1);nodeHashHead.fill(-1);bondRaster.fill(0);
+    freeNext.fill(-1);freePrev.fill(-1);freeBucket.fill(-1);nodeNext.fill(-1);nodePrev.fill(-1);nodeBucket.fill(-1);
+    for(i=0;i<freeSet.length;i++)freeHashInsert(freeSet.ids[i]);
+    for(i=0;i<nodeSet.length;i++)nodeHashInsert(nodeSet.ids[i]);
+    for(i=0;i<edgeSet.length;i++){id=edgeSet.ids[i];if(edgeAlive[id])markBondRaster(id,1);}
+  }
+  async function importCheckpoint(input) {
+    var textValue,obj,i,g,bucket;
+    paused=true;
+    if(input instanceof Blob)textValue=await input.text();
+    else if(input instanceof ArrayBuffer)textValue=new TextDecoder().decode(input);
+    else if(typeof input==="string")textValue=input;
+    else obj=input;
+    if(!obj)obj=JSON.parse(textValue);
+    if(!obj||obj.kind!=="loopgarden-checkpoint"||obj.schemaVersion!==SCHEMA_VERSION)throw new Error("Unsupported Loopgarden checkpoint");
+    cfg=mergeConfig(obj.config);allocateWorld(cfg);rng=new RNG(cfg.seed);rng.importState(obj.prng);tick=obj.tick;
+    initialTotals=obj.initialTotals.slice();initialParcelCount=obj.initialParcelCount;restoreTypedArrays(obj.arrays);
+    freeSet.importState(obj.sets.free);carrierSet.importState(obj.sets.carrier);seedSet.importState(obj.sets.seed);
+    nodeSet.importState(obj.sets.nodes);edgeSet.importState(obj.sets.edges);tipSet.importState(obj.sets.tips);flowerSet.importState(obj.sets.flowers);
+    nodeFree=obj.allocators.nodeFree.slice();nodeNextId=obj.allocators.nodeNextId;edgeFree=obj.allocators.edgeFree.slice();edgeNextId=obj.allocators.edgeNextId;
+    tipFree=obj.allocators.tipFree.slice();tipNextId=obj.allocators.tipNextId;flowerFree=obj.allocators.flowerFree.slice();flowerNextId=obj.allocators.flowerNextId;freeCompoundCursor=obj.allocators.freeCompoundCursor;
+    plants=obj.plants.map(function(x){return Object.assign({},x);});genomes=[];genomeIntern=new Map();
+    for(i=0;i<obj.genomes.length;i++){
+      g=Object.assign({},obj.genomes[i]);g.bytes=new Uint8Array(g.bytes);genomes.push(g);
+      bucket=genomeIntern.get(g.hash);if(!bucket){bucket=[];genomeIntern.set(g.hash,bucket);}bucket.push(g.id);
+    }
+    stats=obj.stats;importantEvents=obj.importantEvents||[];routineEvents=new Array(cfg.routineLogSize);routineCursor=0;
+    (obj.routineEvents||[]).forEach(function(ev){routineEvents[routineCursor++%routineEvents.length]=ev;});
+    droppedImportantEvents=obj.droppedImportantEvents||0;parcelHistories=new Map(obj.parcelHistories||[]);
+    interactionFlux=new Map(obj.interactionFlux||[]);ecologyHistory=(obj.ecologyHistory||[]).slice();rareIntroductions=(obj.rareIntroductions||[]).slice();lastEcologyReadoutTick=-1;
+    rebuildDerivedIndexes();document.getElementById("modeSelect").value=cfg.mode;document.getElementById("seedInput").value=cfg.seed;
+    document.getElementById("leakNote").textContent=cfg.productiveMaintenance?"A carrier can maintain one incoming bond per excursion through free space; growth and reproduction consume matter and also count. Closed circulation dries out.":"Control: every carrier traversal maintains a bond, whether or not it performs useful work.";
+    render();return {tick:tick,stateHash:stateHash(),invariants:assertInvariants("full")};
+  }
+  function exportEventLog(options) {
+    options=options||{};var events=importantEvents.concat(recentRoutineEvents());
+    events.sort(function(a,b){return a.tick-b.tick;});
+    if(options.ndjson)return new Blob([events.map(function(e){return JSON.stringify(e);}).join("\n")+"\n"],{type:"application/x-ndjson"});
+    return new Blob([JSON.stringify({schemaVersion:SCHEMA_VERSION,buildVersion:BUILD_VERSION,seed:cfg.seed,tick:tick,events:events},null,2)],{type:"application/json"});
+  }
+
+  /* ================================================================
+     16. DIRECT IMAGEDATA RENDERER AND ENTITY INSPECTION
+     ================================================================ */
+
+  function chemistryColor(code,value) {
+    var c=DISPLAY_RGB[code];return [Math.round(c[0]*value),Math.round(c[1]*value),Math.round(c[2]*value)];
+  }
+  function ownerColor(id,value) {
+    var h=mix32((id+1)>>>0),sector=h%6,f=(h>>>8)&255,q=Math.round((255-f)*value),t=Math.round(f*value),v=Math.round(255*value);
+    if(sector===0)return[v,t,0];if(sector===1)return[q,v,0];if(sector===2)return[0,v,t];
+    if(sector===3)return[0,q,v];if(sector===4)return[t,0,v];return[v,0,q];
+  }
+  function putPixel(x,y,c) {
+    if(x<0||y<0||x>=cfg.width||y>=cfg.height)return;
+    var k=(y*cfg.width+x)*4;pixels[k]=c[0];pixels[k+1]=c[1];pixels[k+2]=c[2];pixels[k+3]=255;
+  }
+  function drawLine(x0,y0,x1,y1,c) {visitLinePixels(x0,y0,x1,y1,true,function(x,y){putPixel(x,y,c);});}
+  function clearImage() {
+    var i;for(i=0;i<pixels.length;i+=4){pixels[i]=0;pixels[i+1]=0;pixels[i+2]=0;pixels[i+3]=255;}
+  }
+  function edgeRenderColor(e) {
+    var a=edgeA[e],b=edgeB[e],dry=edgeDryMisses[e],value=0.64;
+    if(overlay==="owners")return ownerColor(nodePlant[a],0.55);
+    if(overlay==="dryness")return dry>=cfg.edgeDryWarn?[220,Math.max(20,160-Math.min(120,dry*2)),20]:[80,150,90];
+    if(overlay==="flow"){
+      var recent=(tick-edgeLastProductiveTick[e])>>>0,bright=edgeProductiveCount[e]?(recent<10000?0.85:(recent<100000?0.55:0.22)):0.08;
+      return [Math.round(70*bright),Math.round(255*bright),Math.round(150*bright)];
+    }
+    if(dry>cfg.edgeDryWarn)value=0.64*(1-(dry-cfg.edgeDryWarn)/(cfg.edgeDryBreak-cfg.edgeDryWarn)*0.65);
+    var ca=DISPLAY_RGB[parcelCompound[nodeParcel[a]]],cb=DISPLAY_RGB[parcelCompound[nodeParcel[b]]];
+    return [Math.round((ca[0]+cb[0])*.5*value),Math.round((ca[1]+cb[1])*.5*value),Math.round((ca[2]+cb[2])*.5*value)];
+  }
+  function nodeRenderColor(n,value) {
+    if(overlay==="owners")return ownerColor(nodePlant[n],value);
+    if(overlay==="home")return chemistryColor(nodeHome[n],value);
+    if(overlay==="debt"){
+      var debt=distCompound(parcelCompound[nodeParcel[n]],nodeHome[n]);
+      if(!debt)return [55,Math.round(180*value),95];
+      return debt===1?[Math.round(245*value),150,35]:[Math.round(255*value),55,30];
+    }
+    return chemistryColor(parcelCompound[nodeParcel[n]],value);
+  }
+  function drawHistoryRegions() {
+    var details=regionalHistoryDetails(true),i,r,c,v,x,y;
+    for(i=0;i<details.regions.length;i++){
+      r=details.regions[i];v=Math.min(0.52,0.16+r.parcels*0.055);c=chemistryColor(r.compound,v);x=Math.round(r.x);y=Math.round(r.y);
+      putPixel(x,y,c);putPixel(x-1,y,c);putPixel(x+1,y,c);putPixel(x,y-1,c);putPixel(x,y+1,c);
+    }
+  }
+  function updateEcologyReadout() {
+    if(lastEcologyReadoutTick===tick)return;
+    if(lastEcologyReadoutTick>=0&&tick-lastEcologyReadoutTick<25000&&!paused)return;
+    var e=computeEcology(false),modeLabel=cfg.productiveMaintenance?"productive":"traffic",assay="",a,b,pa,pb;
+    if(rareIntroductions.length>=2){
+      a=rareIntroductions[rareIntroductions.length-2];b=rareIntroductions[rareIntroductions.length-1];pa=plants[a.plantId];pb=plants[b.plantId];
+      assay="\nPair: "+a.label+" "+(pa?pa.nodes:0)+" nodes / "+(pa?pa.births:0)+" seeds vs "+b.label+" "+(pb?pb.nodes:0)+" nodes / "+(pb?pb.births:0)+" seeds";
+    }
+    document.getElementById("ecologyReadout").textContent=
+      e.livePlants+" live · "+e.chemotypes+" chemotypes (effective "+e.effectiveChemotypes.toFixed(2)+") · "+e.extinctions+" deaths · "+e.edgesBroken+" broken bonds\n"+
+      e.productive.total+" useful deliveries · "+(e.coupling.foreignFraction*100).toFixed(1)+"% cross-plant / "+(e.coupling.foreignChemotypeFraction*100).toFixed(1)+"% cross-chemotype restoration · "+e.environment.transformedFreeParcels+" transformed free parcels · "+modeLabel+" maintenance"+assay;
+    lastEcologyReadoutTick=tick;
+  }
+  function drawGlyph(x,y,c,kind) {
+    putPixel(x,y,c);
+    if(kind==="carrier"){
+      putPixel(x-1,y-1,c);putPixel(x+1,y-1,c);putPixel(x-1,y+1,c);putPixel(x+1,y+1,c);
+    }else if(kind==="seed"){
+      putPixel(x-1,y-1,c);putPixel(x+1,y+1,c);putPixel(x+1,y-1,c);
+    }
+  }
+  function drawTipMarker(n,x,y,c) {
+    var t=nodeTipHead[n],h=t>=0?tipHeading[t]:0;
+    var dx=DIR_X[h]>64?1:(DIR_X[h]<-64?-1:0),dy=DIR_Y[h]>64?1:(DIR_Y[h]<-64?-1:0);
+    putPixel(x,y,c);putPixel(x+dx,y+dy,c);
+  }
+  function render() {
+    if(!imageData)return;
+    var i,p,n,e,f,x,y,c,a,b,mx,my,d,keep=[];
+    clearImage();
+    if(overlay==="history")drawHistoryRegions();
+    for(i=0;i<freeSet.length;i++){
+      p=freeSet.ids[i];
+      putPixel(fpToPx(parcelX[p]),fpToPx(parcelY[p]),chemistryColor(parcelCompound[p],overlay==="history"?(parcelTransformCount[p]?0.62:0.035):0.18));
+    }
+    for(i=0;i<edgeSet.length;i++){
+      e=edgeSet.ids[i];a=edgeA[e];b=edgeB[e];c=edgeRenderColor(e);
+      drawLine(fpToPx(nodeX[a]),fpToPx(nodeY[a]),fpToPx(nodeX[b]),fpToPx(nodeY[b]),c);
+      if(edgeKind[e]===EDGE_GRAFT){
+        mx=fpToPx((nodeX[a]+nodeX[b])>>1);my=fpToPx((nodeY[a]+nodeY[b])>>1);
+        putPixel(mx-1,my-1,[170,170,170]);putPixel(mx+1,my+1,[170,170,170]);
+      }
+    }
+    for(i=0;i<nodeSet.length;i++){
+      n=nodeSet.ids[i];x=fpToPx(nodeX[n]);y=fpToPx(nodeY[n]);c=nodeRenderColor(n,0.82);putPixel(x,y,c);
+      if(nodeTipHead[n]>=0)drawTipMarker(n,x,y,nodeRenderColor(n,1));
+    }
+    for(i=0;i<flowerSet.length;i++){
+      f=flowerSet.ids[i];
+      for(d=0;d<4;d++){p=flowerPetals[d][f];if(p>=0)putPixel(fpToPx(parcelX[p]),fpToPx(parcelY[p]),chemistryColor(parcelCompound[p],0.95));}
+      n=flowerCore[f];if(n>=0&&nodeAlive[n])putPixel(fpToPx(nodeX[n]),fpToPx(nodeY[n]),nodeRenderColor(n,1));
+    }
+    for(i=0;i<carrierSet.length;i++){p=carrierSet.ids[i];drawGlyph(fpToPx(parcelX[p]),fpToPx(parcelY[p]),chemistryColor(parcelCompound[p],1),"carrier");}
+    for(i=0;i<seedSet.length;i++){p=seedSet.ids[i];drawGlyph(fpToPx(parcelX[p]),fpToPx(parcelY[p]),chemistryColor(parcelCompound[p],1),"seed");}
+    if(speed<64){
+      for(i=0;i<flashes.length;i++)if(flashes[i].until>=tick){
+        keep.push(flashes[i]);x=fpToPx(flashes[i].x);y=fpToPx(flashes[i].y);c=[235,235,235];
+        putPixel(x-2,y,c);putPixel(x+2,y,c);putPixel(x,y-2,c);putPixel(x,y+2,c);
+      }
+      flashes=keep;
+    }else flashes.length=0;
+    if(selected&&selected.type==="node"&&nodeAlive[selected.id]){
+      x=fpToPx(nodeX[selected.id]);y=fpToPx(nodeY[selected.id]);c=[255,255,255];
+      putPixel(x-3,y,c);putPixel(x+3,y,c);putPixel(x,y-3,c);putPixel(x,y+3,c);
+    }
+    ctx.putImageData(imageData,0,0);lastRenderTick=tick;
+    document.getElementById("readout").textContent="t "+tick.toLocaleString()+" · s "+cfg.seed;
+    updateEcologyReadout();
+    if(selected)updateInspector();
+  }
+  function canvasPoint(event) {
+    var r=canvas.getBoundingClientRect(),scale=Math.min(r.width/cfg.width,r.height/cfg.height);
+    var dw=cfg.width*scale,dh=cfg.height*scale,ox=r.left+(r.width-dw)/2,oy=r.top+(r.height-dh)/2;
+    return [(event.clientX-ox)/scale,(event.clientY-oy)/scale];
+  }
+  function selectAt(px,py) {
+    var best=null,bestD=16,i,id,x,y,d,sets=[["carrier",carrierSet],["seed",seedSet],["node",nodeSet],["free",freeSet]],s;
+    for(s=0;s<sets.length;s++)for(i=0;i<sets[s][1].length;i++){
+      id=sets[s][1].ids[i];
+      if(sets[s][0]==="node"){x=fpToPx(nodeX[id]);y=fpToPx(nodeY[id]);}
+      else{x=fpToPx(parcelX[id]);y=fpToPx(parcelY[id]);}
+      d=(x-px)*(x-px)+(y-py)*(y-py);
+      if(d<bestD){bestD=d;best={type:sets[s][0],id:id};}
+    }
+    selected=best;
+    document.getElementById("inspector").hidden=!best;
+    if(best)updateInspector();render();
+  }
+  function swatchHtml(code) {
+    var c=DISPLAY_RGB[code];return "<span class=\"swatch\" style=\"background:rgb("+c[0]+","+c[1]+","+c[2]+")\"></span>"+COMPOUND_NAMES[code];
+  }
+  function getEntity(type,id) {
+    var p,n,e,f;
+    if(type==="parcel"||type==="free"||type==="carrier"||type==="seed"){
+      p=id;if(p<0||p>=cfg.parcelCount)return null;
+      return {type:"parcel",id:p,state:STATE_NAMES[parcelState[p]],compound:COMPOUND_NAMES[parcelCompound[p]],counts:COUNTS[parcelCompound[p]].slice(),x:fpToPx(parcelX[p]),y:fpToPx(parcelY[p]),nodeId:parcelNode[p],edgeId:parcelEdge[p],incomingEdge:parcelIncoming[p],genomeId:parcelGenome[p],plantId:parcelPlant[p],age:parcelAge[p],lastTissuePlant:parcelLastPlant[p],transformCount:parcelTransformCount[p],lastTransformTick:parcelLastTransformTick[p],environmentallyExposed:!!parcelExposed[p]};
+    }
+    if(type==="node"){
+      n=id;if(n<0||!nodeAlive[n])return null;p=nodeParcel[n];
+      return {type:"node",id:n,parcelId:p,compound:COMPOUND_NAMES[parcelCompound[p]],home:COMPOUND_NAMES[nodeHome[n]],target:COMPOUND_NAMES[nodeTarget[n]],debtDistance:distCompound(parcelCompound[p],nodeHome[n]),gate:COMPOUND_NAMES[nodeGate[n]],gateTolerance:nodeGateTolerance[n],routeKey:COMPOUND_NAMES[nodeRouteKey[n]],plantId:nodePlant[n],genomeId:nodeGenome[n],moduleId:nodeModule[n],role:ROLE_NAMES[nodeRole[n]],degree:nodeDegree[n],neighbors:Array.from({length:nodeDegree[n]},function(_,i){return nodeNbr[i][n];}),flowerId:nodeFlower[n],tipIds:(function(){var a=[],t=nodeTipHead[n];while(t>=0){a.push(t);t=tipNextAtNode[t];}return a;})()};
+    }
+    if(type==="edge"){
+      e=id;if(e<0||!edgeAlive[e])return null;
+      return {type:"edge",id:e,a:edgeA[e],b:edgeB[e],kind:EDGE_NAMES[edgeKind[e]],ownerA:edgeOwnerA[e],ownerB:edgeOwnerB[e],dryMisses:edgeDryMisses[e],flowCount:edgeFlowCount[e],lastFlowTick:edgeLastFlowTick[e],productiveCount:edgeProductiveCount[e],lastProductiveTick:edgeLastProductiveTick[e],restorations:edgeRestorationCount[e],construction:edgeConstructionCount[e],reproduction:edgeReproductionCount[e]};
+    }
+    if(type==="flower"){
+      f=id;if(f<0||!flowerAlive[f])return null;
+      return {type:"flower",id:f,core:flowerCore[f],plantId:flowerPlant[f],genomeId:flowerGenome[f],stage:flowerStage[f],opportunities:flowerOpportunities[f],petalHome:COMPOUND_NAMES[flowerPetalHome[f]],seedHome:COMPOUND_NAMES[flowerSeedHome[f]],petals:[flowerPetals[0][f],flowerPetals[1][f],flowerPetals[2][f],flowerPetals[3][f]]};
+    }
+    if(type==="plant"){
+      p=plants[id];return p?Object.assign({type:"plant",chemistrySignature:chemistrySignature(p.genomeId)},p):null;
+    }
+    return null;
+  }
+  function updateInspector() {
+    var info=selected?getEntity(selected.type,selected.id):null,html="";
+    if(!info){document.getElementById("inspector").hidden=true;selected=null;return;}
+    if(info.type==="parcel"){
+      html="<b>Parcel "+info.id+"</b> · "+info.state+"\n"+swatchHtml(parcelCompound[info.id])+" · ["+info.counts.join(", ")+"]\nposition "+info.x+", "+info.y+"\nnode "+info.nodeId+" · edge "+info.edgeId+" · incoming "+info.incomingEdge+"\ngenome "+info.genomeId+" · seed parent "+info.plantId+"\nlast chemical processor "+info.lastTissuePlant+"\ntransformations "+info.transformCount+" · last at "+info.lastTransformTick+"\nfree-space renewal "+(info.environmentallyExposed?"available":"spent");
+    }else if(info.type==="node"){
+      html="<b>Node "+info.id+"</b> · "+info.role+"\nactual "+swatchHtml(parcelCompound[info.parcelId])+"\nhome "+info.home+" · product "+info.target+" · debt "+info.debtDistance+"\nadmits within 1 of home · routes by product\nplant "+info.plantId+" · genome "+info.genomeId+" · module "+info.moduleId+"\ndegree "+info.degree+" · neighbors "+info.neighbors.join(", ")+"\ntips "+info.tipIds.join(", ")+" · flower "+info.flowerId;
+    }else html="<b>"+info.type+" "+info.id+"</b>\n"+JSON.stringify(info,null,2);
+    document.getElementById("inspectorText").innerHTML=html;
+  }
+
+  /* ================================================================
+     17. RESET, PUBLIC HEADLESS API, SAVE ACTIONS, AND UI
+     ================================================================ */
+
+  function reset(options) {
+    var wasPaused=paused,ancestorId,inv;
+    paused=true;tick=0;selected=null;flashes=[];cfg=mergeConfig(options||{});
+    rng=new RNG(cfg.seed);allocateWorld(cfg);initializeParcelInventory();
+    ancestorId=internGenome(makeAncestorGenome(),-1,-1,-1,"balanced RGB common ancestor");
+    if(cfg.mode==="proof")initializeProof(ancestorId);else initializeFounders(ancestorId);
+    inv=assertInvariants("full");
+    if(!inv.ok)throw new Error("Initialization invariant failure:\n"+inv.errors.join("\n"));
+    document.getElementById("modeSelect").value=cfg.mode;document.getElementById("seedInput").value=cfg.seed;
+    document.getElementById("overlaySelect").value=overlay;paused=wasPaused;updateRunButton();render();
+    document.getElementById("leakNote").textContent=cfg.productiveMaintenance?"A carrier can maintain one incoming bond per excursion through free space; growth and reproduction consume matter and also count. Closed circulation dries out.":"Control: every carrier traversal maintains a bond, whether or not it performs useful work.";
+    return {tick:tick,stateHash:stateHash(),invariants:inv,config:Object.assign({},cfg)};
+  }
+  async function runTo(targetTick,options) {
+    options=options||{};targetTick=Math.max(tick,Math.floor(targetTick));
+    var start=performance.now(),yieldEvery=options.yieldEvery||50000,nextYield=tick+yieldEvery,milestones=options.renderMilestones||[],mi=0,inv;
+    while(mi<milestones.length&&milestones[mi]<=tick)mi++;
+    while(tick<targetTick){
+      stepMany(Math.min(targetTick-tick,10000));
+      if(mi<milestones.length&&tick>=milestones[mi]){render();mi++;}
+      if(tick>=nextYield){nextYield=tick+yieldEvery;await new Promise(function(resolve){setTimeout(resolve,0);});}
+    }
+    if(options.render!==false)render();
+    inv=assertInvariants(options.fullAssertions?"full":"fast");
+    return {tick:tick,stateHash:stateHash(),elapsedMs:performance.now()-start,invariants:inv};
+  }
+  function capturePNG() {
+    render();return new Promise(function(resolve,reject){canvas.toBlob(function(blob){if(blob)resolve(blob);else reject(new Error("PNG capture failed"));},"image/png");});
+  }
+  function downloadBlob(blob,name) {
+    var a=document.createElement("a"),url=URL.createObjectURL(blob);
+    a.href=url;a.download=name;document.body.appendChild(a);a.click();a.remove();setTimeout(function(){URL.revokeObjectURL(url);},1000);
+  }
+  function snapshot(options) {return exportScene(options);}
+  function exportSceneBlob() {return new Blob([JSON.stringify(exportScene(),null,2)],{type:"application/json"});}
+  function updateRunButton(){document.getElementById("runButton").textContent=paused?"Run":"Pause";}
+  function setStatus(textValue){document.getElementById("settingsStatus").textContent=textValue;}
+
+  var api={
+    schemaVersion:SCHEMA_VERSION,buildVersion:BUILD_VERSION,
+    get ready(){return window.__LOOPGARDEN_READY__;},
+    reset:reset,
+    step:function(eventCount){var n=eventCount===undefined?1:Math.max(0,eventCount|0);stepMany(n);render();return {tick:tick,stateHash:stateHash()};},
+    runTo:runTo,
+    pause:function(){paused=true;updateRunButton();return tick;},
+    render:render,
+    setOverlay:function(value){if(["chemistry","history","debt","owners","home","flow","dryness"].indexOf(value)>=0)overlay=value;document.getElementById("overlaySelect").value=overlay;render();return overlay;},
+    getConfig:function(){return Object.assign({},cfg);},
+    getStats:getStats,
+    getEcology:getEcology,
+    getEntity:getEntity,
+    traceParcel:traceParcel,
+    snapshot:snapshot,
+    exportScene:exportScene,
+    exportCheckpoint:exportCheckpoint,
+    importCheckpoint:importCheckpoint,
+    exportEventLog:exportEventLog,
+    assertInvariants:assertInvariants,
+    stateHash:stateHash,
+    introduceRareVariant:introduceRareVariant,
+    introduceHistoryPair:introduceHistoryPair,
+    capturePNG:capturePNG,
+    selfTest:runPureSelfTests
+  };
+  window.loopgarden=api;
+
+  document.getElementById("runButton").addEventListener("click",function(){paused=!paused;updateRunButton();});
+  document.getElementById("stepButton").addEventListener("click",function(){paused=true;updateRunButton();stepMany(1);render();});
+  document.getElementById("speedSelect").addEventListener("change",function(){speed=Number(this.value)||1;});
+  document.getElementById("moreButton").addEventListener("click",function(){var p=document.getElementById("settings");p.hidden=!p.hidden;});
+  document.getElementById("restartButton").addEventListener("click",function(){
+    try{
+      reset({seed:Number(document.getElementById("seedInput").value)||1,mode:document.getElementById("modeSelect").value});
+      paused=false;updateRunButton();setStatus("Restarted deterministically.");
+    }catch(e){showFatal(e);}
+  });
+  document.getElementById("fastForwardButton").addEventListener("click",async function(){
+    var button=this,target=tick+1000000;paused=true;updateRunButton();button.disabled=true;setStatus("Fast-forwarding to "+target.toLocaleString()+" events…");
+    try{await runTo(target,{render:true,yieldEvery:50000});setStatus("Reached "+tick.toLocaleString()+" events. Invariants "+(assertInvariants("fast").ok?"pass":"failed")+".");}
+    catch(e){showFatal(e);}finally{button.disabled=false;}
+  });
+  document.getElementById("overlaySelect").addEventListener("change",function(){overlay=this.value;render();});
+  document.getElementById("exportSceneButton").addEventListener("click",function(){downloadBlob(exportSceneBlob(),"loopgarden-seed-"+cfg.seed+"-tick-"+tick+".scene.json");});
+  document.getElementById("exportCheckpointButton").addEventListener("click",function(){downloadBlob(exportCheckpoint(),"loopgarden-seed-"+cfg.seed+"-tick-"+tick+".checkpoint.json");});
+  document.getElementById("pngButton").addEventListener("click",async function(){downloadBlob(await capturePNG(),"loopgarden-seed-"+cfg.seed+"-tick-"+tick+".png");});
+  document.getElementById("assertButton").addEventListener("click",function(){var inv=assertInvariants("full");setStatus(inv.ok?"All invariants pass at tick "+tick+".":inv.errors.slice(0,3).join(" · "));});
+  document.getElementById("rareButton").addEventListener("click",function(){
+    var result=introduceHistoryPair();lastEcologyReadoutTick=-1;render();
+    setStatus(result.ok?"Inserted identical "+result.target+" product probes: plants "+result.rich.plantId+" (history-rich) and "+result.poor.plantId+" (history-poor). Compare them through getEcology().introductions.":"History-pair assay failed.");
+  });
+  document.getElementById("closeInspector").addEventListener("click",function(){selected=null;document.getElementById("inspector").hidden=true;render();});
+  canvas.addEventListener("pointerdown",function(event){var p=canvasPoint(event);if(p[0]>=0&&p[1]>=0&&p[0]<cfg.width&&p[1]<cfg.height)selectAt(p[0],p[1]);});
+
+  function animationLoop() {
+    renderFrame++;
+    if(!paused)stepMany(speed);
+    if(speed<64||renderFrame%3===0||paused)render();
+    requestAnimationFrame(animationLoop);
+  }
+
+  /* ================================================================
+     18. STARTUP, URL PARAMETERS, AND VISIBLE FAILURE MARKERS
+     ================================================================ */
+
+  var tests=runPureSelfTests();
+  if(!tests.ok)throw new Error("Startup self-tests failed:\n"+tests.errors.join("\n"));
+  var params=new URLSearchParams(location.search),options={};
+  if(params.has("seed"))options.seed=Number(params.get("seed"))||1;
+  if(params.has("width"))options.width=Number(params.get("width"));
+  if(params.has("height"))options.height=Number(params.get("height"));
+  if(params.has("parcels"))options.parcelCount=Number(params.get("parcels"));
+  if(params.has("mode"))options.mode=params.get("mode");
+  if(params.has("founders"))options.founderClones=Number(params.get("founders"));
+  if(params.has("clusters"))options.founderClusters=Number(params.get("clusters"));
+  if(params.get("headless")==="1"){document.getElementById("controls").style.display="none";paused=true;}else paused=false;
+  reset(options);
+  window.__LOOPGARDEN_READY__=true;startup.style.display="none";
+  requestAnimationFrame(animationLoop);
+  if(params.has("until")){
+    paused=true;updateRunButton();
+    runTo(Number(params.get("until"))||0,{render:true}).then(function(result){
+      document.title="Loopgarden t"+result.tick+" "+result.stateHash;
+      document.documentElement.dataset.headlessDone="1";
+    }).catch(showFatal);
+  }
+
+  } catch (error) {
+    showFatal(error);
+  }
+})();
+</script>
+</body>
+</html>

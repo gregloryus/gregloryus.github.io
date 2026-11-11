@@ -1,0 +1,51 @@
+{
+ "overrides": {
+  "fertilityLaw": 1,
+  "fertilityMin": 2
+ },
+ "worldSeed": 1,
+ "dims": {
+  "C": 97,
+  "S": 42,
+  "G": 169
+ },
+ "series": [
+  {
+   "t": 250,
+   "plants": 4,
+   "cells": 8,
+   "seeds": 4,
+   "genomes": 1,
+   "domShare": 1,
+   "meanPlan": 2,
+   "maxPlan": 2,
+   "meanH": 1,
+   "births": 4,
+   "deaths": {},
+   "litter": 0,
+   "maxElev": 0
+  },
+  {
+   "t": 500,
+   "plants": 0,
+   "cells": 0,
+   "seeds": 1,
+   "genomes": 0,
+   "domShare": 0,
+   "meanPlan": 0,
+   "maxPlan": 0,
+   "meanH": 0,
+   "births": 4,
+   "deaths": {
+    "expired": 4
+   },
+   "litter": 8,
+   "maxElev": 0
+  }
+ ],
+ "deathHist": {
+  "0": 507,
+  "1": 4
+ },
+ "maxElevSeen": 0
+}

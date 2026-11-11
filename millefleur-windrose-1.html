@@ -1,0 +1,1187 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
+  <title>Millefleur Windrose 1 — shape writes weather</title>
+  <style>
+    :root { color-scheme: dark; }
+    * { box-sizing: border-box; }
+    html, body {
+      margin: 0; width: 100%; height: 100%; overflow: hidden;
+      background: #05080d; color: #cbd7d0;
+      font: 11px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    }
+    body {
+      display: flex; flex-direction: column;
+      padding: env(safe-area-inset-top) 0 env(safe-area-inset-bottom);
+    }
+    #bar {
+      flex: 0 0 auto; display: flex; align-items: center; gap: 5px;
+      padding: 6px 8px; overflow-x: auto; white-space: nowrap;
+      border-bottom: 1px solid #1a2623; background: #080d12;
+    }
+    button, input {
+      min-height: 32px; border: 1px solid #2b3b35; border-radius: 6px;
+      background: #111b18; color: #d4dfd8; font: inherit; padding: 6px 8px;
+    }
+    button:active { background: #1c2c26; }
+    button.on { color: #fff0b4; border-color: #866e35; background: #292313; }
+    input { width: 82px; background: #0b1311; }
+    #stage {
+      position: relative; flex: 1 1 auto; min-height: 0; overflow: hidden;
+      background: #05080d;
+    }
+    canvas {
+      position: absolute; inset: 0; width: 100%; height: 100%;
+      image-rendering: pixelated; touch-action: manipulation;
+    }
+    #hud {
+      flex: 0 0 auto; padding: 5px 8px; line-height: 1.45;
+      color: #8ea198; border-top: 1px solid #1a2623; background: #080d12;
+    }
+    #hud b { color: #e4ece7; font-weight: 600; }
+    #detail {
+      flex: 0 0 auto; min-height: 20px; max-height: 72px; overflow-y: auto;
+      padding: 0 8px 5px; color: #9caf9f; background: #080d12;
+    }
+    #legend {
+      flex: 0 0 auto; padding: 0 8px 7px; color: #667a70;
+      line-height: 1.5; background: #080d12;
+    }
+    .key { display: inline-block; width: 8px; height: 8px; border-radius: 2px; margin: 0 3px 0 7px; }
+    .key:first-child { margin-left: 0; }
+  </style>
+</head>
+<body>
+  <div id="bar">
+    <button id="run">pause</button>
+    <button data-warp="1">1×</button>
+    <button data-warp="4" class="on">4×</button>
+    <button data-warp="16">16×</button>
+    <button data-warp="64">64×</button>
+    <button id="routing" class="on">shape routing on</button>
+    <input id="seed" inputmode="numeric" aria-label="world seed">
+    <button id="new">new world</button>
+  </div>
+  <div id="stage"><canvas id="world" width="192" height="128"></canvas></div>
+  <div id="hud">starting windrose…</div>
+  <div id="detail">Cross-grain wind dives under a plant, reaches its root, then returns over the tissue to a tip. Tap a plant for its word.</div>
+  <div id="legend">
+    <span class="key" style="background:#55c9d7"></span>↑ north
+    <span class="key" style="background:#dda33b"></span>→ east
+    <span class="key" style="background:#397fd0"></span>↓ south
+    <span class="key" style="background:#9279dc"></span>← west
+    <span class="key" style="background:#66bd78"></span>tissue
+    <span class="key" style="background:#e5f3dd"></span>inside (under/over)
+    <span class="key" style="background:#f2ca6c"></span>root
+    <span class="key" style="background:#d75ca0"></span>propagule
+    <br>bud-word: | extend · ‹/› side leaf · + paired leaves · Y fork · · stop
+  </div>
+
+  <script>
+  /* ==== SIM CORE (DOM-free) ==== */
+  function createWindroseSim(cfg) {
+    cfg = cfg || {};
+    var COLS = cfg.cols || 192;
+    var ROWS = cfg.rows || 128;
+    var N = COLS * ROWS;
+    var P = Object.assign({
+      START_PLANTS: 44,
+      BODY_RADIUS: 8,
+      MIN_SEED_DISTANCE: 9,
+      MIN_NODES: 3,
+      MAX_NODES: 24,
+      MIN_WORD: 2,
+      MAX_WORD: 14,
+
+      SHUTTLE_COUNT: Math.round(N * 0.073),
+      SHUTTLE_EVENTS: 520,
+      RECHARGE: 5,
+      HANDOFF_RANGE: 16,
+      ROUTING: 1,
+      EDGE_MIX: 1,
+      EDGE_MIX_RATE: 0.30,
+
+      MAINT_BASE: 0.0040,
+      MAINT_CELL: 0.00140,
+      SEED_BASE: 9,
+      CHILD_CELL_COST: 0.85,
+      SEED_BANK: 17,
+      FOUNDER_BANK: 90,
+      REPRO_RESERVE: 8,
+      REPRO_COOLDOWN: 112,
+      GROW_INTERVAL: 3,
+      FLOWER_THRESHOLD: 3,
+
+      PROP_WALK: 24,
+      PROP_LIFE: 900,
+      PROP_EVENTS: 84,
+      PROP_SETTLE_RATE: 0.24,
+      MAX_PROPAGULES: 2400,
+      MAX_PLANTS: 2200,
+
+      MUT_RATE: 0.22,
+      MUT_CHANGE: 0.46,
+      MUT_INSERT: 0.18,
+      MUT_DELETE: 0.17,
+      HUE_DRIFT: 35
+    }, cfg.params || {});
+
+    // Heading order is clockwise: north, east, south, west.
+    var DX4 = new Int8Array([0, 1, 0, -1]);
+    var DY4 = new Int8Array([-1, 0, 1, 0]);
+    // Bud-word symbols: forward, left leaf, right leaf, paired leaves, fork, stop.
+    var F = 0, L = 1, R = 2, PAIR = 3, FORK = 4, STOP = 5;
+    var GLYPHS = ["|", "‹", "›", "+", "Y", "·"];
+
+    var bodyOwner = new Int32Array(N);
+    var bodyNode = new Int16Array(N);
+    var bodyDir = new Int8Array(N);
+    var tipCell = new Uint8Array(N);
+    // The visible tree has two causal depth lanes: inward below the cloth,
+    // outward above it. Opposing traffic can pass without a magic swap rule.
+    var inwardAt = new Int32Array(N);
+    var outwardAt = new Int32Array(N);
+    bodyNode.fill(-1);
+    bodyDir.fill(-1);
+
+    var plants = new Map();
+    var shuttles = [];
+    var propagules = [];
+    var tick = 0;
+    var nextPid = 1;
+    var maxGen = 0;
+    var shuttleCursor = 0;
+    var propCursor = 0;
+    var rngState = (cfg.seed == null ? 731927 : cfg.seed) >>> 0;
+
+    var stats = {
+      born: 0, died: 0, starved: 0,
+      captures: 0, delivered: 0, emitted: 0, handoffs: 0,
+      captureDir: [0, 0, 0, 0],
+      deliveredDir: [0, 0, 0, 0],
+      emittedDir: [0, 0, 0, 0],
+      mutations: 0, changed: 0, inserted: 0, deleted: 0, duplicated: 0,
+      seedsMade: 0, germinated: 0, propagulesExpired: 0,
+      blockedBirths: 0, seedCapBlocks: 0, edgeMixes: 0
+    };
+
+    function rand() {
+      rngState ^= rngState << 13;
+      rngState >>>= 0;
+      rngState ^= rngState >>> 17;
+      rngState ^= rngState << 5;
+      rngState >>>= 0;
+      return rngState / 4294967296;
+    }
+    function ri(n) { return (rand() * n) | 0; }
+    function clamp(v, lo, hi) { return v < lo ? lo : v > hi ? hi : v; }
+    function idx(x, y) { return y * COLS + x; }
+    function xof(i) { return i % COLS; }
+    function yof(i) { return (i / COLS) | 0; }
+    function wrapX(x) { return x < 0 ? x + COLS : x >= COLS ? x - COLS : x; }
+    function wrapY(y) { return y < 0 ? y + ROWS : y >= ROWS ? y - ROWS : y; }
+    function at(x, y) { return idx(wrapX(x), wrapY(y)); }
+    function insideGarden(x, y) {
+      var r = P.BODY_RADIUS;
+      return x >= r && x < COLS - r && y >= 2 * r && y < ROWS;
+    }
+    function copyWord(word) { return Array.prototype.slice.call(word); }
+    function defaultRaw() { return { word: [F, F, F, STOP] }; }
+    function wordText(word) {
+      var out = "";
+      for (var i = 0; i < word.length; i++) out += GLYPHS[word[i]] || "?";
+      return out;
+    }
+    function hashWord(word) {
+      var h = 2166136261 >>> 0;
+      h ^= word.length;
+      h = Math.imul(h, 16777619) >>> 0;
+      for (var i = 0; i < word.length; i++) {
+        h ^= word[i] + 17;
+        h = Math.imul(h, 16777619) >>> 0;
+      }
+      return h >>> 0;
+    }
+
+    // A small cyclic word is interpreted by every active meristem. Side leaves
+    // are terminal; both daughters of a fork continue at the next symbol.
+    function compileGenome(raw) {
+      var source = raw && raw.word ? raw.word : raw;
+      if (!source || source.length < P.MIN_WORD || source.length > P.MAX_WORD) return null;
+      var word = [];
+      for (var w = 0; w < source.length; w++) {
+        var sym = source[w] | 0;
+        if (sym < F || sym > STOP) return null;
+        word.push(sym);
+        // Stop ends every active meristem, so later symbols are unreachable
+        // genetic junk. Canonical genomes omit them.
+        if (sym === STOP) break;
+      }
+      if (word.length < P.MIN_WORD) return null;
+
+      var parents = [-1];
+      var heads = [0];
+      var xs = [0];
+      var ys = [0];
+      var depths = [1];
+      var childCount = [0];
+      var seen = { "0,0": 1 };
+      var buds = [{ node: 0, heading: 0, phase: 0 }];
+      var cursor = 0;
+      var guard = P.MAX_NODES * 12;
+
+      function addNode(parent, heading, isBud, phase) {
+        if (parents.length >= P.MAX_NODES) return -1;
+        var x = xs[parent] + DX4[heading];
+        var y = ys[parent] + DY4[heading];
+        // Tissue may form a basal rosette beside the root, but never below it.
+        if (Math.abs(x) > P.BODY_RADIUS || y > 0 || y < -2 * P.BODY_RADIUS) return -1;
+        var key = x + "," + y;
+        if (seen[key]) return -1;
+        seen[key] = 1;
+        var node = parents.length;
+        parents.push(parent);
+        heads.push(heading);
+        xs.push(x);
+        ys.push(y);
+        depths.push(depths[parent] + 1);
+        childCount.push(0);
+        childCount[parent]++;
+        if (isBud) buds.push({ node: node, heading: heading, phase: phase });
+        return node;
+      }
+
+      while (cursor < buds.length && parents.length < P.MAX_NODES && guard-- > 0) {
+        var bud = buds[cursor++];
+        var instruction = word[bud.phase % word.length];
+        var nextPhase = (bud.phase + 1) % word.length;
+        var left = (bud.heading + 3) & 3;
+        var right = (bud.heading + 1) & 3;
+        if (instruction === F) {
+          addNode(bud.node, bud.heading, true, nextPhase);
+        } else if (instruction === L) {
+          addNode(bud.node, bud.heading, true, nextPhase);
+          addNode(bud.node, left, false, 0);
+        } else if (instruction === R) {
+          addNode(bud.node, bud.heading, true, nextPhase);
+          addNode(bud.node, right, false, 0);
+        } else if (instruction === PAIR) {
+          addNode(bud.node, bud.heading, true, nextPhase);
+          addNode(bud.node, left, false, 0);
+          addNode(bud.node, right, false, 0);
+        } else if (instruction === FORK) {
+          addNode(bud.node, left, true, nextPhase);
+          addNode(bud.node, right, true, nextPhase);
+        }
+      }
+
+      var size = parents.length;
+      if (size < P.MIN_NODES) return null;
+      var leaves = 0, forks = 0, maxDepth = 1;
+      var minx = 0, maxx = 0, miny = 0, maxy = 0;
+      var vertical = 0, horizontal = 0;
+      var paths = new Array(size);
+      for (var i = 0; i < size; i++) {
+        if (!childCount[i]) leaves++;
+        if (childCount[i] >= 2) forks++;
+        if (depths[i] > maxDepth) maxDepth = depths[i];
+        if (xs[i] < minx) minx = xs[i];
+        if (xs[i] > maxx) maxx = xs[i];
+        if (ys[i] < miny) miny = ys[i];
+        if (ys[i] > maxy) maxy = ys[i];
+        if (i > 0) {
+          if (heads[i] & 1) horizontal++;
+          else vertical++;
+        }
+        var path = [];
+        var q = i;
+        while (q >= 0) {
+          path.push(q);
+          q = parents[q];
+        }
+        path.reverse();
+        paths[i] = Int16Array.from(path);
+      }
+      return {
+        word: Uint8Array.from(word),
+        text: wordText(word),
+        hash: hashWord(word),
+        size: size,
+        parents: Int16Array.from(parents),
+        heads: Int8Array.from(heads),
+        xs: Int8Array.from(xs),
+        ys: Int8Array.from(ys),
+        childCount: Uint8Array.from(childCount),
+        paths: paths,
+        leaves: leaves,
+        forks: forks,
+        depth: maxDepth,
+        spanX: maxx - minx + 1,
+        spanY: maxy - miny + 1,
+        vertical: vertical,
+        horizontal: horizontal,
+        axisBias: (horizontal - vertical) / Math.max(1, size - 1)
+      };
+    }
+    function defaultGenome() { return compileGenome(defaultRaw()); }
+    function rawGenome(g) { return { word: copyWord(g.word) }; }
+    function genomeLabel(g) {
+      return g.text + " · " + g.size + " cells · " + g.leaves +
+        " tips · " + g.forks + " forks";
+    }
+
+    function mutateGenome(parent) {
+      if (rand() >= P.MUT_RATE) return { g: parent, changed: false, note: "same bud-word" };
+      for (var attempt = 0; attempt < 20; attempt++) {
+        var word = copyWord(parent.word);
+        var roll = rand();
+        var note;
+        if (roll < P.MUT_CHANGE) {
+          var ci = ri(word.length);
+          var old = word[ci];
+          var replacement = ri(6);
+          if (replacement === old) replacement = (replacement + 1 + ri(5)) % 6;
+          word[ci] = replacement;
+          note = "changed one bud";
+        } else if (roll < P.MUT_CHANGE + P.MUT_INSERT && word.length < P.MAX_WORD) {
+          word.splice(ri(word.length + 1), 0, ri(6));
+          note = "inserted one bud";
+        } else if (roll < P.MUT_CHANGE + P.MUT_INSERT + P.MUT_DELETE &&
+                   word.length > P.MIN_WORD) {
+          word.splice(ri(word.length), 1);
+          note = "deleted one bud";
+        } else if (word.length < P.MAX_WORD) {
+          var start = ri(word.length);
+          var length = 1 + ri(Math.min(3, word.length - start));
+          var motif = word.slice(start, start + length);
+          var room = P.MAX_WORD - word.length;
+          if (motif.length > room) motif.length = room;
+          word.splice.apply(word, [ri(word.length + 1), 0].concat(motif));
+          note = "copied a motif";
+        } else {
+          continue;
+        }
+        var compiled = compileGenome({ word: word });
+        if (compiled && compiled.hash !== parent.hash) {
+          return { g: compiled, changed: true, note: note };
+        }
+      }
+      return { g: parent, changed: false, note: "same bud-word" };
+    }
+
+    function territoryClear(x, y, ignorePid) {
+      var clear = true;
+      plants.forEach(function(pl) {
+        if (!clear || pl.pid === ignorePid) return;
+        var dx = Math.abs(pl.x - x);
+        var dy = Math.abs(pl.y - y);
+        if (Math.max(dx, dy) < P.MIN_SEED_DISTANCE) clear = false;
+      });
+      return clear;
+    }
+    function bodyClear(g, x, y) {
+      for (var n = 0; n < g.size; n++) {
+        var xx = x + g.xs[n], yy = y + g.ys[n];
+        if (xx < 0 || xx >= COLS || yy < 0 || yy >= ROWS || bodyOwner[idx(xx, yy)]) return false;
+      }
+      return true;
+    }
+    function newPlant(g, gen, hue, muts, x, y, parentHash, note, bank, force) {
+      if (!g || plants.size >= P.MAX_PLANTS || !insideGarden(x, y) ||
+          (!force && !territoryClear(x, y, 0)) || !bodyClear(g, x, y)) return null;
+      var pid = nextPid++;
+      var root = idx(x, y);
+      var cells = new Int32Array(g.size);
+      cells.fill(-1);
+      cells[0] = root;
+      var pl = {
+        pid: pid, gen: gen, hue: hue, muts: muts,
+        x: x, y: y, genome: g, hash: g.hash, parentHash: parentHash,
+        note: note, cells: cells, built: 1, outlets: [0], outletCursor: 0,
+        tipUse: new Uint32Array(g.size),
+        bank: bank, maint: 0, nextGrow: tick + P.GROW_INTERVAL,
+        nextRepro: tick + P.REPRO_COOLDOWN + ri(P.REPRO_COOLDOWN),
+        caught: new Uint32Array(4), delivered: new Uint32Array(4),
+        emitted: new Uint32Array(4), seedsMade: 0, children: 0
+      };
+      plants.set(pid, pl);
+      bodyOwner[root] = pid;
+      bodyNode[root] = 0;
+      bodyDir[root] = -1;
+      tipCell[root] = 1;
+      stats.born++;
+      if (gen > maxGen) maxGen = gen;
+      return pl;
+    }
+    function buildNext(pl) {
+      if (pl.built >= pl.genome.size) return true;
+      var node = pl.built;
+      var x = pl.x + pl.genome.xs[node];
+      var y = pl.y + pl.genome.ys[node];
+      var cell = idx(x, y);
+      if (bodyOwner[cell]) return false;
+      var parent = pl.genome.parents[node];
+      pl.cells[node] = cell;
+      bodyOwner[cell] = pl.pid;
+      bodyNode[cell] = node;
+      bodyDir[cell] = pl.genome.heads[node];
+      tipCell[cell] = 1;
+      if (parent >= 0) {
+        var pi = pl.outlets.indexOf(parent);
+        if (pi >= 0) pl.outlets.splice(pi, 1);
+        tipCell[pl.cells[parent]] = 0;
+      }
+      pl.outlets.push(node);
+      pl.built++;
+      return true;
+    }
+
+    function releaseFromDead(sh, cell) {
+      if (inwardAt[cell] === sh.id + 1) inwardAt[cell] = 0;
+      if (outwardAt[cell] === sh.id + 1) outwardAt[cell] = 0;
+      sh.mode = 0;
+      sh.pos = cell;
+      sh.heading = sh.entryHeading & 3;
+      sh.cool = P.RECHARGE;
+      sh.pid = 0;
+      sh.node = -1;
+      sh.target = -1;
+      sh.routeIndex = 0;
+      sh.lastPid = 0;
+      sh.sinceExit = 255;
+    }
+    function removePlant(pl) {
+      for (var k = 0; k < pl.built; k++) {
+        var cell = pl.cells[k];
+        if (cell < 0) continue;
+        var inwardId = inwardAt[cell] - 1;
+        var outwardId = outwardAt[cell] - 1;
+        if (inwardId >= 0 && shuttles[inwardId]) releaseFromDead(shuttles[inwardId], cell);
+        if (outwardId >= 0 && shuttles[outwardId]) releaseFromDead(shuttles[outwardId], cell);
+        bodyOwner[cell] = 0;
+        bodyNode[cell] = -1;
+        bodyDir[cell] = -1;
+        tipCell[cell] = 0;
+        inwardAt[cell] = 0;
+        outwardAt[cell] = 0;
+      }
+      plants.delete(pl.pid);
+      stats.died++;
+      stats.starved++;
+    }
+
+    function spawnShuttles() {
+      shuttles = [];
+      for (var n = 0; n < P.SHUTTLE_COUNT; n++) {
+        shuttles.push({
+          id: n, mode: 0, pos: ri(N), heading: ri(4),
+          cool: ri(P.RECHARGE + 1), pid: 0, node: -1,
+          target: -1, routeIndex: 0, entryHeading: 2,
+          lastPid: 0, sinceExit: 255
+        });
+      }
+    }
+    function captureShuttle(sh, cell, pl, node) {
+      if (sh.lastPid && sh.lastPid !== pl.pid && sh.sinceExit <= P.HANDOFF_RANGE) {
+        stats.handoffs++;
+      }
+      stats.captures++;
+      stats.captureDir[sh.heading]++;
+      pl.caught[sh.heading]++;
+      sh.mode = 1;
+      sh.pid = pl.pid;
+      sh.node = node;
+      sh.entryHeading = sh.heading;
+      sh.target = -1;
+      sh.routeIndex = 0;
+      inwardAt[cell] = sh.id + 1;
+    }
+    function externalShuttleEvent(sh) {
+      var x = xof(sh.pos), y = yof(sh.pos);
+      var nx = x + DX4[sh.heading], ny = y + DY4[sh.heading];
+      var crossedEdge = nx < 0 || nx >= COLS || ny < 0 || ny >= ROWS;
+      var next = at(nx, ny);
+      sh.pos = next;
+      if (sh.sinceExit < 255) sh.sinceExit++;
+      // The distant loom edge is a slow abiotic recycler. Plants provide the
+      // faster local alternative by routing a shuttle before it gets there.
+      if (crossedEdge && P.EDGE_MIX) {
+        if (rand() < P.EDGE_MIX_RATE) {
+          sh.pos = ri(N);
+          sh.heading = ri(4);
+          stats.edgeMixes++;
+        }
+        if (sh.cool > 0) sh.cool--;
+        return;
+      }
+      if (sh.cool > 0) {
+        sh.cool--;
+        return;
+      }
+      var pid = bodyOwner[next];
+      var node = bodyNode[next];
+      if (!pid || node <= 0 || inwardAt[next]) return;
+      // Only a broadside crossing can enter oriented tissue.
+      if ((bodyDir[next] & 1) === (sh.heading & 1)) return;
+      var pl = plants.get(pid);
+      if (!pl) return;
+      captureShuttle(sh, next, pl, node);
+    }
+    function chooseOutlet(pl) {
+      if (!pl.outlets.length) return -1;
+      for (var tries = 0; tries < pl.outlets.length; tries++) {
+        var node = pl.outlets[pl.outletCursor++ % pl.outlets.length];
+        if (node > 0 && node < pl.built && pl.cells[node] >= 0) return node;
+      }
+      return -1;
+    }
+    function externalize(sh, pl, node) {
+      var cell = sh.pos;
+      if (inwardAt[cell] === sh.id + 1) inwardAt[cell] = 0;
+      if (outwardAt[cell] === sh.id + 1) outwardAt[cell] = 0;
+      var heading = P.ROUTING ? pl.genome.heads[node] : sh.entryHeading;
+      var x = xof(cell), y = yof(cell);
+      sh.mode = 0;
+      sh.pos = at(x + DX4[heading], y + DY4[heading]);
+      sh.heading = heading;
+      sh.cool = P.RECHARGE;
+      sh.lastPid = pl.pid;
+      sh.sinceExit = 0;
+      sh.pid = 0;
+      sh.node = -1;
+      sh.target = -1;
+      sh.routeIndex = 0;
+      pl.tipUse[node]++;
+      pl.emitted[heading]++;
+      stats.emitted++;
+      stats.emittedDir[heading]++;
+    }
+    function internalShuttleEvent(sh) {
+      var pl = plants.get(sh.pid);
+      if (!pl || sh.node < 0 || pl.cells[sh.node] !== sh.pos ||
+          bodyOwner[sh.pos] !== sh.pid ||
+          (sh.mode === 1 ? inwardAt[sh.pos] : outwardAt[sh.pos]) !== sh.id + 1) {
+        releaseFromDead(sh, sh.pos);
+        return;
+      }
+      if (sh.mode === 1) {
+        if (sh.node === 0) {
+          pl.bank++;
+          pl.delivered[sh.entryHeading]++;
+          stats.delivered++;
+          stats.deliveredDir[sh.entryHeading]++;
+          var target = chooseOutlet(pl);
+          if (target < 0) {
+            sh.target = 0;
+            externalize(sh, pl, 0);
+            return;
+          }
+          if (outwardAt[sh.pos]) return;
+          inwardAt[sh.pos] = 0;
+          outwardAt[sh.pos] = sh.id + 1;
+          sh.mode = 2;
+          sh.target = target;
+          sh.routeIndex = 1;
+          return;
+        }
+        var parent = pl.genome.parents[sh.node];
+        var parentCell = pl.cells[parent];
+        if (parentCell < 0 || inwardAt[parentCell]) return;
+        inwardAt[sh.pos] = 0;
+        sh.pos = parentCell;
+        sh.node = parent;
+        inwardAt[parentCell] = sh.id + 1;
+        return;
+      }
+
+      var path = pl.genome.paths[sh.target];
+      if (sh.routeIndex < path.length) {
+        var nextNode = path[sh.routeIndex];
+        var nextCell = pl.cells[nextNode];
+        if (nextCell < 0 || outwardAt[nextCell]) return;
+        outwardAt[sh.pos] = 0;
+        sh.pos = nextCell;
+        sh.node = nextNode;
+        sh.routeIndex++;
+        outwardAt[nextCell] = sh.id + 1;
+      } else {
+        externalize(sh, pl, sh.target);
+      }
+    }
+    function shuttleEvents() {
+      var count = Math.min(P.SHUTTLE_EVENTS, shuttles.length);
+      for (var k = 0; k < count; k++) {
+        if (shuttleCursor >= shuttles.length) shuttleCursor = 0;
+        var sh = shuttles[shuttleCursor++];
+        if (sh.mode === 0) externalShuttleEvent(sh);
+        else internalShuttleEvent(sh);
+      }
+    }
+
+    function matureFlower(pl) {
+      var best = -1, bestUse = P.FLOWER_THRESHOLD - 1;
+      for (var i = 0; i < pl.outlets.length; i++) {
+        var node = pl.outlets[i];
+        if (node > 0 && node < pl.built && pl.tipUse[node] > bestUse) {
+          best = node;
+          bestUse = pl.tipUse[node];
+        }
+      }
+      return best;
+    }
+    function makePropagule(pl) {
+      if (propagules.length >= P.MAX_PROPAGULES) {
+        stats.seedCapBlocks++;
+        return false;
+      }
+      var flower = matureFlower(pl);
+      if (flower < 0) return false;
+      var mu = mutateGenome(pl.genome);
+      var cost = P.SEED_BASE + P.CHILD_CELL_COST * mu.g.size + P.SEED_BANK;
+      if (pl.bank < cost + P.REPRO_RESERVE) return false;
+      var heading = pl.genome.heads[flower];
+      var cell = pl.cells[flower];
+      var x = wrapX(xof(cell) + DX4[heading]);
+      var y = wrapY(yof(cell) + DY4[heading]);
+      var hue = pl.hue;
+      var muts = pl.muts;
+      if (mu.changed) {
+        hue = (hue + (rand() * 2 - 1) * P.HUE_DRIFT + 360) % 360;
+        muts++;
+      }
+      propagules.push({
+        x: x, y: y, g: mu.g, gen: pl.gen + 1,
+        hue: hue, muts: muts, parentPid: pl.pid, parentHash: pl.hash,
+        note: mu.note, born: tick, walk: P.PROP_WALK,
+        bank: P.SEED_BANK, heading: heading, dead: false
+      });
+      if (mu.changed) {
+        stats.mutations++;
+        if (mu.note === "changed one bud") stats.changed++;
+        else if (mu.note === "inserted one bud") stats.inserted++;
+        else if (mu.note === "deleted one bud") stats.deleted++;
+        else stats.duplicated++;
+      }
+      pl.bank -= cost;
+      pl.seedsMade++;
+      stats.seedsMade++;
+      return true;
+    }
+    function plantEvents() {
+      var doomed = [];
+      plants.forEach(function(pl) {
+        if (pl.built < pl.genome.size && tick >= pl.nextGrow) {
+          if (buildNext(pl)) pl.nextGrow = tick + P.GROW_INTERVAL;
+          else doomed.push(pl);
+        }
+        pl.maint += P.MAINT_BASE + P.MAINT_CELL * pl.built;
+        while (pl.maint >= 1) {
+          pl.bank--;
+          pl.maint--;
+        }
+        if (pl.bank <= 0) {
+          doomed.push(pl);
+          return;
+        }
+        if (pl.built === pl.genome.size && tick >= pl.nextRepro) {
+          if (makePropagule(pl)) pl.nextRepro = tick + P.REPRO_COOLDOWN;
+          else pl.nextRepro = tick + 16;
+        }
+      });
+      var seen = {};
+      for (var i = 0; i < doomed.length; i++) {
+        if (!seen[doomed[i].pid] && plants.has(doomed[i].pid)) {
+          seen[doomed[i].pid] = 1;
+          removePlant(doomed[i]);
+        }
+      }
+    }
+    function propaguleEvent(seed) {
+      if (seed.dead) return;
+      if (tick - seed.born > P.PROP_LIFE) {
+        seed.dead = true;
+        stats.propagulesExpired++;
+        return;
+      }
+      var roll = rand();
+      var heading;
+      if (seed.walk > P.PROP_WALK * 0.55 && roll < 0.30) heading = seed.heading;
+      else if (roll < 0.64) heading = 2;
+      else if (roll < 0.80) heading = 1;
+      else if (roll < 0.96) heading = 3;
+      else heading = 0;
+      seed.x = wrapX(seed.x + DX4[heading]);
+      seed.y = wrapY(seed.y + DY4[heading]);
+      if (seed.walk > 0) {
+        seed.walk--;
+        return;
+      }
+      if (rand() >= P.PROP_SETTLE_RATE || !insideGarden(seed.x, seed.y) ||
+          !territoryClear(seed.x, seed.y, 0) || !bodyClear(seed.g, seed.x, seed.y)) return;
+      var child = newPlant(
+        seed.g, seed.gen, seed.hue, seed.muts, seed.x, seed.y,
+        seed.parentHash, seed.note, seed.bank, false
+      );
+      if (child) {
+        var parent = plants.get(seed.parentPid);
+        if (parent) parent.children++;
+        seed.dead = true;
+        stats.germinated++;
+      } else {
+        stats.blockedBirths++;
+      }
+    }
+    function propaguleEvents() {
+      if (!propagules.length) return;
+      var count = Math.min(P.PROP_EVENTS, propagules.length);
+      for (var i = 0; i < count; i++) {
+        if (propCursor >= propagules.length) propCursor = 0;
+        propaguleEvent(propagules[propCursor++]);
+      }
+      if ((tick & 127) === 0) {
+        var live = [];
+        for (var k = 0; k < propagules.length; k++) if (!propagules[k].dead) live.push(propagules[k]);
+        propagules = live;
+        if (propCursor >= propagules.length) propCursor = 0;
+      }
+    }
+
+    function placeFounders() {
+      var g = defaultGenome();
+      var r = P.BODY_RADIUS;
+      var made = 0;
+      var attempts = P.START_PLANTS * 500;
+      while (made < P.START_PLANTS && attempts-- > 0) {
+        var x = r + ri(Math.max(1, COLS - 2 * r));
+        var y = 2 * r + ri(Math.max(1, ROWS - 2 * r));
+        var pl = newPlant(g, 0, 330, 0, x, y, 0, "common ancestor", P.FOUNDER_BANK, false);
+        if (pl) {
+          pl.nextGrow += ri(P.GROW_INTERVAL + 1);
+          made++;
+        }
+      }
+    }
+    function reset() {
+      bodyOwner.fill(0);
+      bodyNode.fill(-1);
+      bodyDir.fill(-1);
+      tipCell.fill(0);
+      inwardAt.fill(0);
+      outwardAt.fill(0);
+      plants.clear();
+      propagules = [];
+      shuttles = [];
+      tick = 0;
+      nextPid = 1;
+      maxGen = 0;
+      shuttleCursor = 0;
+      propCursor = 0;
+      rngState = (cfg.seed == null ? 731927 : cfg.seed) >>> 0;
+      for (var key in stats) {
+        if (Array.isArray(stats[key])) stats[key] = [0, 0, 0, 0];
+        else stats[key] = 0;
+      }
+      placeFounders();
+      spawnShuttles();
+    }
+    function step() {
+      tick++;
+      shuttleEvents();
+      plantEvents();
+      propaguleEvents();
+    }
+
+    function verify() {
+      var cells = 0, expected = 0, badOwners = 0, badInternal = 0;
+      var arr = Array.from(plants.values());
+      for (var i = 0; i < N; i++) {
+        if (bodyOwner[i]) {
+          cells++;
+          if (!plants.has(bodyOwner[i])) badOwners++;
+        }
+        if (inwardAt[i]) {
+          var inId = inwardAt[i] - 1;
+          var inSh = shuttles[inId];
+          if (!inSh || inSh.mode !== 1 || inSh.pos !== i || bodyOwner[i] !== inSh.pid) badInternal++;
+        }
+        if (outwardAt[i]) {
+          var outId = outwardAt[i] - 1;
+          var outSh = shuttles[outId];
+          if (!outSh || outSh.mode !== 2 || outSh.pos !== i || bodyOwner[i] !== outSh.pid) badInternal++;
+        }
+      }
+      var minDistance = 1e9;
+      for (var a = 0; a < arr.length; a++) {
+        expected += arr[a].built;
+        for (var b = a + 1; b < arr.length; b++) {
+          var d = Math.max(Math.abs(arr[a].x - arr[b].x), Math.abs(arr[a].y - arr[b].y));
+          if (d < minDistance) minDistance = d;
+        }
+      }
+      var internal = 0, badShuttles = 0;
+      for (var q = 0; q < shuttles.length; q++) {
+        var s = shuttles[q];
+        if (s.mode !== 0) {
+          internal++;
+          var lane = s.mode === 1 ? inwardAt : outwardAt;
+          if (lane[s.pos] !== s.id + 1 || bodyOwner[s.pos] !== s.pid) badShuttles++;
+        }
+      }
+      return {
+        bodyCells: cells, expectedCells: expected, overlaps: cells - expected,
+        badOwners: badOwners, badInternalCells: badInternal, badShuttles: badShuttles,
+        shuttleCount: shuttles.length, shuttleConserved: shuttles.length === P.SHUTTLE_COUNT,
+        internal: internal,
+        minSeedDistance: minDistance === 1e9 ? null : minDistance,
+        territoryValid: minDistance === 1e9 || minDistance >= P.MIN_SEED_DISTANCE
+      };
+    }
+    function snapshot() {
+      var forms = new Map();
+      var count = plants.size;
+      var nodes = 0, built = 0, leaves = 0, forks = 0, depth = 0;
+      var spanX = 0, spanY = 0, bank = 0, generations = 0;
+      var bias = 0, branching = 0, complete = 0, muts = 0, flowers = 0;
+      var ancestor = defaultGenome().hash;
+      plants.forEach(function(pl) {
+        var g = pl.genome;
+        nodes += g.size;
+        built += pl.built;
+        leaves += g.leaves;
+        forks += g.forks;
+        depth += g.depth;
+        spanX += g.spanX;
+        spanY += g.spanY;
+        bank += pl.bank;
+        generations += pl.gen;
+        bias += g.axisBias;
+        muts += pl.muts;
+        if (g.forks) branching++;
+        if (pl.built === g.size) complete++;
+        for (var n = 0; n < pl.outlets.length; n++) {
+          if (pl.tipUse[pl.outlets[n]] >= P.FLOWER_THRESHOLD) flowers++;
+        }
+        var f = forms.get(g.hash);
+        if (!f) {
+          f = {
+            hash: g.hash, hue: pl.hue, label: genomeLabel(g), word: copyWord(g.word),
+            plants: 0, gen: 0, nodes: g.size, leaves: g.leaves, forks: g.forks,
+            spanX: g.spanX, spanY: g.spanY, axisBias: g.axisBias,
+            captured: [0, 0, 0, 0], emitted: [0, 0, 0, 0]
+          };
+          forms.set(g.hash, f);
+        }
+        f.plants++;
+        for (var d = 0; d < 4; d++) {
+          f.captured[d] += pl.caught[d];
+          f.emitted[d] += pl.emitted[d];
+        }
+        if (pl.gen > f.gen) f.gen = pl.gen;
+      });
+      var winds = [0, 0, 0, 0], internal = 0, inward = 0, outward = 0, charged = 0;
+      for (var t = 0; t < shuttles.length; t++) {
+        if (shuttles[t].mode === 0) {
+          winds[shuttles[t].heading]++;
+          if (!shuttles[t].cool) charged++;
+        } else {
+          internal++;
+          if (shuttles[t].mode === 1) inward++;
+          else outward++;
+        }
+      }
+      var ancestral = 0;
+      var af = forms.get(ancestor);
+      if (af) ancestral = af.plants;
+      var lineages = Array.from(forms.values()).sort(function(a, b) {
+        return b.plants - a.plants || b.gen - a.gen || b.nodes - a.nodes;
+      }).slice(0, 8);
+      var v = verify();
+      return {
+        tick: tick, plants: count, forms: forms.size, gen: maxGen,
+        meanGen: count ? generations / count : 0,
+        meanNodes: count ? nodes / count : 0,
+        meanBuilt: count ? built / count : 0,
+        meanLeaves: count ? leaves / count : 0,
+        meanForks: count ? forks / count : 0,
+        meanDepth: count ? depth / count : 0,
+        meanSpanX: count ? spanX / count : 0,
+        meanSpanY: count ? spanY / count : 0,
+        meanBank: count ? bank / count : 0,
+        meanMuts: count ? muts / count : 0,
+        meanAxisBias: count ? bias / count : 0,
+        branching: count ? branching / count : 0,
+        completeness: count ? complete / count : 0,
+        ancestralFraction: count ? ancestral / count : 0,
+        flowers: flowers,
+        shuttles: shuttles.length, winds: winds, internal: internal,
+        inward: inward, outward: outward, charged: charged,
+        propagules: propagules.length,
+        captures: stats.captures, captureDir: stats.captureDir.slice(),
+        delivered: stats.delivered, deliveredDir: stats.deliveredDir.slice(),
+        emitted: stats.emitted, emittedDir: stats.emittedDir.slice(),
+        handoffs: stats.handoffs,
+        edgeMixes: stats.edgeMixes,
+        born: stats.born, died: stats.died,
+        seedsMade: stats.seedsMade, germinated: stats.germinated,
+        mutations: stats.mutations,
+        mutationTypes: {
+          changed: stats.changed, inserted: stats.inserted,
+          deleted: stats.deleted, duplicated: stats.duplicated
+        },
+        seedCapBlocks: stats.seedCapBlocks,
+        lineages: lineages, verification: v
+      };
+    }
+    function inspect(x, y) {
+      var cell = idx(clamp(x | 0, 0, COLS - 1), clamp(y | 0, 0, ROWS - 1));
+      var pid = bodyOwner[cell];
+      if (!pid) return null;
+      var pl = plants.get(pid);
+      if (!pl) return null;
+      var activeFlowers = 0;
+      for (var i = 0; i < pl.outlets.length; i++) {
+        if (pl.tipUse[pl.outlets[i]] >= P.FLOWER_THRESHOLD) activeFlowers++;
+      }
+      return {
+        pid: pl.pid, gen: pl.gen, label: genomeLabel(pl.genome),
+        word: pl.genome.text, bank: pl.bank, built: pl.built, muts: pl.muts,
+        vertical: pl.genome.vertical, horizontal: pl.genome.horizontal,
+        caught: Array.prototype.slice.call(pl.caught),
+        delivered: Array.prototype.slice.call(pl.delivered),
+        emitted: Array.prototype.slice.call(pl.emitted),
+        flowers: activeFlowers, seedsMade: pl.seedsMade,
+        children: pl.children, note: pl.note
+      };
+    }
+    function injectPlant(raw, x, y, hue, bank) {
+      var g = compileGenome(raw && raw.word ? raw : { word: raw });
+      if (!g) return null;
+      return newPlant(g, 0, hue == null ? 330 : hue, 0, x, y, 0,
+        "injected", bank == null ? P.FOUNDER_BANK : bank, true);
+    }
+
+    reset();
+    return {
+      COLS: COLS, ROWS: ROWS, N: N, P: P,
+      bodyOwner: bodyOwner, bodyNode: bodyNode, bodyDir: bodyDir,
+      tipCell: tipCell, inwardAt: inwardAt, outwardAt: outwardAt, plants: plants,
+      get shuttles() { return shuttles; },
+      get propagules() { return propagules; },
+      get tick() { return tick; },
+      step: step, reset: reset, snapshot: snapshot, verify: verify,
+      inspect: inspect, defaultGenome: defaultGenome, compileGenome: compileGenome,
+      rawGenome: rawGenome, mutateGenome: mutateGenome,
+      genomeLabel: genomeLabel, injectPlant: injectPlant
+    };
+  }
+
+  if (typeof window !== "undefined") window.createWindroseSim = createWindroseSim;
+
+  /* ==== RENDERER ==== */
+  (function() {
+    if (typeof document === "undefined") return;
+    var canvas = document.getElementById("world");
+    var ctx = canvas.getContext("2d", { alpha: false });
+    var hud = document.getElementById("hud");
+    var detail = document.getElementById("detail");
+    var runButton = document.getElementById("run");
+    var routingButton = document.getElementById("routing");
+    var seedInput = document.getElementById("seed");
+    var worldSeed = 731927;
+    try {
+      var querySeed = Number(new URLSearchParams(location.search).get("seed"));
+      if (querySeed) worldSeed = querySeed >>> 0;
+    } catch (e) {}
+    seedInput.value = String(worldSeed);
+
+    var sim = createWindroseSim({ cols: canvas.width, rows: canvas.height, seed: worldSeed });
+    window.__windrose = sim;
+    var image = ctx.createImageData(sim.COLS, sim.ROWS);
+    var running = true;
+    var warp = 4;
+    var selectedPid = 0;
+    var lastHud = 0;
+    var DX = [0, 1, 0, -1], DY = [-1, 0, 1, 0];
+    var WIND = [[85, 201, 215], [221, 163, 59], [57, 127, 208], [146, 121, 220]];
+
+    function hsl(h, s, l) {
+      h = ((h % 360) + 360) % 360 / 360;
+      var r, g, b;
+      if (!s) r = g = b = l;
+      else {
+        var q = l < 0.5 ? l * (1 + s) : l + s - l * s;
+        var p = 2 * l - q;
+        function f(t) {
+          if (t < 0) t++;
+          if (t > 1) t--;
+          return t < 1 / 6 ? p + (q - p) * 6 * t :
+            t < 0.5 ? q : t < 2 / 3 ? p + (q - p) * (2 / 3 - t) * 6 : p;
+        }
+        r = f(h + 1 / 3); g = f(h); b = f(h - 1 / 3);
+      }
+      return [r * 255, g * 255, b * 255];
+    }
+    function put(data, i, color) {
+      var o = i * 4;
+      data[o] = color[0] | 0;
+      data[o + 1] = color[1] | 0;
+      data[o + 2] = color[2] | 0;
+      data[o + 3] = 255;
+    }
+    function blend(data, i, color, alpha) {
+      var o = i * 4;
+      data[o] = (data[o] * (1 - alpha) + color[0] * alpha) | 0;
+      data[o + 1] = (data[o + 1] * (1 - alpha) + color[1] * alpha) | 0;
+      data[o + 2] = (data[o + 2] * (1 - alpha) + color[2] * alpha) | 0;
+    }
+    function cellAt(x, y) {
+      if (x < 0) x += sim.COLS;
+      else if (x >= sim.COLS) x -= sim.COLS;
+      if (y < 0) y += sim.ROWS;
+      else if (y >= sim.ROWS) y -= sim.ROWS;
+      return y * sim.COLS + x;
+    }
+    function draw() {
+      var data = image.data;
+      for (var i = 0; i < sim.N; i++) put(data, i, [5, 9, 14]);
+
+      for (var s = 0; s < sim.shuttles.length; s++) {
+        var sh = sim.shuttles[s];
+        if (sh.mode !== 0 || sh.id % 3) continue;
+        var x = sh.pos % sim.COLS, y = (sh.pos / sim.COLS) | 0;
+        var tail = cellAt(x - DX[sh.heading], y - DY[sh.heading]);
+        blend(data, tail, WIND[sh.heading], sh.cool ? 0.16 : 0.28);
+        blend(data, sh.pos, WIND[sh.heading], sh.cool ? 0.46 : 0.92);
+      }
+
+      for (var c = 0; c < sim.N; c++) {
+        var pid = sim.bodyOwner[c];
+        if (!pid) continue;
+        var pl = sim.plants.get(pid);
+        var node = sim.bodyNode[c];
+        if (node === 0) {
+          put(data, c, [242, 202, 108]);
+          continue;
+        }
+        var horizontal = sim.bodyDir[c] & 1;
+        var color = horizontal ? [104, 194, 123] : [67, 142, 86];
+        if (sim.tipCell[c] && pl && pl.tipUse[node] >= sim.P.FLOWER_THRESHOLD) {
+          color = hsl(pl.hue, 0.72, 0.68);
+        } else if (sim.tipCell[c]) {
+          color = [132, 211, 143];
+        }
+        put(data, c, color);
+      }
+
+      for (var p = 0; p < sim.shuttles.length; p++) {
+        var pulse = sim.shuttles[p];
+        if (pulse.mode === 0) continue;
+        var color = WIND[pulse.entryHeading];
+        blend(data, pulse.pos, pulse.mode === 1 ?
+          [Math.min(255, color[0] + 45), Math.min(255, color[1] + 45), Math.min(255, color[2] + 45)] :
+          [238, 225, 174], 0.68);
+      }
+      for (var q = 0; q < sim.propagules.length; q++) {
+        var seed = sim.propagules[q];
+        if (!seed.dead && !(q % 3)) put(data, seed.y * sim.COLS + seed.x, [215, 92, 160]);
+      }
+      ctx.putImageData(image, 0, 0);
+    }
+    function updateHud(now) {
+      if (now - lastHud < 180) return;
+      lastHud = now;
+      var s = sim.snapshot();
+      hud.innerHTML =
+        "tick <b>" + s.tick.toLocaleString() + "</b> · g<b>" + s.gen +
+        "</b> · <b>" + s.plants + "</b> plants · <b>" + s.forms +
+        "</b> words · plan <b>" + s.meanNodes.toFixed(1) +
+        "</b> · forks <b>" + s.meanForks.toFixed(1) +
+        "</b> · flowers <b>" + s.flowers +
+        "</b><br>↑<b>" + s.winds[0] + "</b> →<b>" + s.winds[1] +
+        "</b> ↓<b>" + s.winds[2] + "</b> ←<b>" + s.winds[3] +
+        "</b> · under/over <b>" + s.inward + "/" + s.outward +
+        "</b> · handoffs <b>" + s.handoffs.toLocaleString() +
+        "</b> · routing <b>" + (sim.P.ROUTING ? "on" : "off") + "</b>";
+      if (selectedPid) {
+        var selected = sim.plants.get(selectedPid);
+        if (!selected) {
+          selectedPid = 0;
+          detail.textContent = "That plant is gone.";
+        } else {
+          var info = sim.inspect(selected.x, selected.y);
+          if (info) showDetail(info);
+        }
+      }
+    }
+    function showDetail(q) {
+      detail.textContent =
+        "plant " + q.pid + " · generation " + q.gen + " · word " + q.word +
+        " · " + q.built + " cells · " + q.vertical + " vertical / " +
+        q.horizontal + " horizontal · " + q.flowers + " flowers · bank " +
+        q.bank.toFixed(1) + " · caught ↑" + q.caught[0] + " →" + q.caught[1] +
+        " ↓" + q.caught[2] + " ←" + q.caught[3] + " · " + q.muts +
+        " inherited mutations · " + q.note;
+    }
+    function frame(now) {
+      if (running) for (var i = 0; i < warp; i++) sim.step();
+      draw();
+      updateHud(now);
+      requestAnimationFrame(frame);
+    }
+    function setWarp(n) {
+      warp = n;
+      var buttons = document.querySelectorAll("[data-warp]");
+      for (var i = 0; i < buttons.length; i++) {
+        buttons[i].classList.toggle("on", Number(buttons[i].getAttribute("data-warp")) === n);
+      }
+    }
+    var warpButtons = document.querySelectorAll("[data-warp]");
+    for (var b = 0; b < warpButtons.length; b++) {
+      warpButtons[b].addEventListener("click", function() {
+        setWarp(Number(this.getAttribute("data-warp")));
+      });
+    }
+    runButton.addEventListener("click", function() {
+      running = !running;
+      runButton.textContent = running ? "pause" : "play";
+      runButton.classList.toggle("on", !running);
+    });
+    routingButton.addEventListener("click", function() {
+      sim.P.ROUTING = sim.P.ROUTING ? 0 : 1;
+      routingButton.textContent = sim.P.ROUTING ? "shape routing on" : "shape routing off";
+      routingButton.classList.toggle("on", !!sim.P.ROUTING);
+    });
+    document.getElementById("new").addEventListener("click", function() {
+      var value = Number(seedInput.value);
+      worldSeed = (value || ((Math.random() * 4294967295) >>> 0)) >>> 0;
+      seedInput.value = String(worldSeed);
+      sim = createWindroseSim({ cols: canvas.width, rows: canvas.height, seed: worldSeed });
+      window.__windrose = sim;
+      selectedPid = 0;
+      detail.textContent = "Cross-grain wind dives under a plant, reaches its root, then returns over the tissue to a tip. Tap a plant for its word.";
+      routingButton.textContent = "shape routing on";
+      routingButton.classList.add("on");
+    });
+    canvas.addEventListener("pointerdown", function(event) {
+      var rect = canvas.getBoundingClientRect();
+      var x = Math.floor((event.clientX - rect.left) * sim.COLS / rect.width);
+      var y = Math.floor((event.clientY - rect.top) * sim.ROWS / rect.height);
+      var q = sim.inspect(x, y);
+      if (!q) {
+        selectedPid = 0;
+        detail.textContent = "No plant at that stitch.";
+        return;
+      }
+      selectedPid = q.pid;
+      showDetail(q);
+    });
+
+    draw();
+    updateHud(1000);
+    requestAnimationFrame(frame);
+  })();
+  </script>
+</body>
+</html>

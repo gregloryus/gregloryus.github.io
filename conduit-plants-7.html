@@ -1,0 +1,2078 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>conduit plants 7 — grass first</title>
+    <style>
+      :root {
+        --ink: #8b9a90;
+        --dim: #4a544d;
+        --hi: #cfe3d4;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        background: #06080a;
+        color: var(--ink);
+        font: 11px/1.5 ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+        letter-spacing: 0.04em;
+      }
+      body {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 8px;
+        padding: 12px;
+        overflow: hidden;
+      }
+      #stage {
+        image-rendering: pixelated;
+        display: block;
+        box-shadow: 0 0 0 1px #131a17;
+      }
+      #bar,
+      #plans {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 4px 18px;
+        justify-content: center;
+        max-width: 100%;
+      }
+      #bar b {
+        color: var(--hi);
+        font-weight: 500;
+      }
+      #keys,
+      #insp {
+        color: var(--dim);
+        text-align: center;
+        max-width: 900px;
+      }
+      #insp {
+        white-space: pre-wrap;
+        color: var(--ink);
+        font-size: 10px;
+        line-height: 1.45;
+      }
+      #ctl input {
+        font: inherit;
+        letter-spacing: inherit;
+        width: 58px;
+        color: var(--hi);
+        background: #0e1412;
+        border: 1px solid #1e2a24;
+        border-radius: 5px;
+        padding: 7px 6px;
+        text-align: right;
+      }
+      #keys kbd {
+        color: var(--ink);
+        font: inherit;
+      }
+      #ctl {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+        justify-content: center;
+      }
+      #ctl button {
+        font: inherit;
+        letter-spacing: inherit;
+        color: var(--ink);
+        background: #0e1412;
+        border: 1px solid #1e2a24;
+        border-radius: 5px;
+        padding: 7px 10px;
+        min-height: 34px;
+      }
+      #ctl button:active {
+        background: #17211c;
+        color: var(--hi);
+      }
+      .paused {
+        color: #d8a657;
+      }
+      .warp {
+        color: #7db5d8;
+      }
+    </style>
+  </head>
+  <body>
+    <canvas id="stage"></canvas>
+    <div id="ctl"></div>
+    <div id="bar"></div>
+    <div id="plans"></div>
+    <div id="insp">tap a plant to read its plan</div>
+    <div id="keys">
+      the two number boxes are water in the world and how fast buried litter
+      leaves it &mdash; water needs a reset, soil loss applies at once<br />
+      <kbd>space</kbd> pause · <kbd>.</kbd> step · <kbd>1</kbd><kbd>2</kbd
+      ><kbd>3</kbd><kbd>4</kbd> speed · <kbd>w</kbd> warp 10k · <kbd>c</kbd>
+      colour · <kbd>r</kbd> new world
+    </div>
+
+    <script>
+      /* ==== SIM CORE ==== */
+      // conduit-plants core — tip agents lay conduit through a 2D lattice.
+      // No DOM in this file. Renderer lives in the HTML wrapper.
+      //
+      // v6 changes the two things that were stopping evolution from being
+      // legible: the genome is now a growable list of modules mutated field by
+      // field rather than a fixed bit-packed block flipped bit by bit, and the
+      // world has immovable relief, so a hollow and a ridge are different places
+      // to live.
+
+      function createSim(cfg) {
+        cfg = cfg || {};
+        const COLS = cfg.cols || 200;
+        const ROWS = cfg.rows || 140;
+        const N = COLS * ROWS;
+
+        const P = Object.assign(
+          {
+            LIGHT_MAX: 12,
+            LIGHT_ABSORB: 4,
+            WATER_ABSORB: 6,
+            LIT_MIN: 4,
+            LIGHT_TILT: 0, // 0 = straight down
+            ABSORB_RATE: 0.4,
+            SPARE_WATER: 1, // a leaf will not spend the plant's last drop
+            PACKET_STEPS: 2,
+            ENERGY_DECAY: 0.004,
+            VIGOR_START: 10,
+            VIGOR_MAX: 12,
+            SENESCE: 0, // age ceiling. 0 = tissue has no lifespan of its own
+            LITTER: 1,
+            VIGOR_BUMP: 6,
+            VIGOR_HUNGRY: 4,
+            DECAY_PERIOD: 24,
+            SOIL_FLOW: 0.05,
+            FIELD_CAP: 3,
+            CAPILLARY: 0.25,
+            WICK_UP: 0.6,
+            UPTAKE: 0.7,
+            VAPOR_UP: 0.55,
+            EVAPORATE: 0.004,
+            CONDENSE: 0.04,
+            SOIL_PUSH: 0.4,
+            CREEP: 0.06, // soil walks downhill, so ridges stay thin
+            MINERALISE: 0, // buried litter leaving the world. 0 = it all stays
+            FLOOR_ROCK: 3, // rows of bedrock. Flat. Every other solid is litter
+            SEED_COST: 6,
+            MAX_SEEDS: 8000,
+            SEED_RESERVE: 14,
+            SEED_LIFE: 4000,
+            SEED_ROLL: 0.5,
+            SEED_DRIFT: 0.3,
+            MUT_RATE: 0.5, // chance a seed edits a field at all
+            MUT_TOPOLOGY: 0.08, // of those edits, how many rewire the grammar
+            MUT_DUP: 0.05, // duplicate a module: the plan gains a part
+            MUT_DEL: 0.025,
+            MAX_MODULES: 16,
+            MIN_MODULES: 2,
+            HUE_DRIFT: 10, // degrees of colour per mutation, so clades separate
+            FUEL_GAIN: 3,
+            FUEL_MAX: 9,
+            STEP_COST: 2,
+            STUCK_MAX: 14,
+            MAX_TIPS_PLANT: 160,
+            MAX_TIPS: 20000,
+            WATER_TOTAL: 800,
+            START_SEEDS: 24,
+          },
+          cfg.params || {}
+        );
+
+        // --- cell types. ROCK sits below CONDUIT so the "is this tissue" tests
+        // stay as cheap comparisons, and above SOIL so it is obviously mineral.
+        const AIR = 0,
+          SOIL = 1,
+          ROCK = 2,
+          CONDUIT = 3,
+          SEEDSITE = 4;
+
+        // --- how a module finishes
+        const END_NEXT = 0, // hand the tip to another module
+          END_SEED = 1, // set a seed site and stop
+          END_FORK = 2, // split into two children, no parent survivor
+          END_STOP = 3;
+
+        // --- 64 headings. 0 = up, clockwise. HX/HY are fixed point, 1024 = 1 cell
+        const HDIRS = 64;
+        const HX = new Int32Array(HDIRS);
+        const HY = new Int32Array(HDIRS);
+        for (let h = 0; h < HDIRS; h++) {
+          const a = (h / HDIRS) * Math.PI * 2;
+          HX[h] = Math.round(Math.sin(a) * 1024);
+          HY[h] = Math.round(-Math.cos(a) * 1024);
+        }
+        const H_UP = 0,
+          H_DOWN = 32;
+
+        // --- 8 directions, 0 = N, clockwise
+        const DX = [0, 1, 1, 1, 0, -1, -1, -1];
+        const DY = [-1, -1, 0, 1, 1, 1, 0, -1];
+
+        // --- rng
+        let rngState = (cfg.seed || 1337) >>> 0;
+        function rand() {
+          rngState ^= rngState << 13;
+          rngState >>>= 0;
+          rngState ^= rngState >>> 17;
+          rngState ^= rngState << 5;
+          rngState >>>= 0;
+          return rngState / 4294967296;
+        }
+        const ri = (n) => (rand() * n) | 0;
+        const clamp = (v, lo, hi) => (v < lo ? lo : v > hi ? hi : v);
+
+        // --- fields
+        const type = new Uint8Array(N);
+        const owner = new Int32Array(N);
+        const vigor = new Uint8Array(N);
+        const water = new Uint8Array(N);
+        const energy = new Uint8Array(N);
+        const vapor = new Uint8Array(N);
+        const store = new Uint8Array(N);
+        const light = new Uint8Array(N);
+        const lout = new Uint8Array(N);
+        const age = new Uint16Array(N);
+        const leaf = new Uint8Array(N);
+        const held = new Uint8Array(N);
+        const movedE = new Uint8Array(N);
+        const movedW = new Uint8Array(N);
+        const ground = new Int16Array(COLS); // rock surface, for height stats
+
+        // --- neighbour table (x wraps, y does not)
+        const nb = new Int32Array(N * 8);
+        for (let y = 0; y < ROWS; y++) {
+          for (let x = 0; x < COLS; x++) {
+            const i = y * COLS + x;
+            for (let d = 0; d < 8; d++) {
+              const ny = y + DY[d];
+              let nx = x + DX[d];
+              if (ny < 0 || ny >= ROWS) {
+                nb[i * 8 + d] = -1;
+                continue;
+              }
+              if (nx < 0) nx += COLS;
+              else if (nx >= COLS) nx -= COLS;
+              nb[i * 8 + d] = ny * COLS + nx;
+            }
+          }
+        }
+        const NB = (i, d) => nb[i * 8 + d];
+
+        // --- plants, tips, falling seeds
+        let nextPid = 1;
+        const plants = new Map();
+        let tips = [];
+        let seeds = [];
+        let tick = 0;
+        const stats = { born: 0, died: 0, seedsMade: 0, maxGen: 0, photo: 0, transpired: 0, upkeep: 0, grew: 0, fell: 0, push: 0, noE: 0, noW: 0, blocked: 0, decayed: 0, muts: 0 };
+
+        // ---------------------------------------------------------------- genome
+        // A body plan is a list of modules. A tip is always executing exactly one
+        // module and carries its own place in it, so there is still no central
+        // plant object and no parent pointers.
+        //
+        //   len       cells laid per pass
+        //   curve     heading units turned per cell (1 unit = 5.6 degrees)
+        //   reps      passes before the module ends. 0 = indefinite, which is how
+        //             a determinate plan discovers unbounded growth
+        //   brEvery   lay a branch every n cells (0 = never)
+        //   brAngle   branch angle in heading units
+        //   paired    both sides at once, or alternate
+        //   child     module the branch runs
+        //   next      module this one hands to
+        //   end       what happens when reps run out
+        //   photo     how strongly light bends the heading
+        //   grav      how strongly up (shoot) or down (root) bends it
+        //   order     branch order this module tolerates before it must seed
+        //
+        // Mutation edits one field by one step. That is the whole reason a
+        // lineage can walk somewhere legible instead of teleporting: flipping a
+        // bit in a packed field was a jump of eight, and every child was a
+        // stranger.
+        const FIELDS = [
+          { k: "len", lo: 1, hi: 14, w: 3 },
+          { k: "curve", lo: -8, hi: 8, w: 3 },
+          { k: "reps", lo: 1, hi: 8, w: 3 },
+          { k: "brEvery", lo: 0, hi: 7, w: 2 },
+          { k: "brAngle", lo: 0, hi: 15, w: 3 },
+          { k: "photo", lo: 0, hi: 7, w: 1 },
+          { k: "grav", lo: 0, hi: 7, w: 1 },
+          { k: "order", lo: 1, hi: 4, w: 1 },
+          { k: "paired", lo: 0, hi: 1, w: 1 },
+        ];
+        const FIELD_W = FIELDS.reduce((a, f) => a + f.w, 0);
+
+        function mod(o) {
+          return {
+            len: o.len,
+            curve: o.curve,
+            reps: o.reps,
+            brEvery: o.brEvery,
+            brAngle: o.brAngle,
+            paired: o.paired,
+            child: o.child,
+            next: o.next,
+            end: o.end,
+            photo: o.photo,
+            grav: o.grav,
+            order: o.order,
+          };
+        }
+
+        // The ancestor is grass, and barely that: a three-cell shoot that ends
+        // in a seed, a three-cell root, no branching at all. Two modules. Every
+        // structure you will ever see — branching, spacing, indeterminate axes,
+        // extra module types — has to be found by mutation from here, which is
+        // the only way watching it arrive means anything.
+        function defaultGenome() {
+          return {
+            shootStart: 0,
+            rootStart: 1,
+            modules: [
+              mod({ len: 3, curve: 0, reps: 1, brEvery: 0, brAngle: 0, paired: 0, child: 1, next: 1, end: END_SEED, photo: 3, grav: 4, order: 2 }),
+              mod({ len: 3, curve: 0, reps: 1, brEvery: 0, brAngle: 0, paired: 0, child: 1, next: 1, end: END_STOP, photo: 0, grav: 5, order: 2 }),
+            ],
+          };
+        }
+
+        function cloneGenome(g) {
+          return {
+            shootStart: g.shootStart,
+            rootStart: g.rootStart,
+            modules: g.modules.map(mod),
+          };
+        }
+
+        function pickField() {
+          let r = ri(FIELD_W);
+          for (const f of FIELDS) {
+            r -= f.w;
+            if (r < 0) return f;
+          }
+          return FIELDS[0];
+        }
+
+        function editField(g) {
+          const m = g.modules[ri(g.modules.length)];
+          const f = pickField();
+          const up = rand() < 0.5 ? 1 : -1;
+          if (f.k === "paired") {
+            m.paired = m.paired ? 0 : 1;
+          } else if (f.k === "reps") {
+            // reps is a ladder, and indefinite is one rung above the top of it.
+            // A lineage has to climb 1,2,3...8 before any axis of its can become
+            // unbounded, so an arching giant is the end of a visible family line
+            // rather than one lucky child of a tuft of grass.
+            if (m.reps === 0) m.reps = up < 0 ? f.hi : 0;
+            else if (m.reps >= f.hi && up > 0) m.reps = 0;
+            else m.reps = clamp(m.reps + up, f.lo, f.hi);
+          } else {
+            m[f.k] = clamp(m[f.k] + up, f.lo, f.hi);
+          }
+        }
+
+        // Rewiring steps to a neighbouring module rather than jumping to a
+        // random one, and the end operation walks an ordered dial: carry on,
+        // fork, seed, stop. Both keep a child recognisable as its parent's.
+        const END_LADDER = [END_NEXT, END_FORK, END_SEED, END_STOP];
+        function editTopology(g) {
+          const n = g.modules.length;
+          const m = g.modules[ri(n)];
+          const up = rand() < 0.5 ? 1 : -1;
+          const walk = (v) => (v + up + n) % n;
+          const r = ri(4);
+          if (r === 0) m.child = walk(m.child);
+          else if (r === 1) m.next = walk(m.next);
+          else if (r === 2) {
+            const at = END_LADDER.indexOf(m.end);
+            m.end = END_LADDER[clamp((at < 0 ? 0 : at) + up, 0, 3)];
+          } else if (rand() < 0.5) g.shootStart = walk(g.shootStart);
+          else g.rootStart = walk(g.rootStart);
+        }
+
+        function dupModule(g) {
+          const src = ri(g.modules.length);
+          g.modules.push(mod(g.modules[src]));
+          const idx = g.modules.length - 1;
+          const caller = g.modules[ri(g.modules.length)];
+          if (rand() < 0.7) caller.child = idx;
+          else caller.next = idx;
+        }
+
+        function delModule(g) {
+          const gone = ri(g.modules.length);
+          g.modules.splice(gone, 1);
+          const remap = (v) => (v === gone ? Math.min(gone, g.modules.length - 1) : v > gone ? v - 1 : v);
+          g.shootStart = remap(g.shootStart);
+          g.rootStart = remap(g.rootStart);
+          for (const m of g.modules) {
+            m.child = remap(m.child);
+            m.next = remap(m.next);
+          }
+        }
+
+        function mutate(g) {
+          const out = cloneGenome(g);
+          let changed = false;
+          if (rand() < P.MUT_RATE) {
+            let n = 1 + (rand() < 0.25 ? 1 : 0);
+            while (n-- > 0) {
+              if (rand() < P.MUT_TOPOLOGY) editTopology(out);
+              else editField(out);
+              changed = true;
+            }
+          }
+          if (rand() < P.MUT_DUP && out.modules.length < P.MAX_MODULES) {
+            dupModule(out);
+            changed = true;
+          }
+          if (rand() < P.MUT_DEL && out.modules.length > P.MIN_MODULES) {
+            delModule(out);
+            changed = true;
+          }
+          if (changed) stats.muts++;
+          return { g: out, changed };
+        }
+
+        function genomeHash(g) {
+          let h = 2166136261;
+          const push = (v) => {
+            h ^= v | 0;
+            h = Math.imul(h, 16777619);
+          };
+          push(g.shootStart);
+          push(g.rootStart);
+          push(g.modules.length);
+          for (const m of g.modules) {
+            push(m.len); push(m.curve + 8); push(m.reps); push(m.brEvery);
+            push(m.brAngle); push(m.paired); push(m.child); push(m.next);
+            push(m.end); push(m.photo); push(m.grav); push(m.order);
+          }
+          return h >>> 0;
+        }
+
+        // Field by field, for when you want to know exactly what a plant is.
+        function genomeDetail(g) {
+          return g.modules
+            .map(
+              (m, i) =>
+                i + ": len " + m.len + " x" + (m.reps === 0 ? "\u221e" : m.reps) +
+                "  curve " + m.curve +
+                (m.brEvery ? "  branch " + (m.paired ? "paired/" : "alt/") + m.brEvery + " at " + m.brAngle : "  no branch") +
+                "  child " + m.child + "  next " + m.next +
+                "  end " + ["next", "seed", "fork", "stop"][m.end] +
+                "  photo " + m.photo + "  grav " + m.grav + "  order " + m.order
+            )
+            .join("\n");
+        }
+
+        // A compact readout of the plan, for the inspector line.
+        function genomeLabel(g) {
+          return (
+            g.modules.length +
+            " mod S" + g.shootStart + "/R" + g.rootStart + "  " +
+            g.modules
+              .map((m, i) => i + ":" + m.len + "x" + (m.reps === 0 ? "\u221e" : m.reps) + (m.brEvery ? (m.paired ? "\u00b1" : "/") + m.brEvery : ""))
+              .join(" ")
+          );
+        }
+
+        // ---------------------------------------------------------------- world
+        function buildFloor() {
+          // A flat bedrock floor and nothing else. Bedrock is the one thing
+          // plants cannot make, move or eat; every other solid in a run is
+          // something that died, so all relief is of the plants' own making.
+          const top = ROWS - P.FLOOR_ROCK;
+          for (let x = 0; x < COLS; x++) {
+            ground[x] = top;
+            for (let y = top; y < ROWS; y++) type[y * COLS + x] = ROCK;
+          }
+        }
+
+        function reset() {
+          type.fill(AIR);
+          owner.fill(0);
+          vigor.fill(0);
+          water.fill(0);
+          energy.fill(0);
+          vapor.fill(0);
+          store.fill(0);
+          age.fill(0);
+          plants.clear();
+          tips = [];
+          seeds = [];
+          tick = 0;
+          nextPid = 1;
+          for (const k in stats) stats[k] = 0;
+
+          buildFloor();
+
+          // No soil, no pool. All the water in the world starts as vapour in the
+          // air, so it has to condense and rain down before anything can drink.
+          // Every grain of soil in a run is dead plant tissue.
+          let placed = 0;
+          let guard = P.WATER_TOTAL * 40;
+          while (placed < P.WATER_TOTAL && guard-- > 0) {
+            const i = ri(N);
+            if (type[i] === AIR && !vapor[i] && !water[i]) {
+              vapor[i] = 1;
+              placed++;
+            }
+          }
+
+          // Every founder carries the same ancestral plan and the same colour.
+          // Colour then drifts with mutation, so the palette you see later is a
+          // map of how far each lineage has walked from that common ancestor.
+          for (let k = 0; k < P.START_SEEDS; k++) {
+            const x = ri(COLS);
+            seeds.push({
+              x,
+              y: clamp(ground[x] - 1, 0, ROWS - 1),
+              g: defaultGenome(),
+              hue: 96,
+              muts: 0,
+              age: 0,
+              gen: 0,
+            });
+          }
+        }
+
+        function newPlant(genome, gen, hue, muts) {
+          const pid = nextPid++;
+          const h = genomeHash(genome);
+          plants.set(pid, {
+            pid,
+            genome,
+            hash: h,
+            hue,
+            muts,
+            cells: 0,
+            tipCount: 0,
+            reserve: P.SEED_RESERVE,
+            origin: -1,
+            gen,
+            born: tick,
+          });
+          stats.born++;
+          if (gen > stats.maxGen) stats.maxGen = gen;
+          return pid;
+        }
+
+        // ---------------------------------------------------------------- light
+        // Tilting the sample weights tilts the whole light field, so one face of
+        // a ridge is reliably brighter than the other. Aspect becomes a place.
+        function lightPass() {
+          const tilt = P.LIGHT_TILT | 0;
+          const wl = tilt > 0 ? 2 : 1,
+            wc = tilt !== 0 ? 1 : 2,
+            wr = tilt < 0 ? 2 : 1;
+          for (let x = 0; x < COLS; x++) {
+            const i = x;
+            light[i] = P.LIGHT_MAX;
+            lout[i] =
+              type[i] === SOIL || type[i] === ROCK
+                ? 0
+                : type[i] >= CONDUIT
+                ? Math.max(0, P.LIGHT_MAX - P.LIGHT_ABSORB)
+                : P.LIGHT_MAX;
+          }
+          for (let y = 1; y < ROWS; y++) {
+            const row = y * COLS;
+            const prow = row - COLS;
+            for (let x = 0; x < COLS; x++) {
+              const i = row + x;
+              const xl = x === 0 ? COLS - 1 : x - 1;
+              const xr = x === COLS - 1 ? 0 : x + 1;
+              const inc = (lout[prow + xl] * wl + lout[prow + x] * wc + lout[prow + xr] * wr) >> 2;
+              light[i] = inc;
+              const t = type[i];
+              const drag =
+                t === SOIL || t === ROCK
+                  ? P.LIGHT_MAX
+                  : (t >= CONDUIT ? P.LIGHT_ABSORB : 0) +
+                    // only water with water directly above it counts: a droplet in
+                    // the air is transparent, a body of water is dark
+                    (water[i] && water[prow + x] ? P.WATER_ABSORB : 0);
+              lout[i] = drag >= inc ? 0 : inc - drag;
+            }
+          }
+        }
+
+        function leafPass() {
+          leaf.fill(0);
+          for (let i = 0; i < N; i++) {
+            if (type[i] < CONDUIT) continue;
+            if (light[i] < P.LIT_MIN) continue;
+            if (openAir(i) === 0) continue;
+            leaf[i] = 1;
+          }
+        }
+
+        // Open air means dry air. A cell whose only neighbours are flooded is
+        // submerged: it cannot breathe out, so it cannot photosynthesise, so
+        // nothing can live down there off its own carbon.
+        function openAir(i) {
+          let n = 0;
+          for (let d = 0; d < 8; d += 2) {
+            const j = NB(i, d);
+            if (j >= 0 && type[j] === AIR && !water[j]) n++;
+          }
+          return n;
+        }
+
+        // Buried: hemmed in by mineral, litter or standing water rather than open
+        // air. One percept covers a root in mud and a root against bedrock.
+        function buriedAround(i) {
+          let n = 0;
+          for (let d = 0; d < 8; d++) {
+            const j = NB(i, d);
+            if (j < 0 || type[j] === SOIL || type[j] === ROCK || water[j]) n++;
+          }
+          return n;
+        }
+
+        // Foreign tissue touching this cell. Plants may not grow into contact.
+        function foreignTouch(i, pid) {
+          for (let d = 0; d < 8; d++) {
+            const j = NB(i, d);
+            if (j >= 0 && type[j] >= CONDUIT && owner[j] !== pid) return true;
+          }
+          return false;
+        }
+
+        // --------------------------------------------------- absorption + vapour
+        // A lit green cell with an open side trades its water packet for an energy
+        // packet and breathes the water out as vapour. Sugar costs water.
+        function absorb() {
+          for (let i = 0; i < N; i++) {
+            if (!leaf[i] || !water[i] || energy[i]) continue;
+            if (rand() > P.ABSORB_RATE * (light[i] / P.LIGHT_MAX)) continue;
+            if (P.SPARE_WATER) {
+              // Stomata, locally: a leaf trades water for sugar only if some
+              // neighbouring part of the same plant is also holding water. A
+              // plant whose supply has failed stops transpiring instead of
+              // drying itself out, and a plant with more conduit to hold water
+              // photosynthesises more — which is the first real advantage that
+              // having a body confers.
+              let spare = 0;
+              for (let d = 0; d < 8; d++) {
+                const j = NB(i, d);
+                if (j >= 0 && type[j] >= CONDUIT && owner[j] === owner[i] && water[j]) {
+                  spare = 1;
+                  break;
+                }
+              }
+              if (!spare) continue;
+            }
+            let sink = -1;
+            const d0 = ri(8);
+            for (let k = 0; k < 8; k++) {
+              const j = NB(i, (d0 + k) & 7);
+              if (j >= 0 && type[j] === AIR && !vapor[j] && !water[j]) {
+                sink = j;
+                break;
+              }
+            }
+            if (sink < 0) continue; // nowhere to breathe out, so no sugar either
+            water[i] = 0;
+            vapor[sink] = 1;
+            energy[i] = 1;
+            stats.photo++;
+            stats.transpired++;
+          }
+        }
+
+        function vaporPass() {
+          const start = ri(N);
+          for (let k = 0; k < N; k++) {
+            const i = (start + k) % N;
+            if (!vapor[i]) continue;
+            let crowd = 0;
+            for (let d = 0; d < 8; d++) {
+              const j = NB(i, d);
+              if (j >= 0 && vapor[j]) crowd++;
+            }
+            if (crowd >= 2 && rand() < P.CONDENSE && !water[i]) {
+              vapor[i] = 0;
+              water[i] = 1;
+              continue;
+            }
+            const d = rand() < P.VAPOR_UP ? [7, 0, 1][ri(3)] : ri(8);
+            const j = NB(i, d);
+            if (j < 0 || type[j] !== AIR) {
+              // hit the sky or a solid: condense where it stands
+              if (!water[i]) {
+                vapor[i] = 0;
+                water[i] = 1;
+              }
+              continue;
+            }
+            if (vapor[j] || water[j]) continue;
+            vapor[i] = 0;
+            vapor[j] = 1;
+          }
+        }
+
+        // ------------------------------------------------------------- transport
+        // A packet steps to a uniformly random adjacent conduit cell of the same
+        // plant. Reversal at a tip is automatic: the only neighbour is backwards.
+        function transport() {
+          for (let pass = 0; pass < P.PACKET_STEPS; pass++) {
+            movedE.fill(0);
+            movedW.fill(0);
+            const start = ri(N);
+            for (let k = 0; k < N; k++) {
+              const i = (start + k) % N;
+              const t = type[i];
+              if (t < CONDUIT) continue;
+              const pid = owner[i];
+
+              if (energy[i] && !movedE[i]) {
+                if (vigor[i] <= P.VIGOR_HUNGRY && t === CONDUIT) {
+                  // starving tissue eats the sugar passing through it
+                  energy[i] = 0;
+                  bump(i);
+                  stats.upkeep++;
+                } else if (rand() < P.ENERGY_DECAY) {
+                  energy[i] = 0;
+                } else {
+                  const j = pickConduit(i, pid, energy);
+                  if (j >= 0) {
+                    energy[i] = 0;
+                    energy[j] = 1;
+                    movedE[j] = 1;
+                  }
+                }
+              }
+              if (water[i] && !movedW[i] && !leaf[i]) {
+                // water held at a lit surface is what pulls the rest of it upward
+                const j = pickConduit(i, pid, water);
+                if (j >= 0) {
+                  water[i] = 0;
+                  water[j] = 1;
+                  movedW[j] = 1;
+                }
+              }
+            }
+          }
+        }
+
+        function pickConduit(i, pid, field) {
+          // lazy walk: staying put is one of the options, which is both more
+          // physical and avoids a two-cell path oscillating on a fixed parity
+          let count = 1;
+          let pick = -1;
+          for (let d = 0; d < 8; d++) {
+            const j = NB(i, d);
+            if (j < 0) continue;
+            if (type[j] < CONDUIT || owner[j] !== pid) continue;
+            if (field[j]) continue;
+            count++;
+            if (ri(count) === 0) pick = j;
+          }
+          return pick;
+        }
+
+        // With SENESCE at 0 nothing dies of age. Tissue dies when it stops being
+        // fed, which means the cells that go are the ones supply fails to reach:
+        // shaded leaves, over-extended root tips, and anything cut off from the
+        // roots or from the light. An age clock always kills the oldest cell
+        // first, and the oldest cell is always the base, which is why the plants
+        // used to dissolve upward from the ground.
+        function ceiling(i) {
+          if (P.SENESCE <= 0) return P.VIGOR_MAX;
+          const c = P.VIGOR_MAX - ((age[i] / P.SENESCE) | 0);
+          return c < 0 ? 0 : c;
+        }
+
+        function bump(i) {
+          const c = ceiling(i);
+          const v = vigor[i] + P.VIGOR_BUMP;
+          vigor[i] = v > c ? c : v;
+        }
+
+        // ------------------------------------------------------------- support
+        // Nothing hangs in the air. One bottom-up sweep marks every conduit cell
+        // that can trace a path of contact down to ground; anything the sweep
+        // misses is unsupported and falls. No stored graph, no parent links.
+        function supportPass() {
+          held.fill(0);
+          for (let y = ROWS - 1; y >= 0; y--) {
+            const row = y * COLS;
+            for (let x = 0; x < COLS; x++) {
+              const i = row + x;
+              if (type[i] < CONDUIT) continue;
+              if (y === ROWS - 1) {
+                held[i] = 1;
+                continue;
+              }
+              for (let d = 3; d <= 5; d++) {
+                const j = NB(i, d); // down-left, down, down-right
+                if (j < 0) continue;
+                if (type[j] === SOIL || type[j] === ROCK || (type[j] >= CONDUIT && held[j])) {
+                  held[i] = 1;
+                  break;
+                }
+              }
+            }
+            // then let support travel sideways along the row, both ways, so a
+            // cantilevered branch is carried by the stem it grew out of
+            for (let pass = 0; pass < 2; pass++) {
+              for (let k = 0; k < COLS; k++) {
+                const x = pass === 0 ? k : COLS - 1 - k;
+                const i = row + x;
+                if (type[i] < CONDUIT || held[i]) continue;
+                const j = NB(i, pass === 0 ? 6 : 2);
+                if (j >= 0 && type[j] >= CONDUIT && held[j]) held[i] = 1;
+              }
+            }
+          }
+        }
+
+        // Unsupported tissue falls. Sweeping upward from the bottom means the
+        // lowest cell moves first and the rest follows into the gap, so a plant
+        // comes down as a body instead of shredding.
+        function fallPass(moves) {
+          for (let y = ROWS - 2; y >= 0; y--) {
+            const row = y * COLS;
+            const x0 = ri(COLS);
+            for (let k = 0; k < COLS; k++) {
+              const i = row + ((x0 + k) % COLS);
+              if (type[i] < CONDUIT || held[i]) continue;
+              const j = NB(i, 4);
+              if (j < 0 || type[j] !== AIR) continue;
+              type[j] = type[i];
+              owner[j] = owner[i];
+              vigor[j] = vigor[i];
+              age[j] = age[i];
+              store[j] = store[i];
+              energy[j] = energy[i];
+              type[i] = AIR;
+              owner[i] = 0;
+              vigor[i] = 0;
+              age[i] = 0;
+              store[i] = 0;
+              energy[i] = 0;
+              const wj = water[j];
+              water[j] = water[i];
+              water[i] = wj;
+              held[j] = held[i];
+              moves.set(i, j);
+              stats.fell++;
+            }
+          }
+        }
+
+        // Litter that ends up deeply buried mineralises away. Carbon arrives from
+        // the air without limit, so without a sink the whole world would silt up
+        // and the relief would vanish under it. Depth settles instead.
+        function mineralisePass() {
+          for (let i = 0; i < N; i++) {
+            if (type[i] !== SOIL) continue;
+            if (buriedAround(i) < 7) continue;
+            if (rand() < P.MINERALISE) {
+              type[i] = AIR;
+              if (water[i]) {
+                // the pore is gone; hand the water to whatever is beside it
+                const d0 = ri(8);
+                for (let k = 0; k < 8; k++) {
+                  const j = NB(i, (d0 + k) & 7);
+                  if (j >= 0 && type[j] < CONDUIT && type[j] !== ROCK && !water[j]) {
+                    water[j] = 1;
+                    water[i] = 0;
+                    break;
+                  }
+                }
+              }
+            }
+          }
+        }
+
+        // Soil is a grain, not a fixture: it falls, piles, and finds its angle.
+        // Creep is the addition that keeps terrain legible — a grain on a slope
+        // walks downhill, so litter gathers in hollows and ridges stay thin.
+        function soilPass() {
+          for (let y = ROWS - 2; y >= 0; y--) {
+            const row = y * COLS;
+            const x0 = ri(COLS);
+            for (let k = 0; k < COLS; k++) {
+              const i = row + ((x0 + k) % COLS);
+              if (type[i] !== SOIL) continue;
+              if (drop(i, 4)) continue;
+              const first = rand() < 0.5 ? 3 : 5;
+              if (drop(i, first)) continue;
+              if (drop(i, first === 3 ? 5 : 3)) continue;
+              if (rand() < P.CREEP) creep(i);
+            }
+          }
+        }
+
+        // A grain settles sideways only if it would come to rest there, which is
+        // what makes this downhill motion rather than diffusion.
+        function creep(i) {
+          const d = rand() < 0.5 ? 2 : 6;
+          const j = NB(i, d);
+          if (j < 0 || type[j] !== AIR) return false;
+          const below = NB(j, 4);
+          if (below < 0) return false;
+          if (type[below] === AIR) return false; // that is a fall, handled above
+          type[j] = SOIL;
+          type[i] = AIR;
+          const wj = water[j];
+          water[j] = water[i];
+          water[i] = wj;
+          const aj = age[j];
+          age[j] = age[i];
+          age[i] = aj;
+          return true;
+        }
+
+        function drop(i, d) {
+          const j = NB(i, d);
+          if (j < 0 || type[j] !== AIR) return false;
+          // a grain sinking through water trades places with it
+          type[j] = SOIL;
+          type[i] = AIR;
+          const wj = water[j];
+          water[j] = water[i];
+          water[i] = wj;
+          const aj = age[j];
+          age[j] = age[i];
+          age[i] = aj;
+          if (vapor[j]) {
+            vapor[j] = 0;
+            if (!water[i]) water[i] = 1;
+          }
+          return true;
+        }
+
+        // ------------------------------------------------------------- free water
+        function waterPass() {
+          for (let y = ROWS - 1; y >= 0; y--) {
+            const row = y * COLS;
+            const x0 = ri(COLS);
+            for (let k = 0; k < COLS; k++) {
+              const x = (x0 + k) % COLS;
+              const i = row + x;
+              if (!water[i]) continue;
+              const t = type[i];
+              if (t >= CONDUIT) continue; // inside a plant: transport handles it
+              if (t === AIR && rand() < P.EVAPORATE) {
+                // Standing water in contact with dry air goes back up. Without
+                // this the atmosphere is a one-way trip and every drop in the
+                // world ends its life in a pool on the floor.
+                let dry = false;
+                for (let d = 0; d < 8; d++) {
+                  const j = NB(i, d);
+                  if (j >= 0 && type[j] === AIR && !water[j] && !vapor[j]) {
+                    dry = true;
+                    break;
+                  }
+                }
+                if (dry) {
+                  water[i] = 0;
+                  vapor[i] = 1;
+                  continue;
+                }
+              }
+              if (t === AIR && rand() < P.CAPILLARY) {
+                // dry soil in contact with open water pulls some of it in
+                const d = rand() < P.WICK_UP ? [7, 0, 1][ri(3)] : ri(8);
+                const j = NB(i, d);
+                if (j >= 0 && type[j] === SOIL && !water[j]) {
+                  water[i] = 0;
+                  water[j] = 1;
+                  continue;
+                }
+              }
+              if (t === SOIL) {
+                if (rand() > P.SOIL_FLOW) continue;
+                // field capacity: soil holds its water until the pore space is full
+                let wet = 0;
+                for (let d = 0; d < 8; d++) {
+                  const j = NB(i, d);
+                  if (j < 0 || water[j]) wet++;
+                }
+                if (wet < P.FIELD_CAP) {
+                  if (rand() < P.CAPILLARY) {
+                    // wicking, biased upward: this is what keeps the surface damp
+                    // once litter has buried the open water
+                    const d = rand() < P.WICK_UP ? [7, 0, 1][ri(3)] : ri(8);
+                    const j = NB(i, d);
+                    if (j >= 0 && type[j] === SOIL && !water[j]) {
+                      water[i] = 0;
+                      water[j] = 1;
+                    }
+                  }
+                  continue;
+                }
+              }
+
+              if (flow(i, 4)) continue;
+              const first = rand() < 0.5 ? 3 : 5;
+              if (flow(i, first)) continue;
+              if (flow(i, first === 3 ? 5 : 3)) continue;
+              const side = rand() < 0.5 ? 2 : 6;
+              if (flow(i, side)) continue;
+              flow(i, side === 2 ? 6 : 2);
+            }
+          }
+        }
+
+        function flow(i, d) {
+          const j = NB(i, d);
+          if (j < 0) return false;
+          const tj = type[j];
+          if (tj === ROCK || tj >= CONDUIT) return false;
+          if (water[j]) return false;
+          water[i] = 0;
+          water[j] = 1;
+          return true;
+        }
+
+        function uptake() {
+          for (let i = 0; i < N; i++) {
+            if (type[i] < CONDUIT || water[i]) continue;
+            if (rand() > P.UPTAKE) continue;
+            const d0 = ri(4) * 2;
+            for (let k = 0; k < 4; k++) {
+              const j = NB(i, (d0 + k * 2) & 7);
+              if (j >= 0 && type[j] < CONDUIT && water[j]) {
+                water[j] = 0;
+                water[i] = 1;
+                break;
+              }
+            }
+          }
+        }
+
+        // -------------------------------------------------------------- the tips
+        function enterable(j) {
+          if (j < 0) return false;
+          const t = type[j];
+          return (t === AIR || t === SOIL) && owner[j] === 0;
+        }
+
+        // Which cell a heading points at, from a sub-cell position. The tip keeps
+        // a fixed-point position, so a 37 degree plan rasterises as a stepped
+        // curve instead of snapping to the nearest 45.
+        function stepCell(tp, h) {
+          let px = tp.px,
+            py = tp.py;
+          for (let n = 0; n < 3; n++) {
+            px += HX[h];
+            py += HY[h];
+            const nx = Math.round(px / 1024);
+            const ny = Math.round(py / 1024);
+            if (nx !== tp.x || ny !== tp.y) return { px, py, nx, ny };
+          }
+          return null;
+        }
+
+        // Tropism: the world bends the heading, it does not rewrite the plan.
+        function tropism(tp, m) {
+          if (m.photo) {
+            // compare light to either side of the heading and lean brighter
+            const hl = (tp.h + 48) & 63,
+              hr = (tp.h + 16) & 63;
+            const jl = cellAt(tp, hl),
+              jr = cellAt(tp, hr);
+            const ll = jl < 0 ? 0 : light[jl];
+            const lr = jr < 0 ? 0 : light[jr];
+            if (ll !== lr) {
+              const pull = ll > lr ? -1 : 1;
+              if (ri(8) < m.photo) tp.h = (tp.h + pull + 64) & 63;
+            }
+          }
+          if (m.grav && ri(8) < m.grav) {
+            const want = tp.root ? H_DOWN : H_UP;
+            let d = (want - tp.h + 96) & 63;
+            d = d > 32 ? d - 64 : d; // signed shortest way round
+            if (d !== 0) tp.h = (tp.h + (d > 0 ? 1 : -1) + 64) & 63;
+          }
+        }
+
+        function cellAt(tp, h) {
+          const nx = Math.round((tp.px + HX[h] * 2) / 1024);
+          const ny = Math.round((tp.py + HY[h] * 2) / 1024);
+          if (ny < 0 || ny >= ROWS) return -1;
+          return ny * COLS + ((nx % COLS) + COLS) % COLS;
+        }
+
+        function makeTip(x, y, h, m, pid, root, order) {
+          return {
+            x,
+            y,
+            px: x * 1024,
+            py: y * 1024,
+            h,
+            m, // module being executed
+            step: 0, // how far into it — this is the plan's clock
+            rep: 0, // which pass through the module
+            order, // branch order, inherited and incremented at a fork
+            root,
+            pid,
+            side: 1,
+            fuel: 0,
+            stuck: 0,
+            alive: true,
+          };
+        }
+
+        function tipPass() {
+          const born = [];
+          for (let ti = 0; ti < tips.length; ti++) {
+            const tp = tips[ti];
+            if (!tp.alive) continue;
+            const i = tp.y * COLS + tp.x;
+            if (type[i] < CONDUIT || owner[i] !== tp.pid) {
+              tp.alive = false;
+              continue;
+            }
+            const pl = plants.get(tp.pid);
+            if (!pl) {
+              tp.alive = false;
+              continue;
+            }
+            const g = pl.genome;
+            if (tp.m >= g.modules.length) tp.m = g.modules.length - 1;
+            const m = g.modules[tp.m];
+
+            // ---- the clock: sugar accumulates into a reserve and buys steps, so
+            // growth is a supply-throttled rhythm rather than a coin flip
+            if (energy[i] && tp.fuel < P.FUEL_MAX) {
+              energy[i] = 0;
+              tp.fuel += P.FUEL_GAIN;
+            }
+
+            // ---- module finished?
+            if (tp.step >= m.len) {
+              tp.rep++;
+              // reps is the determinacy dial. A finite count means this axis
+              // stops; zero means it never does. The ancestor is all finite.
+              if (m.reps === 0 || tp.rep < m.reps) {
+                tp.step = 0;
+                continue;
+              }
+              let end = m.end;
+              if (tp.order >= m.order && end === END_NEXT) end = END_SEED;
+              if (end === END_SEED) {
+                type[i] = SEEDSITE;
+                store[i] = 0;
+                tp.alive = false;
+              } else if (end === END_STOP) {
+                tp.alive = false;
+              } else if (end === END_FORK) {
+                const c = Math.min(m.child, g.modules.length - 1);
+                const a = m.brAngle;
+                if (pl.tipCount < P.MAX_TIPS_PLANT && tips.length < P.MAX_TIPS) {
+                  born.push(makeTip(tp.x, tp.y, (tp.h + a) & 63, c, tp.pid, tp.root, tp.order + 1));
+                  born.push(makeTip(tp.x, tp.y, (tp.h - a + 64) & 63, c, tp.pid, tp.root, tp.order + 1));
+                  pl.tipCount += 2;
+                }
+                tp.alive = false;
+              } else {
+                tp.m = Math.min(m.next, g.modules.length - 1);
+                tp.step = 0;
+                tp.rep = 0;
+              }
+              continue;
+            }
+
+            if (tp.fuel < P.STEP_COST || !water[i]) {
+              if (tp.fuel < P.STEP_COST) stats.noE++;
+              else stats.noW++;
+              continue;
+            }
+
+            // ---- the plan's own curve, then the world's bend on top of it
+            tp.h = (tp.h + m.curve + 64) & 63;
+            tropism(tp, m);
+
+            const st = stepCell(tp, tp.h);
+            if (!st) continue;
+            if (st.ny < 0 || st.ny >= ROWS) {
+              tp.alive = false;
+              continue;
+            }
+            const target = st.ny * COLS + (((st.nx % COLS) + COLS) % COLS);
+
+            if (!enterable(target) || foreignTouch(target, tp.pid)) {
+              // Perturbation deflects the path, never the progress: the tip bends
+              // and tries again, and the module still lays its full length.
+              tp.h = (tp.h + (rand() < 0.5 ? 3 : -3) + 64) & 63;
+              stats.blocked++;
+              if (++tp.stuck > P.STUCK_MAX) tp.alive = false;
+              continue;
+            }
+            if (type[target] === SOIL && rand() > P.SOIL_PUSH) {
+              stats.push++;
+              continue;
+            }
+
+            tp.fuel -= P.STEP_COST;
+            tp.stuck = 0;
+            type[target] = CONDUIT;
+            owner[target] = tp.pid;
+            vigor[target] = P.VIGOR_START;
+            age[target] = 0;
+            if (!water[target]) {
+              water[target] = 1;
+              water[i] = 0;
+            }
+            pl.cells++;
+            stats.grew++;
+
+            tp.px = st.px;
+            tp.py = st.py;
+            tp.x = st.nx;
+            tp.y = st.ny;
+            tp.step++;
+
+            // ---- branching is written into the plan: this is what makes a
+            // repeated architecture like pinnate spacing possible at all
+            if (
+              m.brEvery &&
+              tp.step % m.brEvery === 0 &&
+              tp.order < m.order &&
+              pl.tipCount < P.MAX_TIPS_PLANT &&
+              tips.length < P.MAX_TIPS
+            ) {
+              const a = m.brAngle;
+              const c = Math.min(m.child, g.modules.length - 1);
+              if (m.paired) {
+                born.push(makeTip(tp.x, tp.y, (tp.h + a) & 63, c, tp.pid, tp.root, tp.order + 1));
+                born.push(makeTip(tp.x, tp.y, (tp.h - a + 64) & 63, c, tp.pid, tp.root, tp.order + 1));
+                pl.tipCount += 2;
+              } else {
+                born.push(makeTip(tp.x, tp.y, (tp.h + a * tp.side + 64) & 63, c, tp.pid, tp.root, tp.order + 1));
+                tp.side = -tp.side;
+                pl.tipCount++;
+              }
+            }
+          }
+          for (const b of born) tips.push(b);
+          if (tips.length > 2048) {
+            const keep = [];
+            for (const tp of tips) {
+              if (tp.alive) keep.push(tp);
+              else {
+                const pl = plants.get(tp.pid);
+                if (pl) pl.tipCount--;
+              }
+            }
+            tips = keep;
+          }
+        }
+
+        // ------------------------------------------------------------- seed sites
+        function seedPass() {
+          for (let i = 0; i < N; i++) {
+            if (type[i] !== SEEDSITE) continue;
+            if (energy[i]) {
+              energy[i] = 0;
+              store[i]++;
+              bump(i);
+            }
+            if (store[i] < P.SEED_COST) continue;
+            const pl = plants.get(owner[i]);
+            if (!pl) continue;
+            let sink = -1;
+            const d0 = ri(8);
+            for (let k = 0; k < 8; k++) {
+              const j = NB(i, (d0 + k) & 7);
+              if (j >= 0 && type[j] === AIR) {
+                sink = j;
+                break;
+              }
+            }
+            if (sink < 0) continue;
+            store[i] = 0;
+            bump(i);
+            // The site keeps bearing for as long as it lives. Senescence, not a
+            // one-shot rule, is what bounds a plant's total output.
+            stats.seedsMade++;
+            if (seeds.length >= P.MAX_SEEDS) continue;
+            const res = mutate(pl.genome);
+            let hue = pl.hue,
+              muts = pl.muts;
+            if (res.changed) {
+              // colour is a record of distance walked from the ancestor, so a
+              // clade that drifts apart genetically drifts apart on screen
+              hue = (pl.hue + (rand() * 2 - 1) * P.HUE_DRIFT + 360) % 360;
+              muts++;
+            }
+            seeds.push({
+              x: sink % COLS,
+              y: (sink / COLS) | 0,
+              g: res.g,
+              hue,
+              muts,
+              age: 0,
+              gen: pl.gen + 1,
+            });
+          }
+        }
+
+        function fallingSeeds() {
+          const keep = [];
+          for (const s of seeds) {
+            s.age++;
+            if (s.age > P.SEED_LIFE) continue;
+            const i = s.y * COLS + s.x;
+            const down = NB(i, 4);
+            let moved = false;
+            if (down >= 0 && type[down] === AIR) {
+              s.y++;
+              moved = true;
+            } else {
+              const first = rand() < 0.5 ? 3 : 5;
+              for (const d of [first, first === 3 ? 5 : 3]) {
+                const j = NB(i, d);
+                if (j >= 0 && type[j] === AIR) {
+                  s.x = j % COLS;
+                  s.y = (j / COLS) | 0;
+                  moved = true;
+                  break;
+                }
+              }
+            }
+            if (moved) {
+              if (rand() < P.SEED_DRIFT) {
+                const j = NB(s.y * COLS + s.x, rand() < 0.5 ? 2 : 6);
+                if (j >= 0 && type[j] === AIR) s.x = j % COLS;
+              }
+              keep.push(s);
+              continue;
+            }
+            if (germinate(s)) continue;
+            // Settled but unable to take: roll along the surface looking for a gap.
+            // This is the only dispersal there is, so shade and crowding push the
+            // next generation sideways instead of killing it outright.
+            if (rand() < P.SEED_ROLL) {
+              const j = NB(s.y * COLS + s.x, rand() < 0.5 ? 2 : 6);
+              if (j >= 0 && type[j] === AIR) {
+                s.x = j % COLS;
+                s.y = (j / COLS) | 0;
+              }
+            }
+            keep.push(s);
+          }
+          seeds = keep;
+        }
+
+        function germinate(s) {
+          const i = s.y * COLS + s.x;
+          if (type[i] !== AIR || owner[i] !== 0) return false;
+          // Bedrock, litter or the floor of the world all count as ground.
+          // Standing water does not.
+          let anchored = s.y === ROWS - 1;
+          for (let d = 0; d < 8; d++) {
+            const j = NB(i, d);
+            if (j < 0) continue;
+            if (type[j] >= CONDUIT) return false; // no germinating against a plant
+            if (type[j] === SOIL || type[j] === ROCK) anchored = true;
+          }
+          if (!anchored) return false;
+          if (water[i] || openAir(i) === 0) return false; // no germinating underwater
+          // germination drinks one nearby water packet
+          let src = -1;
+          if (water[i]) src = i;
+          else {
+            for (let d = 0; d < 8; d++) {
+              const j = NB(i, d);
+              if (j >= 0 && water[j] && type[j] < CONDUIT) {
+                src = j;
+                break;
+              }
+            }
+          }
+          if (src < 0) return false;
+          water[src] = 0;
+
+          const pid = newPlant(s.g, s.gen, s.hue, s.muts);
+          const pl = plants.get(pid);
+          type[i] = CONDUIT;
+          owner[i] = pid;
+          vigor[i] = P.VIGOR_START;
+          age[i] = 0;
+          water[i] = 1;
+          energy[i] = 1;
+          pl.cells = 1;
+          pl.origin = i;
+          const nm = s.g.modules.length;
+          const rootM = Math.min(s.g.rootStart, nm - 1);
+          const shootM = Math.min(s.g.shootStart, nm - 1);
+          // radicle first, then the shoot — the root gets first call on the reserves
+          tips.push(makeTip(s.x, s.y, H_DOWN, rootM, pid, 1, 0));
+          tips.push(makeTip(s.x, s.y, H_UP, shootM, pid, 0, 0));
+          pl.tipCount = 2;
+          return true;
+        }
+
+        // the seed's own reserve, trickled into the cell it germinated in
+        function reservePass() {
+          for (const pl of plants.values()) {
+            if (pl.reserve <= 0) continue;
+            const i = pl.origin;
+            if (i < 0 || type[i] < CONDUIT || owner[i] !== pl.pid) {
+              pl.reserve = 0;
+              continue;
+            }
+            if (energy[i]) continue;
+            energy[i] = 1;
+            pl.reserve--;
+          }
+        }
+
+        // ------------------------------------------------------------------ decay
+        function decayPass() {
+          for (let i = 0; i < N; i++) {
+            const t = type[i];
+            if (t < CONDUIT) continue;
+            if (age[i] < 65000) age[i]++;
+            if (vigor[i] > ceiling(i)) vigor[i] = ceiling(i);
+            if (vigor[i] > 0) vigor[i]--;
+            if (vigor[i] > 0) continue;
+            const pl = plants.get(owner[i]);
+            if (pl) pl.cells--;
+            stats.decayed++;
+            age[i] = 0;
+            if (rand() > P.LITTER) {
+              type[i] = AIR;
+              owner[i] = 0;
+              energy[i] = 0;
+              store[i] = 0;
+              continue;
+            }
+            type[i] = SOIL; // litter becomes soil: all soil here was once a plant
+            owner[i] = 0;
+            energy[i] = 0;
+            store[i] = 0;
+            if (water[i]) {
+              const d0 = ri(8);
+              for (let k = 0; k < 8; k++) {
+                const j = NB(i, (d0 + k) & 7);
+                if (j >= 0 && type[j] === AIR && !water[j]) {
+                  water[j] = 1;
+                  water[i] = 0;
+                  break;
+                }
+              }
+            }
+          }
+          for (const [pid, pl] of plants) {
+            if (pl.cells <= 0) {
+              plants.delete(pid);
+              stats.died++;
+            }
+          }
+        }
+
+        // ------------------------------------------------------------------- tick
+        function step() {
+          lightPass();
+          leafPass();
+          reservePass();
+          absorb();
+          transport();
+          soilPass();
+          supportPass();
+          const moves = new Map();
+          fallPass(moves);
+          if (moves.size) {
+            for (const tp of tips) {
+              if (!tp.alive) continue;
+              const to = moves.get(tp.y * COLS + tp.x);
+              if (to === undefined) continue;
+              tp.y = (to / COLS) | 0;
+              tp.x = to % COLS;
+              tp.py = tp.y * 1024;
+              tp.px = tp.x * 1024;
+            }
+            for (const pl of plants.values()) {
+              const to = moves.get(pl.origin);
+              if (to !== undefined) pl.origin = to;
+            }
+          }
+          waterPass();
+          vaporPass();
+          uptake();
+          tipPass();
+          seedPass();
+          fallingSeeds();
+          if (tick % P.DECAY_PERIOD === 0) {
+            decayPass();
+            mineralisePass();
+          }
+          tick++;
+        }
+
+        // The topmost living cell in each column, as a hue. This is what the
+        // history strip samples: who holds the canopy, where.
+        function canopyRow() {
+          const out = new Float32Array(COLS).fill(-1);
+          for (let x = 0; x < COLS; x++) {
+            for (let y = 0; y < ROWS; y++) {
+              const i = y * COLS + x;
+              if (type[i] < CONDUIT) continue;
+              const pl = plants.get(owner[i]);
+              if (pl) out[x] = pl.hue;
+              break;
+            }
+          }
+          return out;
+        }
+
+        function snapshot() {
+          let w = 0,
+            e = 0,
+            v = 0,
+            cells = 0,
+            soil = 0,
+            liveTips = 0;
+          const tall = new Map();
+          const rise = new Map(); // above bedrock, which does not move as litter piles
+          const deep = new Map();
+          // the ground surface as it stands now: bedrock, or the litter on it.
+          // Height is measured from here, so it means what it looks like.
+          const surf = new Int16Array(COLS).fill(ROWS - 1);
+          for (let x = 0; x < COLS; x++) {
+            for (let y = 0; y < ROWS; y++) {
+              const t = type[y * COLS + x];
+              if (t === SOIL || t === ROCK) {
+                surf[x] = y;
+                break;
+              }
+            }
+          }
+          for (let i = 0; i < N; i++) {
+            w += water[i];
+            e += energy[i];
+            v += vapor[i];
+            const t = type[i];
+            if (t === SOIL) soil++;
+            else if (t >= CONDUIT) {
+              cells++;
+              const pid = owner[i];
+              const y = (i / COLS) | 0;
+              const h = surf[i % COLS] - y;
+              const th = tall.get(pid);
+              if (th === undefined || h > th) tall.set(pid, h);
+              const hr = ground[i % COLS] - y;
+              const tr = rise.get(pid);
+              if (tr === undefined || hr > tr) rise.set(pid, hr);
+              const dp = deep.get(pid);
+              if (dp === undefined || -h > dp) deep.set(pid, -h);
+            }
+          }
+          for (const tp of tips) if (tp.alive) liveTips++;
+
+          // Body plans, keyed by the genome itself. Two plants are the same
+          // strain when their plan is identical, which is what makes "the plants
+          // are getting more complex" a claim you can read off the screen.
+          const buckets = new Map();
+          let hSum = 0,
+            rSum = 0,
+            dSum = 0,
+            nPl = 0,
+            mSum = 0;
+          for (const pl of plants.values()) {
+            const h = tall.get(pl.pid);
+            const d = deep.get(pl.pid);
+            if (h !== undefined) {
+              hSum += h;
+              rSum += rise.get(pl.pid) || 0;
+              dSum += d === undefined ? 0 : Math.max(0, d);
+              nPl++;
+            }
+            mSum += pl.muts;
+            let b = buckets.get(pl.hash);
+            if (!b)
+              buckets.set(pl.hash, (b = { hue: pl.hue, label: genomeLabel(pl.genome), mods: pl.genome.modules.length, branch: pl.genome.modules.some((m) => m.brEvery > 0), plants: 0, cells: 0, gen: 0, muts: pl.muts, h: 0, n: 0 }));
+            b.plants++;
+            b.cells += pl.cells;
+            if (pl.gen > b.gen) b.gen = pl.gen;
+            if (h !== undefined) {
+              b.h += h;
+              b.n++;
+            }
+          }
+          let branching = 0,
+            modSum = 0;
+          for (const pl of plants.values()) {
+            modSum += pl.genome.modules.length;
+            if (pl.genome.modules.some((m) => m.brEvery > 0)) branching++;
+          }
+          const lineages = [...buckets.values()]
+            .sort((a, b) => b.plants - a.plants)
+            .slice(0, 3)
+            .map((b) => ({ hue: b.hue, label: b.label, mods: b.mods, branch: b.branch, plants: b.plants, cells: b.cells, gen: b.gen, muts: b.muts, height: b.n ? b.h / b.n : 0 }));
+
+          return {
+            tick,
+            plants: plants.size,
+            cells,
+            soil,
+            tips: liveTips,
+            seeds: seeds.length,
+            water: w,
+            vapor: v,
+            energy: e,
+            strains: buckets.size,
+            mods: plants.size ? modSum / plants.size : 0,
+            branching: plants.size ? branching / plants.size : 0,
+            gen: stats.maxGen,
+            muts: stats.muts,
+            meanMuts: plants.size ? mSum / plants.size : 0,
+            height: nPl ? hSum / nPl : 0,
+            rise: nPl ? rSum / nPl : 0,
+            depth: nPl ? dSum / nPl : 0,
+            born: stats.born,
+            seedsMade: stats.seedsMade,
+            photo: stats.photo,
+            upkeep: stats.upkeep,
+            grew: stats.grew,
+            fell: stats.fell,
+            push: stats.push,
+            noE: stats.noE,
+            noW: stats.noW,
+            blocked: stats.blocked,
+            decayed: stats.decayed,
+            lineages,
+          };
+        }
+
+        reset();
+
+        return {
+          COLS,
+          ROWS,
+          N,
+          P,
+          AIR,
+          SOIL,
+          ROCK,
+          CONDUIT,
+          SEEDSITE,
+          type,
+          owner,
+          vigor,
+          water,
+          energy,
+          vapor,
+          store,
+          light,
+          ground,
+          plants,
+          get tips() {
+            return tips;
+          },
+          get seeds() {
+            return seeds;
+          },
+          get tick() {
+            return tick;
+          },
+          step,
+          reset,
+          snapshot,
+          canopyRow,
+          genomeLabel,
+          genomeDetail,
+          defaultGenome,
+        };
+      }
+
+      /* ==== RENDERER ==== */
+      (function () {
+        var COLS = 200,
+          ROWS = 140;
+        var waterWanted = 800;
+        var sim = createSim({
+          cols: COLS,
+          rows: ROWS,
+          seed: (Math.random() * 1e9) | 0,
+          params: { WATER_TOTAL: waterWanted },
+        });
+        var N = sim.N;
+        var SOIL = sim.SOIL,
+          ROCK = sim.ROCK,
+          CONDUIT = sim.CONDUIT,
+          SEEDSITE = sim.SEEDSITE;
+
+        var stage = document.getElementById("stage");
+        stage.width = COLS;
+        stage.height = ROWS;
+        var sctx = stage.getContext("2d");
+        var img = sctx.createImageData(COLS, ROWS);
+        var px = img.data;
+        for (var k = 3; k < px.length; k += 4) px[k] = 255;
+
+        // Sizing is done in CSS, with the canvas backing store one pixel per
+        // cell. That keeps the world visible at any viewport, including previews
+        // that give the page no usable height of its own.
+        function fit() {
+          var availW = Math.min(window.innerWidth - 24, 900);
+          var availH = window.innerHeight - 210;
+          var w = Math.min(availW, availH * (COLS / ROWS));
+          if (!(w > 60)) w = availW;
+          stage.style.width = Math.round(w) + "px";
+          stage.style.height = Math.round((w * ROWS) / COLS) + "px";
+        }
+        window.addEventListener("resize", fit);
+        fit();
+
+        function hue2rgb(hDeg, s, l) {
+          var c = (1 - Math.abs(2 * l - 1)) * s;
+          var hp = (((hDeg % 360) + 360) % 360) / 60;
+          var x = c * (1 - Math.abs((hp % 2) - 1));
+          var r = 0,
+            g = 0,
+            b = 0;
+          if (hp < 1) {
+            r = c;
+            g = x;
+          } else if (hp < 2) {
+            r = x;
+            g = c;
+          } else if (hp < 3) {
+            g = c;
+            b = x;
+          } else if (hp < 4) {
+            g = x;
+            b = c;
+          } else if (hp < 5) {
+            r = x;
+            b = c;
+          } else {
+            r = c;
+            b = x;
+          }
+          var m = l - c / 2;
+          return [(r + m) * 255, (g + m) * 255, (b + m) * 255];
+        }
+        function css(h) {
+          var c = hue2rgb(h, 0.55, 0.62);
+          return "rgb(" + (c[0] | 0) + "," + (c[1] | 0) + "," + (c[2] | 0) + ")";
+        }
+
+        var MODES = ["lineage", "channels", "light"];
+        var mode = 0;
+        var LMAX = sim.P.LIGHT_MAX;
+
+        function draw() {
+          var type = sim.type,
+            vigor = sim.vigor,
+            water = sim.water,
+            energy = sim.energy,
+            vapor = sim.vapor,
+            light = sim.light,
+            owner = sim.owner;
+          var m = MODES[mode];
+          for (var i = 0, j = 0; i < N; i++, j += 4) {
+            var t = type[i],
+              r,
+              g,
+              b;
+            if (m === "light") {
+              var v = (light[i] * 255) / LMAX;
+              r = g = b = v;
+              if (t === SOIL) {
+                r = 30;
+                g = 26;
+                b = 22;
+              } else if (t === ROCK) {
+                r = 26;
+                g = 28;
+                b = 34;
+              } else if (t >= CONDUIT) {
+                r = 20;
+                g = 90;
+                b = 40;
+              }
+              px[j] = r;
+              px[j + 1] = g;
+              px[j + 2] = b;
+              continue;
+            }
+            if (t === 0) {
+              var l = light[i];
+              r = 5 + l * 0.5;
+              g = 7 + l * 0.6;
+              b = 13 + l * 1.4;
+            } else if (t === SOIL) {
+              r = 44;
+              g = 37;
+              b = 30;
+            } else if (t === ROCK) {
+              // bedrock reads cool and mineral, so the relief is legible under
+              // whatever litter has gathered on it
+              r = 30;
+              g = 33;
+              b = 39;
+            } else {
+              var vg = vigor[i];
+              if (m === "lineage") {
+                var pl = sim.plants.get(owner[i]);
+                var c = hue2rgb(pl ? pl.hue : 100, 0.3 + (vg / 15) * 0.55, 0.44);
+                r = c[0];
+                g = c[1];
+                b = c[2];
+              } else {
+                r = 8 + vg * 2;
+                g = 34 + vg * 14;
+                b = 18 + vg * 3;
+              }
+              if (t === SEEDSITE) {
+                r += 110;
+                g += 70;
+                b += 5;
+              }
+            }
+            if (water[i]) {
+              var above = i >= COLS ? water[i - COLS] : 0;
+              if (above) {
+                r = r * 0.2 + 6;
+                g = g * 0.3 + 30;
+                b = b * 0.4 + 96;
+              } else {
+                b += 150;
+                g += 30;
+                r += 10;
+              }
+            }
+            if (energy[i]) {
+              r += 175;
+              g += 20;
+            }
+            if (vapor[i]) {
+              r += 62;
+              g += 68;
+              b += 78;
+            }
+            px[j] = r > 255 ? 255 : r;
+            px[j + 1] = g > 255 ? 255 : g;
+            px[j + 2] = b > 255 ? 255 : b;
+          }
+          var sd = sim.seeds;
+          for (var q = 0; q < sd.length; q++) {
+            var o = (sd[q].y * COLS + sd[q].x) * 4;
+            px[o] = 235;
+            px[o + 1] = 205;
+            px[o + 2] = 120;
+          }
+          var tp = sim.tips;
+          for (var q2 = 0; q2 < tp.length; q2++) {
+            if (!tp[q2].alive) continue;
+            var o2 = (tp[q2].y * COLS + tp[q2].x) * 4;
+            px[o2] = 250;
+            px[o2 + 1] = 255;
+            px[o2 + 2] = 225;
+          }
+          sctx.putImageData(img, 0, 0);
+        }
+
+        var bar = document.getElementById("bar");
+        var plansEl = document.getElementById("plans");
+        var inspEl = document.getElementById("insp");
+        var paused = false;
+        var speed = 2;
+        var warpLeft = 0;
+
+        function hud() {
+          var s = sim.snapshot();
+          bar.innerHTML =
+            (paused ? '<span class="paused">paused</span> ' : "") +
+            (warpLeft > 0 ? '<span class="warp">warp ' + warpLeft + "</span> " : "") +
+            "tick <b>" + s.tick +
+            "</b>  gen <b>" + s.gen +
+            "</b>  plants <b>" + s.plants +
+            "</b>  plans <b>" + s.strains +
+            "</b>  modules <b>" + s.mods.toFixed(2) +
+            "</b>  branching <b>" + Math.round(s.branching * 100) + "%" +
+            "</b>  mut/plant <b>" + s.meanMuts.toFixed(1) +
+            "</b>  height <b>" + s.height.toFixed(1) +
+            "</b>  above rock <b>" + s.rise.toFixed(1) +
+            "</b>  depth <b>" + s.depth.toFixed(1) +
+            "</b>  cells <b>" + s.cells +
+            "</b>  soil <b>" + s.soil +
+            "</b>  tips <b>" + s.tips +
+            "</b>  seeds <b>" + s.seeds +
+            "</b>  water <b>" + s.water +
+            "</b>  vapour <b>" + s.vapor +
+            "</b>  view <b>" + MODES[mode] +
+            "</b>  x<b>" + speed + "</b>";
+          // The commonest body plans, written out. This is the readout that is
+          // supposed to make "getting more complex" checkable.
+          var out = "";
+          for (var i = 0; i < s.lineages.length; i++) {
+            var L = s.lineages[i];
+            out +=
+              '<span style="color:' + css(L.hue) + '">\u2588</span> <b>' + L.plants +
+              "</b> plants &middot; " + L.label + " &middot; h" + L.height.toFixed(1) +
+              " &middot; gen " + L.gen + " &middot; " + L.muts + " mut";
+          }
+          plansEl.innerHTML = out;
+        }
+
+        function newWorld() {
+          sim = createSim({
+            cols: COLS,
+            rows: ROWS,
+            seed: (Math.random() * 1e9) | 0,
+            params: { WATER_TOTAL: waterWanted, MINERALISE: parseFloat(soilIn.value) || 0 },
+          });
+          inspEl.textContent = "tap a plant to read its plan";
+          draw();
+          hud();
+        }
+
+        // Tapping a cell prints the plan of whatever owns it. The plan is the
+        // genome, so this is the only place lineage identity really lives.
+        stage.addEventListener("pointerdown", function (e) {
+          var r = stage.getBoundingClientRect();
+          var x = Math.floor(((e.clientX - r.left) / r.width) * COLS);
+          var y = Math.floor(((e.clientY - r.top) / r.height) * ROWS);
+          if (x < 0 || y < 0 || x >= COLS || y >= ROWS) return;
+          var i = y * COLS + x;
+          var pl = sim.plants.get(sim.owner[i]);
+          if (!pl || sim.type[i] < sim.CONDUIT) {
+            inspEl.textContent = "nothing living there";
+            return;
+          }
+          inspEl.textContent =
+            "plant " + pl.pid + " \u00b7 generation " + pl.gen + " \u00b7 " + pl.muts +
+            " mutations from the ancestor \u00b7 " + pl.cells + " cells \u00b7 hue " +
+            Math.round(pl.hue) + "\u00b0\n" + sim.genomeDetail(pl.genome);
+        });
+
+        // Buttons as well as keys, because this mostly gets watched on a phone.
+        var ctl = document.getElementById("ctl");
+        function button(label, fn) {
+          var b = document.createElement("button");
+          b.type = "button";
+          b.textContent = label;
+          b.addEventListener("click", function () {
+            fn(b);
+          });
+          ctl.appendChild(b);
+          return b;
+        }
+        var pauseBtn = button("pause", function (b) {
+          paused = !paused;
+          b.textContent = paused ? "run" : "pause";
+          hud();
+        });
+        button("step", function () {
+          sim.step();
+          draw();
+          hud();
+        });
+        var speedBtn = button("x2", function (b) {
+          var order = [1, 2, 4, 8, 16];
+          speed = order[(order.indexOf(speed) + 1) % order.length];
+          b.textContent = "x" + speed;
+          hud();
+        });
+        function warp(n) {
+          warpLeft = n;
+          paused = false;
+          pauseBtn.textContent = "pause";
+        }
+        button("warp 1k", function () {
+          warp(1000);
+        });
+        button("10k", function () {
+          warp(10000);
+        });
+        button("100k", function () {
+          warp(100000);
+        });
+        var waterIn = document.createElement("input");
+        waterIn.type = "number";
+        waterIn.min = "0";
+        waterIn.step = "100";
+        waterIn.value = String(waterWanted);
+        waterIn.title = "water in the world";
+        ctl.appendChild(waterIn);
+        var soilIn = document.createElement("input");
+        soilIn.type = "number";
+        soilIn.min = "0";
+        soilIn.max = "0.5";
+        soilIn.step = "0.005";
+        soilIn.value = "0";
+        soilIn.title = "chance buried litter leaves the world";
+        soilIn.addEventListener("change", function () {
+          var v = parseFloat(soilIn.value);
+          if (!isFinite(v) || v < 0) v = 0;
+          soilIn.value = String(v);
+          sim.P.MINERALISE = v; // live, no reset needed
+        });
+        ctl.appendChild(soilIn);
+        button("water reset", function () {
+          var v = parseInt(waterIn.value, 10);
+          if (!isFinite(v) || v < 0) v = 0;
+          waterWanted = Math.min(v, sim.N / 2);
+          waterIn.value = String(waterWanted);
+          newWorld();
+        });
+        var viewBtn = button("lineage", function (b) {
+          mode = (mode + 1) % MODES.length;
+          b.textContent = MODES[mode];
+          draw();
+          hud();
+        });
+        button("new world", newWorld);
+
+        document.addEventListener("keydown", function (e) {
+          if (e.key === " ") {
+            paused = !paused;
+            pauseBtn.textContent = paused ? "run" : "pause";
+            e.preventDefault();
+          } else if (e.key === ".") {
+            sim.step();
+            draw();
+            hud();
+          } else if (e.key >= "1" && e.key <= "4") {
+            speed = [1, 2, 4, 8][+e.key - 1];
+            speedBtn.textContent = "x" + speed;
+          } else if (e.key === "w" || e.key === "W") {
+            warp(10000);
+          } else if (e.key === "c" || e.key === "C") {
+            mode = (mode + 1) % MODES.length;
+            viewBtn.textContent = MODES[mode];
+            draw();
+            hud();
+          } else if (e.key === "r" || e.key === "R") {
+            newWorld();
+          }
+        });
+
+        var acc = 0;
+        function loop() {
+          var steps = warpLeft > 0 ? Math.min(warpLeft, 400) : paused ? 0 : speed;
+          for (var n = 0; n < steps; n++) sim.step();
+          if (warpLeft > 0) warpLeft -= steps;
+          draw();
+          if (++acc % 6 === 0 || warpLeft > 0) hud();
+          requestAnimationFrame(loop);
+        }
+        draw();
+        hud();
+        loop();
+      })();
+    </script>
+  </body>
+</html>

@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>millefleur-5 — the growing world</title>
+    <style>
+      html,
+      body {
+        margin: 0;
+        padding: 0;
+        overflow: hidden;
+        background: #0b0e08;
+      }
+      #canvas-div canvas {
+        display: block;
+      }
+    </style>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pixi.js/7.4.0/pixi.min.js"></script>
+  </head>
+  <body>
+    <div id="canvas-div"></div>
+    <!--
+      URL params: ?seed= &clone= &cols= &rows= &scale= &upkeep= &seedcost=
+
+      Keys
+        space  step (while paused)      p  pause        f  fast-forward
+        c      fit view                 r  report to console
+        0      new run (new seed)       1  restart on the SAME seed
+        wheel  zoom at cursor           drag  pan
+
+      Live knobs — these change the STANDING world, no restart:
+        e/E  income per exposure point (ABSORB_COEFF)
+        k/K  upkeep per cell — the drought lever
+        w/W  seed cost — absolute pacing, which sets density
+        b/B  build cost per cell
+        l/L  how much more a leaf earns than other tissue
+        o/O  P(a mutated bare twig becomes an organ)
+        s/S  seed flight length
+    -->
+    <script src="evo-engine-millefleur-5.js"></script>
+  </body>
+</html>

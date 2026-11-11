@@ -1,0 +1,810 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="theme-color" content="#150e08">
+<title>Sampler 15 — no soil</title>
+<style>
+  :root { --ink:#c2d09b; --dim:#477345; --bloom:#d4638f; }
+  html,body{ margin:0; padding:0; height:100%; background:#150e08; overflow:hidden;
+             -webkit-user-select:none; user-select:none; -webkit-tap-highlight-color:transparent;
+             touch-action:manipulation; overscroll-behavior:none; }
+  canvas{ display:block; image-rendering:pixelated; image-rendering:crisp-edges; }
+  #hud{ position:fixed; left:9px; top:calc(9px + env(safe-area-inset-top));
+        font:10px/1.65 ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+        letter-spacing:.07em; color:var(--ink); opacity:.5;
+        pointer-events:none; white-space:pre; text-transform:uppercase; }
+  #hud.off{ display:none; }
+  #bar{ position:fixed; left:0; right:0; bottom:0; display:flex; gap:1px;
+        padding-bottom:env(safe-area-inset-bottom);
+        background:#080a20; border-top:1px solid #1b2145; }
+  #bar button{
+        flex:1; min-height:50px; border:0; background:#0e1230; color:var(--dim);
+        font:11px/1 ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+        letter-spacing:.1em; text-transform:uppercase; cursor:pointer;
+        padding:0; -webkit-appearance:none; }
+  #bar button:active{ background:#151a3c; }
+  #bar button.on{ color:var(--bloom); background:#151a3c; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="hud"></div>
+<div id="bar">
+  <button data-a="play">pause</button>
+  <button data-a="speed">1&times;</button>
+  <button data-a="scale">4px</button>
+  <button data-a="sow">sow</button>
+  <button data-a="resow">reset</button>
+  <button data-a="info">info</button>
+</div>
+
+<script>
+"use strict";
+/* ============================================================
+   SAMPLER 15 — Phase 3, simplified
+   No shade, no soil, no litter, no decay timers. A plant that dies gives
+   its water back where it stood; that water falls and is drunk again.
+   Matter is conserved without a single extra kind of cell.
+
+   What is left: light from the open sides, water falling and evaporating,
+   plants growing strokes, flowering, and seeding. Rain lands across the
+   whole field, because the whole field is ground seen from above.
+
+   Question this build answers: with soil gone, was it giving anything?
+   ============================================================ */
+
+const Q = new URLSearchParams(location.search);
+const CFG = {
+  px:   +(Q.get("px")   || 4),
+  w:    +(Q.get("w")    || 0),
+  h:    +(Q.get("h")    || 0),
+  seed: +(Q.get("seed") || 7),
+  tps:  +(Q.get("tps")  || 30),
+  n:    +(Q.get("n")    || 40),
+  rain: +(Q.get("rain") || 3),
+  recolonise: (Q.get("recolonise") ?? "1") !== "0",
+};
+
+/* ---------- tuning ----------
+   The six dials worth turning are overridable from the URL, so a value can be
+   tried without a rebuild: ?senesce=2600&seedcost=52&germclear=2 and so on. */
+const T = (k, d) => { const v = Q.get(k); return v === null ? d : +v; };
+const UPKEEP        = T("upkeep", 0.004);
+const SENESCE       = T("senesce", 200);
+const AGE_COST      = 0.60;
+const MARK_COST     = T("markcost", 0.25);
+const SEED_ENERGY   = T("seedenergy", 4);
+const SEED_COST     = T("seedcost", 7);
+const STARVE_DEBT   = 25;     // energy below zero before a plant gives out
+const FACES_TO_FEED = 2;
+const LIGHT         = T("light", 12);   // how much a lit face pays per drop
+const VAPOR_LIFE    = 70;
+const SEASON        = T("season", 2600);
+const ABSORB_CHANCE = 0.25;
+const GIVEBACK      = T("giveback", 1);  // share of a dead plant that returns as water
+const SKY           = T("sky", 1);      // 1 = rain falls on the whole field, 0 = only the top edge
+const SEED_WALK     = 55;
+const SEED_LIFE     = T("seedlife", 900);   // dormancy: long enough to ride out a drought
+const GERM_CLEAR    = T("germclear", 3);
+const MUT_P         = 0.35;
+const HUE_MUT       = T("huemut", 0.06); // chance a child's bloom shifts a step round the ring
+const NOVELTY       = T("novelty", 0.5); // discount on a seed for being the odd colour out
+const COMPAT        = T("compat", 1);    // how far apart two blooms may be and still cross
+const CROSS         = T("cross", 0.7);   // chance a crossed seed really takes a limb from the pollen
+const BLK           = 16;                // how coarse the pollinator's idea of "nearby" is
+const MUT_P2        = 0.25;
+const MAX_NODES     = 20;
+
+/* ---------- palette (16, fixed, shared by all life) ---------- */
+const HEX = [
+  0x150e08, 0x3a2740, 0x03040f, 0x0b1233, 0x1c2331, 0x2c4a34,
+  0x477345, 0x7da45e, 0xc2d09b, 0xd9a441, 0x5aa9c9, 0x2a1e15,
+  0x9b6bd4, 0xd4638f, 0xf4e8cc, 0xffd473,
+];
+const GROUND=0, BLOOM_SHADE=1, WATER_DEEP=2, WATER_C=3, VAPOR_C=4,
+      STEM_DARK=5, STEM=6, STEM_LIT=7, LEAF_RIM=8, GOLD=9, SKY_BLUE=10,
+      SEED_C=11, VIOLET=12, PINK=13, BLOOM_CORE=14, ENERGY_C=15;
+/* The four bloom colours sit in a ring. Neighbours on the ring can cross;
+   opposites cannot. */
+const HUES = 4;
+const HUE_PAL = [PINK, GOLD, SKY_BLUE, VIOLET];
+const hueGap = (a,b) => { const d=Math.abs(a-b)%HUES; return Math.min(d,HUES-d); };
+const PAL = new Uint32Array(HEX.map(h =>
+  (255<<24)|((h&255)<<16)|(((h>>8)&255)<<8)|((h>>16)&255)));
+
+/* ---------- cell kinds ---------- */
+const OPEN=0, LIVE=1, WATER=3, VAPOR=4, SEED_CELL=5;
+const TISSUE=0, PETAL=1, CORE=2;
+
+const DX=[0,1,1,1,0,-1,-1,-1], DY=[-1,-1,0,1,1,1,0,-1];
+
+let worldSeed=(CFG.seed>>>0)||1;
+let rngState=worldSeed;
+function reseed(v){ worldSeed=(v>>>0)||1; rngState=worldSeed; }
+function rand(){ rngState^=rngState<<13; rngState^=rngState>>>17; rngState^=rngState<<5; return (rngState>>>0)/4294967296; }
+const randInt=n=>(rand()*n)|0;
+const pick=a=>a[randInt(a.length)];
+
+/* ============================================================
+   THE GRAMMAR
+   ============================================================ */
+const FLAT=0, SWELL=1;
+const PLUS=0, RING=1, BLOCK=2;
+const S=(turn,len,prof,...ch)=>({k:"S",turn,len,prof,ch});
+const F=(turn,shape)=>({k:"F",turn,shape,ch:[]});
+
+function strokeCells(x,y,dir,len,prof){
+  const spine=[],wings=[];
+  const dx=DX[dir],dy=DY[dir];
+  const pa=(dir&1)?((dir+1)&7):((dir+2)&7);
+  const pb=(dir&1)?((dir+7)&7):((dir+6)&7);
+  const lo=Math.round(len*0.3), hi=Math.round(len*0.72);
+  for(let i=0;i<len;i++){
+    const cx=x+dx*i, cy=y+dy*i;
+    spine.push(cx,cy);
+    if(prof===SWELL&&len>=4&&i>=lo&&i<hi){
+      wings.push(cx+DX[pa],cy+DY[pa]);
+      wings.push(cx+DX[pb],cy+DY[pb]);
+    }
+  }
+  return {spine,wings};
+}
+function flowerCells(x,y,shape){
+  const arm=[[0,-1],[1,0],[0,1],[-1,0]], diag=[[1,-1],[1,1],[-1,1],[-1,-1]];
+  const petals=[],cores=[];
+  if(shape===PLUS){ for(const[a,b]of arm)petals.push(x+a,y+b); cores.push(x,y); }
+  if(shape===RING){ for(const[a,b]of arm.concat(diag))petals.push(x+a,y+b); }
+  if(shape===BLOCK){ for(const[a,b]of arm.concat(diag))petals.push(x+a,y+b); cores.push(x,y); }
+  return {petals,cores};
+}
+
+/* ============================================================
+   THE COMMON ANCESTOR — everything later is earned from this
+   ============================================================ */
+const ANCESTOR = S(0,3,FLAT, F(0,PLUS));
+ANCESTOR.hue = 0;                        // everything starts one colour and earns the rest
+
+/* ============================================================
+   HEREDITY
+   Clonal for now. All reproduction routes through breed(), which
+   takes a list of parents — always one today, so that pollen can
+   be added later as a patch rather than a rewrite.
+   ============================================================ */
+const clone = n => ({...n, ch:n.ch.map(clone)});
+
+function walk(root){
+  const out=[];
+  (function rec(n,p){ out.push({n,p}); for(const c of n.ch) rec(c,n); })(root,null);
+  return out;
+}
+const size = root => walk(root).length;
+
+function mutate(root){
+  const nodes=walk(root);
+  const roll=rand();
+
+  if(roll<0.20 && size(root)<MAX_NODES){          // graft: duplicate and diverge
+    const host=pick(nodes.filter(e=>e.n.k==="S"&&e.n.ch.length<3));
+    if(host){ host.n.ch.push(clone(pick(nodes).n)); return root; }
+  }
+  if(roll<0.34){                                   // prune
+    const victim=pick(nodes.filter(e=>e.p));
+    if(victim){ const i=victim.p.ch.indexOf(victim.n); if(i>=0) victim.p.ch.splice(i,1); return root; }
+  }
+
+  const e=pick(nodes), n=e.n;                      // perturb one field
+  if(n.k==="S"){
+    const f=randInt(4);
+    if(f===0 && e.p) n.turn = Math.max(-3, Math.min(3, n.turn + (rand()<0.5?-1:1)));
+    else if(f===1)   n.len  = Math.max(2, Math.min(7, n.len + (rand()<0.5?-1:1)));
+    else if(f===2)   n.prof = n.prof===FLAT?SWELL:FLAT;
+    else if(e.p && n.ch.length===0){ n.k="F"; n.shape=randInt(3); }
+  } else {
+    if(rand()<0.5) n.shape=(n.shape+1)%3;
+    else { n.k="S"; n.len=2+randInt(4); n.prof=randInt(2); }
+  }
+  return root;
+}
+
+function breed(parents){
+  const g = clone(parents[0]);
+  const donor = parents[1];
+  if(donor && rand()<CROSS){
+    // the child keeps its mother's plan but takes one limb from the pollen
+    const spots = walk(g).filter(e=>e.p), gift = pick(walk(donor)).n;
+    const spot  = pick(spots);
+    if(spot && gift && size(g) - size(spot.n) + size(gift) <= MAX_NODES){
+      const i = spot.p.ch.indexOf(spot.n);
+      if(i>=0) spot.p.ch[i] = clone(gift);
+    }
+    if(rand()<0.5) g.hue = donor.hue;
+  }
+  if(rand()<MUT_P){ mutate(g); if(rand()<MUT_P2) mutate(g); }
+  if(rand()<HUE_MUT) g.hue = (g.hue + (rand()<0.5 ? 1 : HUES-1)) % HUES;
+  return g;
+}
+
+/** A short signature so distinct morphologies can be counted. */
+function formCode(n){ return n.k==="S" ? `s${n.turn}${n.len}${n.prof}(${n.ch.map(formCode).join("")})`
+                                  : `f${n.shape}`; }
+
+/* ============================================================
+   POLLINATORS
+   A coarse tally of who is in bloom and in what colour, rebuilt each
+   tick. Blocks rather than a true radius, because a plant only needs to
+   know roughly how ordinary it looks from a little way off.
+   ============================================================ */
+let bw,bh,blockCount,blockMates;
+
+function tallyBlooms(){
+  blockCount.fill(0);
+  for(const list of blockMates) list.length=0;
+  for(const p of plants){
+    if(!p.done || !p.flowers.length) continue;
+    const b = ((p.baseY/BLK)|0)*bw + ((p.baseX/BLK)|0);
+    blockMates[b].push(p);
+    blockCount[b*HUES + p.genome.hue]++;
+  }
+}
+
+/** Everything in bloom within a block of me, by colour, plus who they are. */
+function nearby(p){
+  const bx=(p.baseX/BLK)|0, by=(p.baseY/BLK)|0;
+  const counts=[0,0,0,0], mates=[];
+  for(let dy=-1;dy<=1;dy++)for(let dx=-1;dx<=1;dx++){
+    const nx=bx+dx, ny=by+dy;
+    if(nx<0||ny<0||nx>=bw||ny>=bh) continue;
+    const b=ny*bw+nx;
+    for(let h=0;h<HUES;h++) counts[h]+=blockCount[b*HUES+h];
+    for(const q of blockMates[b]) mates.push(q);
+  }
+  return {counts,mates};
+}
+
+/* ============================================================
+   WORLD
+   ============================================================ */
+let W,H,N,kind,role,owner,fromSeed,stamp,buf,img,off,offCtx;
+let high,groundY,hueAt;
+const canvas=document.getElementById("c");
+const ctx=canvas.getContext("2d",{alpha:false});
+const hud=document.getElementById("hud");
+const bar=document.getElementById("bar");
+
+let plants=[], seeds=[], vapors=[];
+let freeIds=[], nextId=1, tick=0, paused=false, acc=0, lastT=0;
+let waterCount=0, waterMinY=0, generation=0, born=0, died=0, recolonised=0;
+let sowMode=false, showInfo=true;
+const SPEEDS=[1,4,16,64,256,512,1024]; let speedI=0;
+
+const idx=(x,y)=>y*W+x;
+const inB=(x,y)=>x>=0&&y>=0&&x<W&&y<H;
+const openAt=(x,y)=>!inB(x,y)||kind[idx(x,y)]===OPEN;
+const passable=(x,y)=>inB(x,y)&&kind[idx(x,y)]===OPEN;
+
+function barH(){ return bar.offsetHeight || 50; }
+
+function setupWorld(){
+  const px=CFG.px;
+  const availH = window.innerHeight - barH();
+  W = CFG.w || Math.max(60, Math.floor(window.innerWidth/px));
+  H = CFG.h || Math.max(40, Math.floor(availH/px));
+  N = W*H;
+  kind=new Uint8Array(N); role=new Uint8Array(N);
+  owner=new Uint16Array(N); fromSeed=new Uint16Array(N); stamp=new Int32Array(N);
+  high=new Uint8Array(N); groundY=new Uint16Array(N); hueAt=new Uint8Array(N);
+  bw=Math.ceil(W/BLK); bh=Math.ceil(H/BLK);
+  blockCount=new Int32Array(bw*bh*HUES);
+  blockMates=Array.from({length:bw*bh},()=>[]);
+  canvas.width=W*px; canvas.height=H*px;
+  canvas.style.width=(W*px)+"px"; canvas.style.height=(H*px)+"px";
+  off=document.createElement("canvas"); off.width=W; off.height=H;
+  offCtx=off.getContext("2d",{alpha:false});
+  img=offCtx.createImageData(W,H); buf=new Uint32Array(img.data.buffer);
+  ctx.imageSmoothingEnabled=false;
+}
+
+function takeId(){ return freeIds.length ? freeIds.pop() : (nextId<65535 ? nextId++ : 1); }
+
+/* ============================================================
+   PLANT
+   ============================================================ */
+class Plant {
+  constructor(genome,x,y,gen){
+    this.id=takeId(); this.genome=genome; this.formCode=formCode(genome);
+    this.gen=gen||0; if(this.gen>generation) generation=this.gen;
+    this.queue=[{node:genome,x,y,dir:0,d:0}];
+    this.cells=[]; this.energy=SEED_ENERGY; this.age=0;
+    this.sap=[]; this.flowers=[]; this.baseX=x; this.baseY=y; this.done=false; this.marks=0;
+    born++;
+  }
+
+  fits(pairs,strict){
+    let fresh=0;
+    for(let i=0;i<pairs.length;i+=2){
+      const x=pairs[i],y=pairs[i+1];
+      if(!inB(x,y)) return false;
+      const j=idx(x,y);
+      if(kind[j]===LIVE){
+        if(owner[j]!==this.id) return false;
+        if(strict) return false;        // a flower may not be built through itself
+        continue;
+      }
+      if(kind[j]===SEED_CELL) return false;
+      fresh++;
+      for(let dy=-1;dy<=1;dy++)for(let dx=-1;dx<=1;dx++){
+        const nx=x+dx,ny=y+dy; if(!inB(nx,ny))continue;
+        const m=idx(nx,ny);
+        if(kind[m]===LIVE&&owner[m]!==this.id) return false;
+      }
+    }
+    return fresh>0;
+  }
+
+  write(pairs,r,d){
+    for(let i=0;i<pairs.length;i+=2){
+      const j=idx(pairs[i],pairs[i+1]);
+      if(kind[j]===LIVE) continue;
+      if(kind[j]===WATER){ waterCount--; this.sap.push({i:j,up:true}); }
+      else if(kind[j]===VAPOR){ const k=vapors.findIndex(v=>v.i===j); if(k>=0) vapors.splice(k,1); }
+      kind[j]=LIVE; role[j]=r; owner[j]=this.id; fromSeed[j]=d;
+      hueAt[j]=this.genome.hue;
+      const cy=pairs[i+1];
+      high[j]=Math.max(0,Math.min(255,this.baseY-cy));
+      groundY[j]=cy+high[j];
+      this.cells.push(j);
+    }
+  }
+
+  costOf(job){
+    const{node,x,y,dir}=job;
+    if(node.k==="F"){ const m=flowerCells(x,y,node.shape); return (m.petals.length+m.cores.length)/2*MARK_COST; }
+    const s=strokeCells(x,y,dir,node.len,node.prof);
+    return (s.spine.length+s.wings.length)/2*MARK_COST;
+  }
+
+  grow(){
+    if(this.done) return;
+    let guard=0;
+    while(this.queue.length&&guard++<8){
+      const job=this.queue[0], cost=this.costOf(job);
+      if(this.energy<cost) return;              // wait and save
+      this.queue.shift();
+      if(this.place(job,cost)){ this.marks++; return; }
+    }
+    if(!this.queue.length) this.done=true;
+  }
+
+  place(job,cost){
+    const{node,x,y,dir,d}=job;
+    if(node.k==="F"){
+      // one more step along, so the bloom clears the stem tip entirely
+      const fx=x+DX[dir], fy=y+DY[dir];
+      const{petals,cores}=flowerCells(fx,fy,node.shape);
+      if(!this.fits(petals.concat(cores), true)) return false;
+      this.write(petals,PETAL,d); this.write(cores,CORE,d);
+      const fcells=[];
+      for(let i=0;i<petals.length;i+=2) fcells.push(idx(petals[i],petals[i+1]));
+      for(let i=0;i<cores.length;i+=2)  fcells.push(idx(cores[i],cores[i+1]));
+      this.flowers.push({x:fx,y:fy,cells:fcells});                    // every head is a seed launch site
+      this.energy-=cost; return true;
+    }
+    const{spine,wings}=strokeCells(x,y,dir,node.len,node.prof);
+    if(!this.fits(spine.concat(wings))) return false;
+    for(let i=0;i<spine.length;i+=2) this.write([spine[i],spine[i+1]],TISSUE,d+(i>>1));
+    this.write(wings,TISSUE,d+(node.len>>1));
+    this.energy-=cost;
+    const tx=spine[spine.length-2], ty=spine[spine.length-1];
+    for(const child of node.ch){
+      const cd=(dir+child.turn+8)&7;
+      this.queue.push({node:child,x:tx+DX[cd],y:ty+DY[cd],dir:cd,d:d+node.len});
+    }
+    return true;
+  }
+
+  drink(){
+    for(const j of this.cells){
+      const x=j%W,y=(j/W)|0;
+      for(let d=0;d<8;d++){
+        const nx=x+DX[d],ny=y+DY[d]; if(!inB(nx,ny))continue;
+        const m=idx(nx,ny);
+        if(kind[m]===WATER&&rand()<ABSORB_CHANCE){
+          kind[m]=OPEN; waterCount--; this.sap.push({i:j,up:true});
+          break;
+        }
+      }
+    }
+  }
+
+  moveSap(){
+    for(let p=this.sap.length-1;p>=0;p--){
+      const drop=this.sap[p];
+      const x=drop.i%W,y=(drop.i/W)|0, here=fromSeed[drop.i], cand=[];
+      for(let d=0;d<8;d++){
+        const nx=x+DX[d],ny=y+DY[d]; if(!inB(nx,ny))continue;
+        const m=idx(nx,ny);
+        if(kind[m]!==LIVE||owner[m]!==this.id) continue;
+        if(drop.up?fromSeed[m]>here:fromSeed[m]<here) cand.push(m);
+      }
+      if(cand.length){ drop.i=pick(cand); continue; }
+      if(drop.up){
+        const faces=openFaces(drop.i);
+        if(faces>=FACES_TO_FEED){ drop.up=false; drop.yield=faces; releaseVapor(drop.i); }
+        else this.sap.splice(p,1);          // water lost where nothing earns
+      } else {
+                this.energy += (drop.yield||0)*LIGHT;
+        this.sap.splice(p,1);
+      }
+    }
+  }
+
+  /** Mature plants turn income into seed. */
+  /** No flower, no seed. Each head sets seed on its own, from where it stands. */
+  sow(){
+    if(!this.done || !this.flowers.length) return;
+    const {counts,mates} = nearby(this);
+    let total=0; for(let h=0;h<HUES;h++) total+=counts[h];
+    // how unusual this bloom looks from a little way off, 0 to 1
+    const same = counts[this.genome.hue]-1, others = total-1-same;
+    const odd  = (total>1) ? others/(total-1) : 1;
+    const cost = SEED_COST*(1-NOVELTY*odd);
+
+    // whoever is in bloom nearby in a colour close enough to mine
+    const willing = mates.filter(q =>
+      q!==this && hueGap(q.genome.hue,this.genome.hue)<=COMPAT);
+
+    for(const h of this.flowers){
+      if(this.energy < cost) return;
+      this.energy -= cost;
+      const mate = willing.length ? pick(willing) : null;   // nobody? then itself
+      const g = breed(mate ? [this.genome, mate.genome] : [this.genome]);
+      seeds.push(new Seed(g, h.x, h.y, this.gen+1));
+    }
+  }
+
+  upkeep(){
+    this.age++;
+    const a=this.age/SENESCE;
+    this.energy -= this.cells.length*UPKEEP + a*a*AGE_COST;
+    return this.energy < -STARVE_DEBT;          // true if this plant gives out
+  }
+
+  die(){
+    for(const j of this.cells){
+      if(kind[j]!==LIVE||owner[j]!==this.id) continue;
+      owner[j]=0; role[j]=0; high[j]=0; groundY[j]=0;
+      if(rand()<GIVEBACK){ kind[j]=WATER; waterCount++;      // back to where it came from
+                           const gy=(j/W)|0; if(gy<waterMinY) waterMinY=gy; }
+      else kind[j]=OPEN;
+    }
+    freeIds.push(this.id);
+    died++;
+  }
+}
+
+function openFaces(j){
+  const x=j%W,y=(j/W)|0; let n=0;
+  for(let d=0;d<8;d++) if(openAt(x+DX[d],y+DY[d])) n++;
+  return n-3;
+}
+function releaseVapor(j){
+  const x=j%W,y=(j/W)|0, d=randInt(8);
+  for(let k=0;k<8;k++){
+    const dd=(d+k)&7,nx=x+DX[dd],ny=y+DY[dd];
+    if(passable(nx,ny)){ const m=idx(nx,ny); kind[m]=VAPOR; vapors.push({i:m,age:0}); return; }
+  }
+}
+
+/* ============================================================
+   SEED — disperses, then waits for rain
+   ============================================================ */
+class Seed {
+  constructor(genome,x,y,gen){
+    this.genome=genome; this.gen=gen; this.age=0;
+    this.steps=20+randInt(SEED_WALK); this.i=-1;
+    this.x=x; this.y=y;
+  }
+  occupy(){ if(passable(this.x,this.y)){ this.i=idx(this.x,this.y); kind[this.i]=SEED_CELL; } }
+  settled(){ const k=kind[idx(this.x,this.y)];   // its own marker counts as landed
+              return k===SEED_CELL||k===OPEN; }
+  release(){ if(this.i>=0&&kind[this.i]===SEED_CELL){ kind[this.i]=OPEN; } this.i=-1; }
+
+  step(){
+    this.age++;
+    if(this.age>SEED_LIFE){ this.release(); return false; }
+
+    if(this.steps>0){                            // in flight: ignores the world
+      this.steps--;
+      const d=randInt(8);                        // no bias in any direction
+      const nx=this.x+DX[d], ny=this.y+DY[d];
+      if(inB(nx,ny)){ this.x=nx; this.y=ny; }
+      if(this.steps===0 && !passable(this.x,this.y)) this.steps=4;   // keep hunting
+      return true;
+    }
+    this.occupy();
+    if(!this.settled()){ this.steps=4; return true; }   // resting on soil counts as landed
+
+    // Germinate wherever there is room to stand. Dry ground no longer blocks
+    // it — a seedling that came up thirsty starves where you can watch it.
+    for(let dy=-GERM_CLEAR;dy<=GERM_CLEAR;dy++)for(let dx=-GERM_CLEAR;dx<=GERM_CLEAR;dx++){
+      const nx=this.x+dx,ny=this.y+dy;
+      if(!inB(nx,ny)) continue;
+      const k=kind[idx(nx,ny)];
+      if(k===LIVE) return true;                  // too crowded — keep waiting
+    }
+    this.release();
+    const pl=new Plant(this.genome,this.x,this.y,this.gen);
+    pl.grow();
+    if(pl.cells.length===0){                     // no room to take root
+      born--; freeIds.push(pl.id); this.occupy(); return true;
+    }
+    plants.push(pl);
+    return false;
+  }
+}
+
+/* ============================================================
+   WATER, VAPOR, LITTER
+   ============================================================ */
+function stepWater(){
+  if(waterCount<=0){ waterMinY=0; return; }
+  let minY=H-1;
+  for(let y=H-1;y>=waterMinY;y--){
+    for(let x=0;x<W;x++){
+      const j=idx(x,y);
+      if(kind[j]!==WATER||stamp[j]===tick) continue;
+      stamp[j]=tick;
+      if(y===H-1){                                // spillway at the low edge
+        const deep = y>=4 && kind[j-4*W]===WATER;  // only a deep pool drains
+        if(deep && rand()<0.40){ kind[j]=OPEN; waterCount--; } else if(y<minY) minY=y;
+        continue;
+      }
+      // A drop looks one step ahead. Soil in its way is a soft push, not a
+      // wall: a thin scatter barely turns it, a deep pile shoves it aside.
+      // With nothing to lean away from, it just goes straight down.
+      const s=rand()<0.5?1:-1;
+      if(passable(x,y+1)){ mv(j,idx(x,y+1)); continue; }
+      if(passable(x+s,y+1)){ mv(j,idx(x+s,y+1)); continue; }
+      if(passable(x-s,y+1)){ mv(j,idx(x-s,y+1)); continue; }
+      if(rand()<0.30){
+        if(passable(x+s,y)){ mv(j,idx(x+s,y)); continue; }
+        if(passable(x-s,y)){ mv(j,idx(x-s,y)); continue; }
+      }
+      if(y<minY) minY=y;
+    }
+  }
+  waterMinY=Math.max(0,minY-1);
+  function mv(a,b){ kind[b]=WATER; stamp[b]=tick; kind[a]=OPEN;
+                    const by=(b/W)|0; if(by<minY) minY=by; }
+}
+
+function stepVapor(){
+  for(let k=vapors.length-1;k>=0;k--){
+    const v=vapors[k], j=v.i;
+    if(kind[j]!==VAPOR){ vapors.splice(k,1); continue; }
+    const x=j%W,y=(j/W)|0;
+    let met=false;
+    for(let d=0;d<8;d++){
+      const nx=x+DX[d],ny=y+DY[d];
+      if(inB(nx,ny)&&kind[idx(nx,ny)]===VAPOR){ met=true; break; }
+    }
+    if(met||++v.age>VAPOR_LIFE){
+      kind[j]=WATER; waterCount++; if(y<waterMinY) waterMinY=y;
+      vapors.splice(k,1); continue;
+    }
+    const d=randInt(8),nx=x+DX[d],ny=y+DY[d];
+    if(passable(nx,ny)){ const m=idx(nx,ny); kind[m]=VAPOR; kind[j]=OPEN; v.i=m; }
+  }
+}
+
+const season = () => 0.5 - 0.5*Math.cos(2*Math.PI*tick/SEASON);
+
+function stepRain(){
+  const wet=season();
+  const drops=CFG.rain*(0.08+0.92*wet*wet)*(N/2600);
+  let n=Math.floor(drops)+(rand()<(drops%1)?1:0);
+  while(n-->0){
+    // The whole canvas is ground seen from above, so rain lands on all of it,
+    // not along the top edge. It still runs down-canvas once it is down.
+    const x=randInt(W), y0=SKY?randInt(H-2):0;
+    for(let y=y0;y<H;y++){                    // it falls until it finds a gap
+      if(kind[idx(x,y)]===LIVE) continue;
+      if(passable(x,y)){ kind[idx(x,y)]=WATER; waterCount++;
+                         if(y<waterMinY) waterMinY=y; break; }
+      if(SKY) break;                          // it landed on something; it does not tunnel
+    }
+  }
+}
+
+/* ============================================================
+   SOWING
+   ============================================================ */
+function clearWorld(){
+  kind.fill(0); role.fill(0); owner.fill(0); fromSeed.fill(0); stamp.fill(-1);
+  high.fill(0); groundY.fill(0); hueAt.fill(0);
+  plants=[]; seeds=[]; vapors=[]; freeIds=[];
+  nextId=1; tick=0; waterCount=0; waterMinY=0;
+  generation=0; born=0; died=0; recolonised=0;
+}
+
+function sowWorld(){
+  clearWorld();
+  for(let y=H-6;y<H;y++)for(let x=0;x<W;x++)
+    if(rand()<0.55){ kind[idx(x,y)]=WATER; waterCount++; }
+  waterMinY=Math.max(0,H-7);
+  colonise(CFG.n);
+}
+
+function colonise(n){
+  let tries=0;
+  let placed=0;
+  while(placed<n&&tries<n*200){
+    tries++;
+    const x=5+randInt(W-10),y=8+randInt(H-16);
+    if(kind[idx(x,y)]!==OPEN) continue;
+    let clear=true;
+    for(const p of plants)
+      if(Math.abs(p.baseX-x)<12&&Math.abs(p.baseY-y)<14){ clear=false; break; }
+    if(!clear) continue;
+    const sd=new Seed(clone(ANCESTOR),x,y,0);
+    sd.steps=0;                                  // sown where it lies
+    seeds.push(sd); placed++;
+  }
+}
+
+/* ============================================================
+   RENDER — rim light is metabolism
+   ============================================================ */
+const DARKER=new Uint8Array(16);
+DARKER[LEAF_RIM]=STEM_LIT; DARKER[STEM_LIT]=STEM; DARKER[STEM]=STEM_DARK;
+DARKER[STEM_DARK]=STEM_DARK; DARKER[BLOOM_CORE]=BLOOM_SHADE;
+DARKER[BLOOM_SHADE]=BLOOM_SHADE;
+for(const h of HUE_PAL) DARKER[h]=BLOOM_SHADE;
+
+function tissueTone(lit,rim){
+  if(lit===0) return STEM_DARK;
+  if(lit===1) return rim?STEM:STEM_DARK;
+  if(lit===2) return rim?STEM_LIT:STEM;
+  return            rim?LEAF_RIM:STEM_LIT;
+}
+
+function render(){
+  let j=0;
+  for(let y=0;y<H;y++){
+    for(let x=0;x<W;x++,j++){
+      const k=kind[j];
+      if(k===OPEN){ buf[j]=PAL[GROUND]; continue; }
+      if(k===VAPOR){ buf[j]=PAL[VAPOR_C]; continue; }
+      if(k===SEED_CELL){ buf[j]=PAL[SEED_C]; continue; }
+      if(k===WATER){ buf[j]=PAL[(y>0&&kind[j-W]===WATER)?WATER_DEEP:WATER_C]; continue; }
+      let lit=-3;
+      for(let d=0;d<8;d++) if(openAt(x+DX[d],y+DY[d])) lit++;
+      const rim=openAt(x-1,y-1)||openAt(x,y-1);
+      let tone = role[j]===CORE  ? BLOOM_CORE
+               : role[j]===PETAL ? ((lit>=2||rim)?HUE_PAL[hueAt[j]]:BLOOM_SHADE)
+               :                   tissueTone(lit,rim);
+      buf[j]=PAL[tone];
+    }
+  }
+  for(const sd of seeds){
+    if(!inB(sd.x,sd.y)) continue;
+    const f=sd.age/SEED_LIFE;                    // dormant seed fades as it waits
+    buf[idx(sd.x,sd.y)] = PAL[ f<0.5 ? SEED_C : GROUND ];
+  }
+  for(const p of plants) for(const drop of p.sap)
+    buf[drop.i]=PAL[drop.up?WATER_C:ENERGY_C];
+  offCtx.putImageData(img,0,0);
+  ctx.imageSmoothingEnabled=false;
+  ctx.drawImage(off,0,0,canvas.width,canvas.height);
+}
+
+/* ============================================================
+   LOOP
+   ============================================================ */
+function step(){
+  tick++;
+  stepRain(); stepWater(); stepVapor(); tallyBlooms();
+
+  for(let i=plants.length-1;i>=0;i--){
+    const p=plants[i];
+    p.drink(); p.moveSap(); p.grow(); p.sow();
+    if(p.cells.length===0 || p.upkeep()){ p.die(); plants.splice(i,1); continue; }
+  }
+  for(let i=seeds.length-1;i>=0;i--) if(!seeds[i].step()) seeds.splice(i,1);
+
+  // a world rule, not a user gate: bare ground eventually gets colonised
+  if(CFG.recolonise && plants.length===0 && seeds.length===0 && tick%400===0){
+    colonise(6); recolonised++;
+  }
+}
+
+function frame(t){
+  const dt=Math.min(100,t-lastT); lastT=t;
+  if(!paused){
+    acc+=dt;
+    const iv=1000/(CFG.tps*SPEEDS[speedI]);
+    const t0=performance.now();
+    while(acc>=iv){
+      acc-=iv; step();
+      if(performance.now()-t0>12){ acc=0; break; }   // adaptive budget
+    }
+  }
+  render(); drawHud();
+  requestAnimationFrame(frame);
+}
+
+function drawHud(){
+  if(!showInfo) return;
+  let cells=0,sap=0;
+  const forms=new Set();
+  for(const p of plants){
+    cells+=p.cells.length; sap+=p.sap.length; forms.add(p.formCode);
+  }
+  const wet=season();
+  hud.textContent =
+    `sampler 9  ${W}\u00d7${H}  ${CFG.px}px  t${tick}\n`+
+    `plants ${plants.length}  seeds ${seeds.length}  cells ${cells}\n`+
+    `forms ${forms.size}  gen ${generation}  born ${born}  died ${died}\n`+
+    `water ${waterCount}  vapor ${vapors.length}\n`+
+    `sap ${sap}  seed ${worldSeed}  ${wet<0.35?"dry":wet>0.65?"wet":"turning"}`+
+    (recolonised?`  recol ${recolonised}`:``);
+}
+
+/* ============================================================
+   TOUCH UI
+   ============================================================ */
+function syncBar(){
+  for(const b of bar.children){
+    const a=b.dataset.a;
+    if(a==="play"){ b.textContent=paused?"play":"pause"; b.classList.toggle("on",paused); }
+    if(a==="speed"){ b.textContent=SPEEDS[speedI]+"\u00d7"; b.classList.toggle("on",speedI>0); }
+    if(a==="scale"){ b.textContent=CFG.px+"px"; }
+    if(a==="sow"){ b.classList.toggle("on",sowMode); }
+    if(a==="info"){ b.classList.toggle("on",showInfo); }
+  }
+  hud.classList.toggle("off",!showInfo);
+}
+
+bar.addEventListener("click",e=>{
+  const b=e.target.closest("button"); if(!b) return;
+  switch(b.dataset.a){
+    case "play":  paused=!paused; break;
+    case "speed": speedI=(speedI+1)%SPEEDS.length; break;
+    case "scale": CFG.px=CFG.px>1?(CFG.px===4?3:CFG.px===3?2:1):4; boot(); break;
+    case "sow":   sowMode=!sowMode; break;
+    case "resow": reseed((Math.random()*4294967295)>>>0); sowWorld(); break;
+    case "info":  showInfo=!showInfo; break;
+  }
+  syncBar();
+});
+
+canvas.addEventListener("pointerdown",e=>{
+  if(!sowMode) return;
+  const r=canvas.getBoundingClientRect();
+  const x=Math.floor((e.clientX-r.left)/CFG.px), y=Math.floor((e.clientY-r.top)/CFG.px);
+  if(!inB(x,y)||kind[idx(x,y)]!==OPEN) return;
+  const sd=new Seed(clone(ANCESTOR),x,y,generation); sd.steps=0; seeds.push(sd);
+});
+
+addEventListener("keydown",e=>{
+  const k=e.key;
+  if(k===" "){ paused=!paused; e.preventDefault(); }
+  else if(k==="r"||k==="R"){ reseed((Math.random()*4294967295)>>>0); sowWorld(); }
+  else if(k==="ArrowRight"){ speedI=Math.min(SPEEDS.length-1,speedI+1); }
+  else if(k==="ArrowLeft"){ speedI=Math.max(0,speedI-1); }
+  else if(k==="i"||k==="I"){ showInfo=!showInfo; }
+  syncBar();
+});
+
+let rt;
+addEventListener("resize",()=>{ clearTimeout(rt); rt=setTimeout(boot,200); });
+
+function boot(){ setupWorld(); sowWorld(); syncBar(); }
+boot();
+requestAnimationFrame(t=>{ lastT=t; frame(t); });
+</script>
+</body>
+</html>

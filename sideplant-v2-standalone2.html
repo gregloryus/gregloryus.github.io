@@ -1,0 +1,570 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
+<title>Sideplant v2 — conserved-light TBT ecology</title>
+<style>
+  :root {
+    color-scheme: dark;
+    --ink:#e9f2e5; --muted:#9db0a3; --panel:#101a20e8; --line:#314149;
+    --sky:#07121d; --accent:#b7e36c; --button:#1d2c32; --warn:#ffc86b;
+  }
+  * { box-sizing:border-box; }
+  html,body { width:100%; height:100%; margin:0; overflow:hidden; background:var(--sky); color:var(--ink); font:13px/1.3 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; }
+  body { display:grid; grid-template-rows:auto 48px 1fr auto; touch-action:none; }
+  header { padding:max(7px,env(safe-area-inset-top)) 10px 6px; background:#0b151bcc; border-bottom:1px solid var(--line); z-index:5; }
+  #stats { display:flex; gap:8px 14px; flex-wrap:wrap; align-items:center; }
+  #stats b { color:var(--accent); font-weight:700; }
+  #miniWrap { position:relative; border-bottom:1px solid var(--line); background:#0a1319; }
+  #mini { width:100%; height:47px; display:block; image-rendering:pixelated; }
+  #miniLabel { position:absolute; left:8px; top:4px; color:#d7e2d8aa; font-size:10px; pointer-events:none; }
+  #worldWrap { position:relative; min-height:0; overflow:hidden; background:linear-gradient(#071521,#101c22 70%,#18211d); }
+  #view { width:100%; height:100%; display:block; image-rendering:pixelated; cursor:grab; }
+  #view.dragging { cursor:grabbing; }
+  #legend { position:absolute; left:8px; bottom:8px; display:flex; flex-wrap:wrap; gap:4px 9px; max-width:calc(100% - 16px); padding:5px 7px; color:#d4dfd4; background:#071018b8; border:1px solid #ffffff1b; border-radius:7px; pointer-events:none; font-size:10px; }
+  #legend span { white-space:nowrap; }
+  #legend i { display:inline-block; width:8px; height:8px; margin-right:4px; border:1px solid #ffffff33; vertical-align:-1px; }
+  #notice { position:absolute; inset:12px auto auto 50%; transform:translateX(-50%); padding:6px 10px; border-radius:8px; background:#080f14d9; color:var(--warn); opacity:0; transition:opacity .2s; pointer-events:none; white-space:nowrap; }
+  #notice.show { opacity:1; }
+  footer { display:grid; grid-template-columns:repeat(6,minmax(0,1fr)); gap:5px; padding:7px 7px max(7px,env(safe-area-inset-bottom)); border-top:1px solid var(--line); background:#0b151b; z-index:5; }
+  button,select,input { font:inherit; color:var(--ink); }
+  button { min-height:38px; padding:5px 4px; border:1px solid #42555d; border-radius:7px; background:var(--button); }
+  button:active { background:#31464e; }
+  #settings { position:fixed; z-index:20; inset:max(8px,env(safe-area-inset-top)) 8px max(8px,env(safe-area-inset-bottom)); overflow:auto; padding:14px; border:1px solid #50636a; border-radius:12px; background:#0d171df7; box-shadow:0 16px 60px #000b; }
+  #settings[hidden],#inspect[hidden] { display:none; }
+  #settings h2,#inspect h2 { margin:0 0 10px; font:700 16px/1.2 system-ui,sans-serif; }
+  #settingsGrid { display:grid; grid-template-columns:1fr 1fr; gap:11px 14px; }
+  label { display:grid; gap:4px; color:var(--muted); }
+  label.wide,.wide { grid-column:1/-1; }
+  label output { float:right; color:var(--ink); }
+  input[type=range] { width:100%; accent-color:var(--accent); }
+  select { width:100%; min-height:34px; padding:4px; background:#17242a; border:1px solid #43555d; border-radius:6px; }
+  .settingsButtons { display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-top:15px; }
+  .note { color:var(--muted); margin:12px 0 0; font:12px/1.45 system-ui,sans-serif; }
+  #inspect { position:fixed; z-index:18; left:10px; right:10px; bottom:calc(66px + env(safe-area-inset-bottom)); max-height:44vh; overflow:auto; padding:12px; background:#0c161deb; border:1px solid #4b6068; border-radius:10px; box-shadow:0 10px 35px #0009; }
+  #inspect pre { white-space:pre-wrap; word-break:break-word; margin:0; color:#cbd8cc; }
+  #inspectClose { float:right; min-height:28px; padding:2px 9px; }
+  @media (max-width:620px) {
+    body { grid-template-rows:auto 42px 1fr auto; }
+    header { font-size:11px; }
+    footer { grid-template-columns:repeat(3,1fr); }
+    button { min-height:36px; }
+    #settingsGrid { grid-template-columns:1fr; }
+    label.wide,.wide { grid-column:1; }
+  }
+</style>
+</head>
+<body>
+<header><div id="stats">starting…</div></header>
+<div id="miniWrap"><canvas id="mini"></canvas><span id="miniLabel">10,000-cell ring overview — tap to jump</span></div>
+<main id="worldWrap">
+  <canvas id="view" aria-label="Side-view evolving plant simulation"></canvas>
+  <div id="legend"></div><div id="notice"></div>
+</main>
+<footer>
+  <button id="play">Pause</button><button id="step">Step</button><button id="speed">Speed: max</button>
+  <button id="zoomOut">Zoom −</button><button id="zoomIn">Zoom +</button><button id="more">Settings</button>
+</footer>
+
+<section id="settings" hidden>
+  <button id="settingsClose" style="float:right">Close</button><h2>Ecology and experiment</h2>
+  <div id="settingsGrid">
+    <label>Founder deployment
+      <select id="FOUNDER_MODE"><option value="many">One genotype every N columns</option><option value="one">One physical founder</option></select>
+    </label>
+    <label>Founder spacing <output id="o-FOUNDER_SPACING"></output><input id="FOUNDER_SPACING" type="range" min="20" max="200" step="5"></label>
+    <label>Lifespan <output id="o-LIFESPAN"></output><input id="LIFESPAN" type="range" min="32" max="512" step="4"></label>
+    <label>Mutation probability <output id="o-MUTATION_RATE"></output><input id="MUTATION_RATE" type="range" min="0" max="1" step="0.01"></label>
+    <label>Stem build cost <output id="o-BUILD_STEM"></output><input id="BUILD_STEM" type="range" min="1" max="32" step="1"></label>
+    <label>Stem upkeep <output id="o-UPKEEP_STEM"></output><input id="UPKEEP_STEM" type="range" min="0" max="4" step="0.25"></label>
+    <label>Leaf cost multiplier <output id="o-LEAF_RATIO"></output><input id="LEAF_RATIO" type="range" min="1" max="5" step="0.25"></label>
+    <label>Seed × child build cost <output id="o-SEED_MULT"></output><input id="SEED_MULT" type="range" min="0.5" max="3" step="0.25"></label>
+    <label>Fixed seed overhead <output id="o-SEED_OVERHEAD"></output><input id="SEED_OVERHEAD" type="range" min="0" max="160" step="4"></label>
+    <label>Starvation grace <output id="o-STARVE_GRACE"></output><input id="STARVE_GRACE" type="range" min="1" max="64" step="1"></label>
+    <label>Blocked-tip patience <output id="o-BLOCK_PATIENCE"></output><input id="BLOCK_PATIENCE" type="range" min="0" max="128" step="4"></label>
+    <label>Sand clear run <output id="o-CLEAR_RUN"></output><input id="CLEAR_RUN" type="range" min="4" max="32" step="1"></label>
+    <label>Dormant seed life <output id="o-DORMANCY"></output><input id="DORMANCY" type="range" min="16" max="512" step="8"></label>
+    <label class="wide">Random seed <input id="RNG_SEED" inputmode="numeric" value="246813579"></label>
+  </div>
+  <div class="settingsButtons"><button id="restart">Restart with settings</button><button id="colorMode">Color: light</button></div>
+  <p class="note">The default cotyledon costs 48 energy including its root. A seed costs the child’s construction energy plus a fixed 48-energy reserve, so the cotyledon seed carries 96. The founder gains about 2 energy per mature tick. Its calibrated 288-tick life normally funds six seeds—with no reproductive cap.</p>
+</section>
+
+<section id="inspect" hidden><button id="inspectClose">Close</button><h2>Cell inspection</h2><pre id="inspectText"></pre></section>
+
+<script id="core" type="text/plain">
+function makeSim(options) {
+  "use strict";
+  const C = Object.assign({
+    W:10000, H0:16, H_MAX:2048, LIGHT_TOP:8,
+    BUILD_STEM:8, UPKEEP_STEM:1, LEAF_RATIO:2, SEED_MULT:1, SEED_OVERHEAD:48,
+    LIFESPAN:288, MIN_REPRO_AGE:12, MUTATION_RATE:1/3,
+    STARVE_GRACE:16, BLOCK_RETRY:8, BLOCK_PATIENCE:32,
+    DORMANCY:96, AIR_STUCK_LIMIT:32, AIR_FALL_CHANCE:0.55, CLEAR_RUN:8,
+    FOUNDER_MODE:"many", FOUNDER_SPACING:50,
+    MAX_GENOME_GUARD:4096, RNG_SEED:246813579
+  }, options || {});
+
+  const EMPTY=0, SAND=1, ROOT=2, STEM=3, LEAF=4, FREE_SEED=5;
+  const LEAF_GENE=8;
+  const DX=[0,1,0,-1], DY=[1,0,-1,0]; // north, east, south, west; y increases upward
+  const SLOT_BIT=[4,2,1];              // canonical LEFT, FORWARD, RIGHT
+  const FOUNDER=Uint8Array.from([2,5,8,8]);
+  const W=C.W;
+  let H=C.H0, type, owner, nodeAt, leafCapture, sandActiveFlag, movedStamp;
+  let dirtyCols=[], sandActive=[], bottomCandidates=new Set(), hangingPlants=new Set();
+  const dirtyFlag=new Uint8Array(W);
+  let rng=(C.RNG_SEED>>>0)||1, tick=0, nextPlantId=1, nextSeedId=1;
+  let plants=[], seeds=[];
+  const plantById=new Map(), seedById=new Map(), genomeCounts=new Map();
+  const seenGenomes=new Set(), seenSubtrees=new Set();
+  const stats={births:0,deaths:0,aged:0,starved:0,seedsMade:0,seedsGerminated:0,seedsLost:0,
+    mutants:0,sand:0,clears:0,clearedCells:0,rigidDrops:0,heightExpansions:0};
+
+  function alloc(newH) {
+    const n=W*newH;
+    const nt=new Uint8Array(n), no=new Int32Array(n), nn=new Int32Array(n), nl=new Float32Array(n);
+    const na=new Uint8Array(n), ns=new Int32Array(n);
+    if (type) { nt.set(type); no.set(owner); nn.set(nodeAt); nl.set(leafCapture); na.set(sandActiveFlag); ns.set(movedStamp); }
+    type=nt; owner=no; nodeAt=nn; leafCapture=nl; sandActiveFlag=na; movedStamp=ns; H=newH;
+  }
+  alloc(H);
+
+  function rand(){ rng^=rng<<13; rng^=rng>>>17; rng^=rng<<5; return (rng>>>0)/4294967296; }
+  function randInt(n){ return (rand()*n)|0; }
+  function wrapX(x){ x%=W; return x<0?x+W:x; }
+  function idx(x,y){ return y*W+wrapX(x); }
+  function xy(i){ const y=(i/W)|0; return [i-y*W,y]; }
+  function isLiving(t){ return t===ROOT||t===STEM||t===LEAF; }
+  function leafBuild(){ return C.BUILD_STEM*C.LEAF_RATIO; }
+  function leafUpkeep(){ return C.UPKEEP_STEM*C.LEAF_RATIO; }
+  function expandFor(y){
+    if (y<H-2) return true;
+    if (H>=C.H_MAX) return y<H;
+    let nh=H; while (y>=nh-2&&nh<C.H_MAX) nh=Math.min(nh*2,C.H_MAX);
+    if (nh!==H) { alloc(nh); stats.heightExpansions++; }
+    return y<H;
+  }
+
+  function newTreeNode(gene,parent,slot){
+    return {gene:gene===LEAF_GENE?LEAF_GENE:(gene&7),leaf:gene===LEAF_GENE,parent,slot,kids:[null,null,null],index:-1,cell:-1,facing:0,light:0};
+  }
+  function decodeGenome(genome){
+    let k=0; const nodes=[];
+    function build(parent,slot){
+      if (k>=genome.length) return null;
+      const n=newTreeNode(genome[k++],parent,slot); n.index=nodes.length; nodes.push(n);
+      if (!n.leaf) for (let s=0;s<3;s++) if (n.gene&SLOT_BIT[s]) n.kids[s]=build(n,s);
+      return n;
+    }
+    let root=build(null,-1);
+    if (!root) { root=newTreeNode(0,null,-1); root.index=0; nodes.push(root); }
+    if (root.leaf) { root.leaf=false; root.gene=0; }
+    return {root,nodes};
+  }
+  function encodeTree(root){
+    const out=[];
+    (function walk(n){
+      if (n.leaf) { out.push(LEAF_GENE); return; }
+      let g=0; for(let s=0;s<3;s++) if(n.kids[s]) g|=SLOT_BIT[s];
+      out.push(g); for(let s=0;s<3;s++) if(n.kids[s]) walk(n.kids[s]);
+    })(root);
+    return Uint8Array.from(out);
+  }
+  function collectNodes(root){ const a=[]; (function w(n){a.push(n);for(let s=0;s<3;s++)if(n.kids[s])w(n.kids[s]);})(root); return a; }
+  function mutateGenome(genome){
+    const t=decodeGenome(genome), all=collectNodes(t.root), nonRoot=all.slice(1);
+    const add=all.filter(n=>!n.leaf&&n.kids.some(k=>!k));
+    const remove=nonRoot.filter(n=>n.leaf||n.kids.every(k=>!k));
+    const toggle=remove.slice();
+    const move=remove.filter(n=>n.parent&&n.parent.kids.filter(Boolean).length<3);
+    const ops=[];
+    if(add.length&&all.length<C.MAX_GENOME_GUARD) ops.push(["add",35]);
+    if(remove.length) ops.push(["remove",35]);
+    if(toggle.length) ops.push(["toggle",20]);
+    if(move.length) ops.push(["move",10]);
+    if(!ops.length) return {genome:Uint8Array.from(genome),changed:false,op:"none"};
+    let total=ops.reduce((s,o)=>s+o[1],0), r=rand()*total, op=ops[0][0];
+    for(const o of ops){ r-=o[1]; if(r<=0){op=o[0];break;} }
+    if(op==="add"){
+      const p=add[randInt(add.length)], empty=[]; for(let s=0;s<3;s++)if(!p.kids[s])empty.push(s);
+      const s=empty[randInt(empty.length)]; p.kids[s]=newTreeNode(rand()<0.5?LEAF_GENE:0,p,s);
+    } else if(op==="remove"){
+      const n=remove[randInt(remove.length)]; n.parent.kids[n.slot]=null;
+    } else if(op==="toggle"){
+      const n=toggle[randInt(toggle.length)]; n.leaf=!n.leaf; n.gene=n.leaf?LEAF_GENE:0; n.kids=[null,null,null];
+    } else {
+      const n=move[randInt(move.length)], p=n.parent, empty=[]; for(let s=0;s<3;s++)if(!p.kids[s])empty.push(s);
+      if(empty.length){ p.kids[n.slot]=null; n.slot=empty[randInt(empty.length)]; p.kids[n.slot]=n; }
+    }
+    const out=encodeTree(t.root);
+    return {genome:out,changed:String(out)!==String(genome),op};
+  }
+  function buildCost(genome){
+    let c=C.BUILD_STEM; // the seed/root itself is real biomass
+    for(let i=1;i<genome.length;i++) c+=genome[i]===LEAF_GENE?leafBuild():C.BUILD_STEM;
+    return c;
+  }
+  function genomeKey(g){ return Array.from(g).join("."); }
+  function genomeHue(g){ let h=2166136261; for(const v of g){h^=v;h=Math.imul(h,16777619);} return (h>>>0)&255; }
+  function recordComponents(g){
+    seenGenomes.add(genomeKey(g));
+    const t=decodeGenome(g);
+    for(const n of t.nodes){
+      const sub=encodeTree(n); if(sub.length>=2) seenSubtrees.add(genomeKey(sub));
+    }
+  }
+
+  function markCol(x){ x=wrapX(x); if(!dirtyFlag[x]){dirtyFlag[x]=1;dirtyCols.push(x);} }
+  function relightColumn(x){
+    for(let y=0;y<H;y++){
+      const i=y*W+x;
+      if(type[i]===LEAF&&leafCapture[i]!==0){
+        const p=plantById.get(owner[i]); if(p)p.income-=leafCapture[i];
+        leafCapture[i]=0;
+      }
+    }
+    let light=C.LIGHT_TOP;
+    for(let y=H-1;y>=0&&light>0;y--){
+      const i=y*W+x,t=type[i];
+      if(t===SAND){light=0;break;}
+      if(isLiving(t)||t===FREE_SEED){
+        const outgoing=light>1?Math.floor(light/2):0;
+        if(t===LEAF){
+          const captured=light-outgoing; leafCapture[i]=captured;
+          const p=plantById.get(owner[i]); if(p)p.income+=captured;
+        }
+        light=outgoing;
+      }
+    }
+  }
+  function relightDirty(){ for(const x of dirtyCols){dirtyFlag[x]=0;relightColumn(x);} dirtyCols=[]; }
+
+  function activateSand(i){ if(i>=0&&i<type.length&&type[i]===SAND&&!sandActiveFlag[i]){sandActiveFlag[i]=1;sandActive.push(i);} }
+  function destabilizeAbove(i){
+    const [x,y]=xy(i); if(y+1>=H)return;
+    for(let dx=-1;dx<=1;dx++) activateSand(idx(x+dx,y+1));
+    const a=idx(x,y+1); if(type[a]===ROOT){const p=plantById.get(owner[a]);if(p)hangingPlants.add(p.id);}
+  }
+  function vacate(i){ const [x]=xy(i); type[i]=EMPTY;owner[i]=0;nodeAt[i]=0;leafCapture[i]=0;markCol(x);destabilizeAbove(i); }
+  function occupySand(i){ type[i]=SAND;owner[i]=0;nodeAt[i]=0;leafCapture[i]=0;movedStamp[i]=tick;stats.sand++;activateSand(i);const[x,y]=xy(i);markCol(x);if(y===0)bottomCandidates.add(x); }
+  function moveSand(i,j){
+    const [x0]=xy(i),[x1,y1]=xy(j); type[j]=SAND;owner[j]=0;nodeAt[j]=0;leafCapture[j]=0;movedStamp[j]=tick;
+    type[i]=EMPTY;owner[i]=0;nodeAt[i]=0;leafCapture[i]=0;markCol(x0);markCol(x1);destabilizeAbove(i);activateSand(j);if(y1===0)bottomCandidates.add(x1);
+  }
+  function sandStep(){
+    const list=sandActive; sandActive=[]; for(const i of list)sandActiveFlag[i]=0;
+    for(const i of list){
+      if(type[i]!==SAND||movedStamp[i]===tick)continue;
+      const [x,y]=xy(i); if(y===0){bottomCandidates.add(x);continue;}
+      const down=idx(x,y-1); if(type[down]===EMPTY){moveSand(i,down);continue;}
+      let d=rand()<0.5?-1:1,moved=false;
+      for(let q=0;q<2;q++,d=-d){const j=idx(x+d,y-1);if(type[j]===EMPTY){moveSand(i,j);moved=true;break;}}
+      if(!moved&&type[i]===SAND)movedStamp[i]=0;
+    }
+  }
+  function clearBottomRuns(){
+    if(!bottomCandidates.size)return;
+    const candidates=Array.from(bottomCandidates); bottomCandidates.clear(); let events=0;
+    for(const cx of candidates){
+      if(events>=64||type[cx]!==SAND)continue;
+      let start=cx;
+      for(let n=1;n<C.CLEAR_RUN;n++){const q=wrapX(start-1);if(type[q]!==SAND)break;start=q;}
+      let count=0; while(count<C.CLEAR_RUN&&type[wrapX(start+count)]===SAND)count++;
+      if(count<C.CLEAR_RUN)continue;
+      for(let n=0;n<C.CLEAR_RUN;n++){
+        const x=wrapX(start+n),i=x; if(type[i]!==SAND)break;
+        type[i]=EMPTY;owner[i]=0;nodeAt[i]=0;leafCapture[i]=0;stats.sand--;markCol(x);destabilizeAbove(i);
+      }
+      stats.clears++;stats.clearedCells+=C.CLEAR_RUN;events++;
+      bottomCandidates.add(wrapX(start-1));bottomCandidates.add(wrapX(start+C.CLEAR_RUN));
+    }
+  }
+
+  function placePlantCell(p,n,cellIndex,cellType,facing){
+    type[cellIndex]=cellType;owner[cellIndex]=p.id;nodeAt[cellIndex]=n.index+1;n.cell=cellIndex;n.facing=facing;n.light=0;
+    p.cellNodes.push(n.index);if(cellType===STEM)p.nStem++;else if(cellType===LEAF)p.nLeaf++;
+    const[x]=xy(cellIndex);markCol(x);
+    for(let s=0;s<3;s++)if(n.kids[s])p.frontier.push({node:n.kids[s].index,blockedAt:-1,nextTry:0});
+  }
+  function createPlant(genome,cellIndex,energy,generation,parentKey){
+    const decoded=decodeGenome(genome), key=genomeKey(genome);
+    const p={id:nextPlantId++,idx:plants.length,genome:Uint8Array.from(genome),key,hue:genomeHue(genome),
+      root:decoded.root,nodes:decoded.nodes,cellNodes:[],frontier:[],energy,income:0,nStem:0,nLeaf:0,
+      age:0,starve:0,generation,parentKey:parentKey||null,embryo:null,seedsMade:0,dead:false};
+    plants.push(p);plantById.set(p.id,p);genomeCounts.set(key,(genomeCounts.get(key)||0)+1);recordComponents(genome);
+    placePlantCell(p,p.root,cellIndex,ROOT,0);stats.births++;return p;
+  }
+  function killPlant(p,reason){
+    if(p.dead)return;p.dead=true;
+    for(const ni of p.cellNodes){const n=p.nodes[ni],i=n.cell;if(i<0||!isLiving(type[i])||owner[i]!==p.id)continue;
+      const[x,y]=xy(i);type[i]=SAND;owner[i]=0;nodeAt[i]=0;leafCapture[i]=0;n.cell=-1;stats.sand++;activateSand(i);markCol(x);if(y===0)bottomCandidates.add(x);}
+    plantById.delete(p.id);hangingPlants.delete(p.id);genomeCounts.set(p.key,(genomeCounts.get(p.key)||1)-1);if(genomeCounts.get(p.key)<=0)genomeCounts.delete(p.key);
+    const last=plants.pop();if(last!==p){plants[p.idx]=last;last.idx=p.idx;}
+    stats.deaths++;if(reason==="age")stats.aged++;else stats.starved++;
+  }
+  function childFacing(parentFacing,slot){return slot===0?(parentFacing+3)&3:slot===1?parentFacing:(parentFacing+1)&3;}
+  function growthTarget(p,n){
+    const par=n.parent;if(!par||par.cell<0)return {kind:"permanent"};
+    const [px,py]=xy(par.cell),f=childFacing(par.facing,n.slot),tx=wrapX(px+DX[f]),ty=py+DY[f];
+    if(ty<0||!expandFor(ty))return {kind:"permanent"};
+    const ti=idx(tx,ty),tt=type[ti];
+    if(tt!==EMPTY)return {kind:owner[ti]===p.id&&isLiving(tt)?"permanent":"transient"};
+    const l=(f+3)&3,r=(f+1)&3,ax=tx+DX[f],ay=ty+DY[f];
+    const checks=[[tx+DX[l],ty+DY[l]],[tx+DX[r],ty+DY[r]],[ax,ay],[ax+DX[l],ay+DY[l]],[ax+DX[r],ay+DY[r]]];
+    for(const q of checks){if(q[1]<0||q[1]>=H)continue;const j=idx(q[0],q[1]);if(j!==par.cell&&isLiving(type[j])&&owner[j]===p.id)return {kind:"permanent"};}
+    return {kind:"ok",index:ti,facing:f};
+  }
+  function tryGrowth(p){
+    if(!p.frontier.length)return false;
+    const attempts=p.frontier.length;
+    for(let z=0;z<attempts;z++){
+      const item=p.frontier.shift(),n=p.nodes[item.node];
+      if(tick<item.nextTry){p.frontier.push(item);continue;}
+      const cost=n.leaf?leafBuild():C.BUILD_STEM;
+      if(p.energy<cost){p.frontier.unshift(item);return false;}
+      const target=growthTarget(p,n);
+      if(target.kind==="ok"){
+        placePlantCell(p,n,target.index,n.leaf?LEAF:STEM,target.facing);p.energy-=cost;return true;
+      }
+      if(target.kind==="transient"){
+        if(item.blockedAt<0)item.blockedAt=tick;
+        if(tick-item.blockedAt<=C.BLOCK_PATIENCE){item.nextTry=tick+C.BLOCK_RETRY;p.frontier.push(item);}
+      }
+    }
+    return false;
+  }
+  function randomRealizedTip(p){
+    const tips=[];for(const ni of p.cellNodes){const n=p.nodes[ni];if(n.cell<0)continue;let child=false;for(const k of n.kids)if(k&&k.cell>=0){child=true;break;}if(!child)tips.push(n);}
+    return tips.length?tips[randInt(tips.length)]:p.root;
+  }
+  function pathToRoot(n){const a=[];while(n){a.push(n.index);n=n.parent;}a.reverse();return a;}
+  function makeOffspring(p){
+    if(!p.embryo){
+      let g=Uint8Array.from(p.genome),changed=false,op="clone";
+      if(rand()<C.MUTATION_RATE){const m=mutateGenome(g);g=m.genome;changed=m.changed;op=m.op;}
+      p.embryo={genome:g,mutated:changed,op,cost:C.SEED_OVERHEAD+C.SEED_MULT*buildCost(g)};
+    }
+    if(p.energy<p.embryo.cost)return false;
+    const tip=randomRealizedTip(p),s={id:nextSeedId++,state:0,parentId:p.id,parentKey:p.key,path:pathToRoot(tip),pathPos:0,
+      displayCell:p.root.cell,genome:p.embryo.genome,energy:p.embryo.cost,generation:p.generation+1,mutated:p.embryo.mutated,
+      age:0,landedAge:0,stuck:0,cell:-1};
+    seeds.push(s);seedById.set(s.id,s);p.energy-=p.embryo.cost;p.seedsMade++;stats.seedsMade++;if(p.embryo.mutated)stats.mutants++;p.embryo=null;return true;
+  }
+  function plantStep(){
+    for(let k=plants.length-1;k>=0;k--){
+      const p=plants[k];p.age++;p.energy+=p.income;
+      const upkeep=(1+p.nStem)*C.UPKEEP_STEM+p.nLeaf*leafUpkeep();
+      if(p.energy>=upkeep){p.energy-=upkeep;p.starve=0;}else{p.energy=0;p.starve++;}
+      if(p.age>=C.LIFESPAN){killPlant(p,"age");continue;}
+      if(p.starve>=C.STARVE_GRACE){killPlant(p,"starve");continue;}
+      if(p.frontier.length){tryGrowth(p);continue;}
+      if(p.age>=C.MIN_REPRO_AGE&&p.nLeaf>0)makeOffspring(p);
+    }
+  }
+
+  function attemptRigidDrops(){
+    if(!hangingPlants.size)return;
+    const ids=Array.from(hangingPlants);
+    for(const id of ids){
+      const p=plantById.get(id);if(!p){hangingPlants.delete(id);continue;}
+      const root=p.root.cell;if(root<W||type[root-W]!==EMPTY){hangingPlants.delete(id);continue;}
+      let ok=true;
+      for(const ni of p.cellNodes){const c=p.nodes[ni].cell,d=c-W;if(d<0){ok=false;break;}const t=type[d];if(t!==EMPTY&&!(isLiving(t)&&owner[d]===p.id)){ok=false;break;}}
+      if(!ok)continue;
+      const old=[];for(const ni of p.cellNodes){const n=p.nodes[ni];old.push([n,n.cell,type[n.cell]]);}
+      p.income=0;
+      for(const [n,c] of old){type[c]=EMPTY;owner[c]=0;nodeAt[c]=0;leafCapture[c]=0;markCol(c%W);}
+      for(const [n,c,t] of old){const d=c-W;n.cell=d;type[d]=t;owner[d]=p.id;nodeAt[d]=n.index+1;leafCapture[d]=0;markCol(d%W);}
+      for(const [,c] of old)destabilizeAbove(c);
+      stats.rigidDrops++; if(p.root.cell<W||type[p.root.cell-W]!==EMPTY)hangingPlants.delete(id);
+    }
+  }
+
+  function seedVacate(s){if(s.cell>=0&&type[s.cell]===FREE_SEED&&owner[s.cell]===s.id){vacate(s.cell);}s.cell=-1;}
+  function seedMove(s,j){const old=s.cell;type[j]=FREE_SEED;owner[j]=s.id;nodeAt[j]=0;leafCapture[j]=0;s.cell=j;markCol(j%W);if(old>=0)vacate(old);}
+  function seedToSand(s){if(s.cell>=0&&type[s.cell]===FREE_SEED){const i=s.cell;type[i]=SAND;owner[i]=0;nodeAt[i]=0;leafCapture[i]=0;stats.sand++;activateSand(i);const[x,y]=xy(i);markCol(x);if(y===0)bottomCandidates.add(x);}s.cell=-1;}
+  function removeSeed(s,lost){seedVacate(s);seedById.delete(s.id);if(lost)stats.seedsLost++;}
+  function canGerminate(s){
+    if(s.cell<0||type[s.cell]!==FREE_SEED)return false;const[x,y]=xy(s.cell);
+    if(y>0&&type[idx(x,y-1)]!==SAND)return false;
+    for(const dx of [-1,1]){const t=type[idx(x+dx,y)];if(isLiving(t)||t===FREE_SEED)return false;}
+    if(!expandFor(y+1))return false;
+    if(type[idx(x,y+1)]!==EMPTY)return false;
+    return true;
+  }
+  function releaseSeed(s,p){
+    const n=p.nodes[s.path[s.path.length-1]], [x,y]=xy(n.cell);
+    const candidates=[[x,y+1],[x+DX[n.facing],y+DY[n.facing]],[x-1,y],[x+1,y]];
+    for(const q of candidates){if(q[1]<0||!expandFor(q[1]))continue;const j=idx(q[0],q[1]);if(type[j]===EMPTY){type[j]=FREE_SEED;owner[j]=s.id;s.cell=j;s.state=1;markCol(q[0]);return true;}}
+    return false;
+  }
+  function airborneStep(s){
+    const[x,y]=xy(s.cell);
+    if(y===0){s.state=2;s.landedAge=0;return;}
+    const below=idx(x,y-1),bt=type[below];
+    if(bt===SAND){s.state=2;s.landedAge=0;return;}
+    if(rand()>C.AIR_FALL_CHANCE){
+      let d=rand()<.5?-1:1;for(let q=0;q<2;q++,d=-d){const j=idx(x+d,y);if(type[j]===EMPTY){seedMove(s,j);s.stuck=0;return;}}
+    }
+    let dx=randInt(3)-1,candidates=[];
+    candidates.push(idx(x+dx,y-1));if(dx!==0)candidates.push(below);candidates.push(idx(x+(dx===0?(rand()<.5?-1:1):-dx),y-1));
+    for(const j of candidates)if(type[j]===EMPTY){seedMove(s,j);s.stuck=0;return;}
+    if(isLiving(bt)||bt===FREE_SEED){
+      let d=rand()<.5?-1:1;for(let q=0;q<2;q++,d=-d){const j=idx(x+d,y);if(type[j]===EMPTY){seedMove(s,j);s.stuck=0;return;}}
+    }
+    if(++s.stuck>C.AIR_STUCK_LIMIT){seedToSand(s);s.state=9;stats.seedsLost++;}
+  }
+  function seedStep(){
+    const alive=[];
+    for(const s of seeds){
+      s.age++;
+      if(s.state===0){
+        const p=plantById.get(s.parentId);if(!p){seedById.delete(s.id);stats.seedsLost++;continue;}
+        if(s.pathPos<s.path.length-1){s.pathPos++;s.displayCell=p.nodes[s.path[s.pathPos]].cell;}
+        else if(!releaseSeed(s,p)){if(++s.stuck>C.AIR_STUCK_LIMIT){seedById.delete(s.id);stats.seedsLost++;continue;}}
+      } else if(s.state===1) airborneStep(s);
+      else if(s.state===2){
+        if(canGerminate(s)){
+          const i=s.cell;type[i]=EMPTY;owner[i]=0;markCol(i%W);s.cell=-1;seedById.delete(s.id);
+          createPlant(s.genome,i,s.energy,s.generation,s.parentKey);stats.seedsGerminated++;continue;
+        }
+        if(++s.landedAge>=C.DORMANCY){seedToSand(s);seedById.delete(s.id);stats.seedsLost++;continue;}
+      }
+      if(s.state!==9)alive.push(s);else seedById.delete(s.id);
+    }
+    seeds=alive;
+  }
+
+  function deployFounders(){
+    const energy=C.SEED_OVERHEAD+C.SEED_MULT*buildCost(FOUNDER);
+    if(C.FOUNDER_MODE==="one")createPlant(FOUNDER,idx((W/2)|0,0),energy,0,null);
+    else {const gap=Math.max(4,C.FOUNDER_SPACING|0),offset=(gap/2)|0;for(let x=offset;x<W;x+=gap)createPlant(FOUNDER,idx(x,0),energy,0,null);}
+  }
+  deployFounders();
+
+  function step(){
+    tick++;sandStep();clearBottomRuns();attemptRigidDrops();seedStep();relightDirty();plantStep();
+  }
+  function run(n){for(let i=0;i<n;i++)step();}
+  function summary(){
+    let cells=0,leaves=0,stems=0,energy=0,income=0,maxGen=0,sumGen=0,maxGenome=0,sumGenome=0,maxHeight=0;
+    for(const p of plants){cells+=p.cellNodes.length;leaves+=p.nLeaf;stems+=p.nStem;energy+=p.energy;income+=p.income;sumGen+=p.generation;maxGen=Math.max(maxGen,p.generation);sumGenome+=p.genome.length;maxGenome=Math.max(maxGenome,p.genome.length);const ry=xy(p.root.cell)[1];for(const ni of p.cellNodes)maxHeight=Math.max(maxHeight,xy(p.nodes[ni].cell)[1]-ry);}
+    const n=plants.length||1;return Object.assign({},stats,{tick,H,plants:plants.length,cells,leaves,stems,freeSeeds:seeds.length,
+      meanEnergy:+(energy/n).toFixed(1),meanIncome:+(income/n).toFixed(2),meanGeneration:+(sumGen/n).toFixed(1),maxGeneration:maxGen,
+      meanGenome:+(sumGenome/n).toFixed(2),maxGenome,maxHeight,uniqueGenomes:genomeCounts.size,novelGenomes:seenGenomes.size,novelSubtrees:seenSubtrees.size,extinct:plants.length===0&&seeds.length===0});
+  }
+  function snapshot(view,withOverview){
+    const cols=view.cols|0,rows=view.rows|0,x0=Math.floor(view.x0),y0=Math.max(0,Math.floor(view.y0));
+    const t=new Uint8Array(cols*rows),l=new Uint8Array(cols*rows),h=new Uint8Array(cols*rows);
+    for(let sy=0;sy<rows;sy++){const wy=y0+(rows-1-sy);if(wy<0||wy>=H)continue;for(let sx=0;sx<cols;sx++){
+      const wx=wrapX(x0+sx),i=wy*W+wx,o=sy*cols+sx,tt=type[i];t[o]=tt;if(tt===LEAF)l[o]=Math.min(255,Math.round(leafCapture[i]));if(isLiving(tt)){const p=plantById.get(owner[i]);if(p)h[o]=p.hue;}
+    }}
+    for(const s of seeds)if(s.state===0&&s.displayCell>=0){const[wx,wy]=xy(s.displayCell),sx=((wx-x0)%W+W)%W,sy=rows-1-(wy-y0);if(sx>=0&&sx<cols&&sy>=0&&sy<rows)t[sy*cols+sx]=FREE_SEED;}
+    let overview=null;
+    if(withOverview){const bins=500,top=new Uint16Array(bins),density=new Uint16Array(bins),hue=new Uint8Array(bins);for(let x=0;x<W;x++){
+      const b=Math.min(bins-1,Math.floor(x*bins/W));for(let y=0;y<H;y++){const i=y*W+x,tt=type[i];if(tt!==EMPTY){density[b]++;if(y+1>top[b])top[b]=y+1;if(isLiving(tt)){const p=plantById.get(owner[i]);if(p)hue[b]=p.hue;}}}
+    }overview={top,density,hue};}
+    return {cols,rows,t,l,h,overview,s:summary()};
+  }
+  function inspectCell(x,y){
+    x=wrapX(Math.floor(x));y=Math.floor(y);if(y<0||y>=H)return {x,y,type:"empty"};const i=idx(x,y),tt=type[i];
+    if(tt===EMPTY)return{x,y,type:"empty"};if(tt===SAND)return{x,y,type:"sand"};if(tt===FREE_SEED){const s=seedById.get(owner[i]);return{x,y,type:"free seed",age:s?s.age:null,generation:s?s.generation:null,energy:s?s.energy:null,genome:s?Array.from(s.genome):null};}
+    const p=plantById.get(owner[i]);if(!p)return{x,y,type:"orphaned cell"};const ni=nodeAt[i]-1,n=p.nodes[ni];
+    return{x,y,type:tt===ROOT?"root seed":tt===STEM?"stem":"leaf",plantId:p.id,age:p.age,generation:p.generation,energy:+p.energy.toFixed(2),income:+p.income.toFixed(2),upkeep:+(((1+p.nStem)*C.UPKEEP_STEM+p.nLeaf*leafUpkeep()).toFixed(2)),genes:p.genome.length,genome:Array.from(p.genome).map(v=>v===8?"L":v.toString(2).padStart(3,"0")).join(" "),seedsMade:p.seedsMade,cellFacing:["N","E","S","W"][n.facing],captured:leafCapture[i]};
+  }
+  function gridHash(){let h=2166136261;for(let i=0;i<type.length;i++){h^=type[i];h=Math.imul(h,16777619);h^=owner[i];h=Math.imul(h,16777619);}return h>>>0;}
+  function validate(){
+    const errors=[];let sand=0;for(let i=0;i<type.length;i++){if(type[i]===SAND)sand++;if(isLiving(type[i])&&!plantById.has(owner[i]))errors.push("living cell without plant @"+i);if(type[i]===LEAF){const p=plantById.get(owner[i]),n=p&&p.nodes[nodeAt[i]-1];if(n&&n.kids.some(Boolean))errors.push("leaf has child");}}
+    for(const p of plants){let calc=0;for(const ni of p.cellNodes){const n=p.nodes[ni];if(n.cell<0||owner[n.cell]!==p.id)errors.push("plant cell mismatch "+p.id);calc+=n.light||0;}if(!Number.isFinite(p.energy)||!Number.isFinite(p.income))errors.push("nonfinite energy");}
+    if(sand!==stats.sand)errors.push("sand count "+sand+" != "+stats.sand);return errors;
+  }
+  return {C,step,run,summary,snapshot,inspectCell,validate,gridHash,mutateGenome,buildCost,FOUNDER,
+    get W(){return W;},get H(){return H;},get tick(){return tick;},get plants(){return plants;},get type(){return type;}};
+}
+</script>
+
+<script id="workerGlue" type="text/plain">
+let sim=null,running=true,fast=true,perFrame=1,tps=0,lastMeasure=0,lastTick=0,started=false;
+const channel=new MessageChannel();channel.port1.onmessage=pump;
+function measure(){const now=performance.now();if(now-lastMeasure>500&&sim){tps=(sim.tick-lastTick)*1000/(now-lastMeasure);lastTick=sim.tick;lastMeasure=now;}}
+function pump(){if(sim&&running&&fast){const end=performance.now()+14;while(performance.now()<end)sim.run(10);}measure();if(sim&&running&&fast)channel.port2.postMessage(0);else setTimeout(pump,25);}
+onmessage=e=>{const m=e.data;
+  if(m.cmd==="init"){sim=makeSim(m.opts);running=true;lastMeasure=performance.now();lastTick=0;if(!started){started=true;pump();}postMessage({kind:"ready"});return;}
+  if(!sim)return;
+  if(m.cmd==="run")running=m.value;
+  else if(m.cmd==="speed"){fast=m.fast;perFrame=m.perFrame;}
+  else if(m.cmd==="step")sim.run(m.n||1);
+  else if(m.cmd==="frame"){
+    if(running&&!fast)sim.run(perFrame);const f=sim.snapshot(m.view,m.overview);f.kind="frame";f.tps=tps;f.running=running;
+    const tr=[f.t.buffer,f.l.buffer,f.h.buffer];if(f.overview)tr.push(f.overview.top.buffer,f.overview.density.buffer,f.overview.hue.buffer);postMessage(f,tr);
+  } else if(m.cmd==="inspect")postMessage({kind:"inspect",data:sim.inspectCell(m.x,m.y)});
+};
+</script>
+
+<script>
+(()=>{"use strict";
+  const $=id=>document.getElementById(id),params=new URLSearchParams(location.search);
+  const DEFAULTS={W:10000,H0:16,LIFESPAN:288,MUTATION_RATE:1/3,BUILD_STEM:8,UPKEEP_STEM:1,LEAF_RATIO:2,SEED_MULT:1,SEED_OVERHEAD:48,
+    STARVE_GRACE:16,BLOCK_PATIENCE:32,CLEAR_RUN:8,DORMANCY:96,FOUNDER_MODE:"many",FOUNDER_SPACING:50,RNG_SEED:246813579};
+  const settings=Object.assign({},DEFAULTS);
+  const sliderKeys=["FOUNDER_SPACING","LIFESPAN","MUTATION_RATE","BUILD_STEM","UPKEEP_STEM","LEAF_RATIO","SEED_MULT","SEED_OVERHEAD","STARVE_GRACE","BLOCK_PATIENCE","CLEAR_RUN","DORMANCY"];
+  let worker=null,local=null,latest=null,awaiting=false,running=true,speedIndex=3,colorMode="light",frameCount=0,lastOverview=null;
+  const SPEEDS=[1,10,100,0];
+  const coreSrc=$("core").textContent,glueSrc=$("workerGlue").textContent;
+  try{const url=URL.createObjectURL(new Blob([coreSrc,"\n",glueSrc],{type:"text/javascript"}));worker=new Worker(url);worker.onmessage=e=>{const m=e.data;if(m.kind==="frame"){latest=m;awaiting=false;if(m.overview)lastOverview=m.overview;}else if(m.kind==="inspect")showInspection(m.data);};worker.onerror=()=>{console.warn("worker fallback");worker.terminate();worker=null;startLocal();restart();};}catch(e){startLocal();}
+  function startLocal(){if(local)return;const makeSim=new Function(coreSrc+"\nreturn makeSim;")();local={makeSim,sim:null,last:performance.now(),lastTick:0,tps:0};}
+  if(!worker)startLocal();
+  function send(m){if(worker)worker.postMessage(m);else if(local){if(m.cmd==="init")local.sim=local.makeSim(m.opts);else if(m.cmd==="run")running=m.value;else if(m.cmd==="step")local.sim.run(m.n||1);else if(m.cmd==="inspect")showInspection(local.sim.inspectCell(m.x,m.y));}}
+  function restart(){settings.FOUNDER_MODE=$("FOUNDER_MODE").value;settings.RNG_SEED=(+$("RNG_SEED").value>>>0)||1;running=true;$("play").textContent="Pause";send({cmd:"init",opts:Object.assign({},settings)});if(worker)send({cmd:"speed",fast:speedIndex===3,perFrame:SPEEDS[speedIndex]});const focus=settings.FOUNDER_MODE==="one"?settings.W/2:Math.floor((settings.W/2)/settings.FOUNDER_SPACING)*settings.FOUNDER_SPACING+settings.FOUNDER_SPACING/2;camera.x=focus-camera.cols/2;camera.y=0;latest=null;notify(settings.FOUNDER_MODE==="one"?"one physical founder":"one genome, many clonal founders");}
+
+  const view=$("view"),ctx=view.getContext("2d",{alpha:false}),mini=$("mini"),mctx=mini.getContext("2d",{alpha:false});
+  const camera={x:0,y:0,cell:8,cols:1,rows:1};let image=null,pixels=null,drag=null,dragged=false;
+  const rgb=h=>[parseInt(h.slice(1,3),16),parseInt(h.slice(3,5),16),parseInt(h.slice(5,7),16)];
+  const pack=([r,g,b])=>(255<<24)|(b<<16)|(g<<8)|r;
+  const COLORS={sky:"#081520",sand:"#b99a6a",root:"#8c542f",seed:"#f7e8b4",stem:"#2e713f",leaf0:"#183724",leaf1:"#315d30",leaf2:"#5f9b43",leaf4:"#b6df62",ground:"#3a2a1d"};
+  const P={};for(const k in COLORS)P[k]=pack(rgb(COLORS[k]));
+  function hsl(h,s,l){const a=s*Math.min(l,1-l),f=n=>{const k=(n+h*12)%12;return l-a*Math.max(-1,Math.min(k-3,9-k,1));};return[Math.round(f(0)*255),Math.round(f(8)*255),Math.round(f(4)*255)];}
+  const leafHue=new Uint32Array(256),stemHue=new Uint32Array(256);for(let i=0;i<256;i++){leafHue[i]=pack(hsl(i/256,.68,.62));stemHue[i]=pack(hsl(i/256,.48,.34));}
+  function resize(){const r=view.getBoundingClientRect(),dpr=Math.min(devicePixelRatio||1,2);camera.cols=Math.max(8,Math.ceil(r.width/camera.cell));camera.rows=Math.max(8,Math.ceil(r.height/camera.cell));view.width=camera.cols;view.height=camera.rows;image=ctx.createImageData(camera.cols,camera.rows);pixels=new Uint32Array(image.data.buffer);mini.width=Math.max(300,Math.floor(mini.clientWidth*dpr));mini.height=Math.floor(mini.clientHeight*dpr);}
+  function draw(f){
+    if(!image||f.cols!==camera.cols||f.rows!==camera.rows)resize();pixels.fill(P.sky);
+    for(let i=0;i<f.t.length;i++){const t=f.t[i];if(!t)continue;let c=P.sky;if(t===1)c=P.sand;else if(t===2)c=P.root;else if(t===5)c=P.seed;else if(colorMode==="lineage")c=t===4?leafHue[f.h[i]]:stemHue[f.h[i]];else if(t===3)c=P.stem;else if(t===4){const q=f.l[i];c=q>=4?P.leaf4:q>=2?P.leaf2:q>=1?P.leaf1:P.leaf0;}pixels[i]=c;}
+    ctx.putImageData(image,0,0);drawGround();drawStats(f);drawMini(f.s);
+  }
+  function drawGround(){ctx.fillStyle=COLORS.ground;const gy=camera.rows-1-(0-camera.y)+1;if(gy>=0&&gy<camera.rows)ctx.fillRect(0,gy,camera.cols,1);}
+  function drawStats(f){const s=f.s,fmt=n=>n>=1e6?(n/1e6).toFixed(2)+"M":n>=1e4?(n/1e3).toFixed(1)+"k":String(n);$("stats").innerHTML=`<span>tick <b>${fmt(s.tick)}</b></span><span><b>${fmt(Math.round(f.tps||0))}</b>/s</span><span>plants <b>${s.plants}</b></span><span>seeds <b>${s.freeSeeds}</b></span><span>generation <b>${s.meanGeneration}</b>/${s.maxGeneration}</span><span>genes <b>${s.meanGenome}</b></span><span>novel genomes <b>${s.novelGenomes}</b></span><span>subtrees <b>${s.novelSubtrees}</b></span><span>world <b>10k×${s.H}</b></span>${s.extinct?'<span style="color:#ffc86b"><b>EXTINCT</b></span>':''}`;}
+  function drawMini(s){
+    const w=mini.width,h=mini.height;mctx.fillStyle="#071018";mctx.fillRect(0,0,w,h);if(lastOverview){const o=lastOverview,b=o.top.length,maxH=Math.max(16,s.H);for(let x=0;x<w;x++){const q=Math.min(b-1,Math.floor(x*b/w)),top=o.top[q];if(!top)continue;const bh=Math.max(1,Math.round(top/maxH*(h-5)));mctx.fillStyle=o.density[q]>20?"#8daf56":"#536e3f";mctx.fillRect(x,h-bh,1,bh);}}
+    let x=((camera.x%settings.W)+settings.W)%settings.W/settings.W*w,ww=Math.max(2,camera.cols/settings.W*w);mctx.strokeStyle="#f4edb2";mctx.strokeRect(x,1,ww,h-2);
+  }
+  function requestFrame(){
+    if(local&&local.sim){if(running){const t0=performance.now();if(speedIndex===3)while(performance.now()-t0<10)local.sim.run(10);else local.sim.run(SPEEDS[speedIndex]);}const now=performance.now();if(now-local.last>500){local.tps=(local.sim.tick-local.lastTick)*1000/(now-local.last);local.last=now;local.lastTick=local.sim.tick;}latest=local.sim.snapshot(camera,frameCount%15===0);latest.tps=local.tps;if(latest.overview)lastOverview=latest.overview;draw(latest);}
+    else if(worker){if(latest){draw(latest);latest=null;}if(!awaiting){awaiting=true;worker.postMessage({cmd:"frame",view:camera,overview:frameCount%15===0});}}
+    frameCount++;requestAnimationFrame(requestFrame);
+  }
+  function worldAt(clientX,clientY){const r=view.getBoundingClientRect(),sx=Math.floor((clientX-r.left)/r.width*camera.cols),sy=Math.floor((clientY-r.top)/r.height*camera.rows);return{x:camera.x+sx,y:camera.y+(camera.rows-1-sy)};}
+  view.addEventListener("pointerdown",e=>{view.setPointerCapture(e.pointerId);drag={x:e.clientX,y:e.clientY,cx:camera.x,cy:camera.y};dragged=false;view.classList.add("dragging");});
+  view.addEventListener("pointermove",e=>{if(!drag)return;const dx=e.clientX-drag.x,dy=e.clientY-drag.y;if(Math.abs(dx)+Math.abs(dy)>5)dragged=true;camera.x=drag.cx-dx/camera.cell;camera.y=Math.max(0,drag.cy+dy/camera.cell);});
+  view.addEventListener("pointerup",e=>{view.classList.remove("dragging");if(drag&&!dragged){const q=worldAt(e.clientX,e.clientY);send({cmd:"inspect",x:q.x,y:q.y});}drag=null;});
+  mini.addEventListener("pointerdown",e=>{const r=mini.getBoundingClientRect();camera.x=(e.clientX-r.left)/r.width*settings.W-camera.cols/2;});
+  function zoom(f){const cx=camera.x+camera.cols/2,cy=camera.y+camera.rows/2;camera.cell=Math.max(2,Math.min(24,camera.cell*f));resize();camera.x=cx-camera.cols/2;camera.y=Math.max(0,cy-camera.rows/2);}
+  function showInspection(d){$("inspect").hidden=false;$("inspectText").textContent=Object.entries(d).map(([k,v])=>`${k}: ${Array.isArray(v)?v.join(" "):v}`).join("\n");}
+  function notify(t){const n=$("notice");n.textContent=t;n.classList.add("show");setTimeout(()=>n.classList.remove("show"),1800);}
+  function legend(){const items=colorMode==="light"?[["sand","sand"],["root","root seed"],["stem","stem"],["leaf4","leaf captures 4"],["leaf2","2"],["leaf1","1"],["leaf0","0"],["seed","traveling seed"]]:[["sand","sand"],["root","root seed"],["seed","traveling seed"]];$("legend").innerHTML=items.map(([k,v])=>`<span><i style="background:${COLORS[k]}"></i>${v}</span>`).join("")+(colorMode==="lineage"?"<span>genome colors</span>":"");}
+
+  $("play").onclick=()=>{running=!running;$("play").textContent=running?"Pause":"Play";send({cmd:"run",value:running});};
+  $("step").onclick=()=>{if(running){running=false;$("play").textContent="Play";send({cmd:"run",value:false});}send({cmd:"step",n:1});};
+  $("speed").onclick=()=>{speedIndex=(speedIndex+1)%SPEEDS.length;const fast=speedIndex===3;$("speed").textContent="Speed: "+(fast?"max":SPEEDS[speedIndex]+"/frame");if(worker)send({cmd:"speed",fast,perFrame:SPEEDS[speedIndex]});};
+  $("zoomOut").onclick=()=>zoom(.7);$("zoomIn").onclick=()=>zoom(1.4);$("more").onclick=()=>$("settings").hidden=false;$("settingsClose").onclick=()=>$("settings").hidden=true;$("inspectClose").onclick=()=>$("inspect").hidden=true;
+  $("restart").onclick=()=>{$("settings").hidden=true;restart();};
+  $("colorMode").onclick=()=>{colorMode=colorMode==="light"?"lineage":"light";$("colorMode").textContent="Color: "+colorMode;legend();};
+  for(const k of sliderKeys){const el=$(k),out=$("o-"+k);el.value=settings[k];const show=()=>out.textContent=k==="MUTATION_RATE"?(+el.value).toFixed(2):el.value;show();el.oninput=()=>{settings[k]=+el.value;show();};}
+  $("FOUNDER_MODE").value=settings.FOUNDER_MODE;$("RNG_SEED").value=params.get("seed")||settings.RNG_SEED;
+  addEventListener("resize",resize);resize();legend();restart();requestAnimationFrame(requestFrame);
+  window.sideplant={restart,getLatest:()=>latest,getCamera:()=>Object.assign({},camera),pause:()=>$("play").click()};
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,1895 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#08100d">
+  <title>Palimpsest Garden MVP</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --ink: #edf2df;
+      --muted: #9ead9e;
+      --dim: #718078;
+      --night: #08100d;
+      --panel: #101a16;
+      --panel-2: #15221c;
+      --line: rgba(220, 232, 205, .14);
+      --line-strong: rgba(220, 232, 205, .24);
+      --moss: #98bc65;
+      --moss-bright: #d8eb8e;
+      --gold: #e8c267;
+      --rust: #b86f4a;
+      --water: #62a9b8;
+      --violet: #9a83cf;
+      --shadow: 0 22px 70px rgba(0, 0, 0, .35);
+      --radius: 18px;
+    }
+
+    * { box-sizing: border-box; }
+
+    html, body {
+      width: 100%;
+      min-height: 100%;
+      margin: 0;
+      background: var(--night);
+      color: var(--ink);
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      -webkit-font-smoothing: antialiased;
+      overscroll-behavior: none;
+    }
+
+    body {
+      min-height: 100vh;
+      min-height: 100svh;
+      overflow-x: hidden;
+      background:
+        radial-gradient(circle at 12% -10%, rgba(96, 129, 89, .18), transparent 34rem),
+        radial-gradient(circle at 90% 10%, rgba(69, 106, 113, .13), transparent 32rem),
+        var(--night);
+    }
+
+    button, select, input { font: inherit; }
+    button { color: inherit; }
+
+    .app {
+      min-height: 100vh;
+      min-height: 100svh;
+      display: grid;
+      grid-template-rows: auto minmax(0, 1fr);
+    }
+
+    .topbar {
+      min-height: 66px;
+      padding: 12px clamp(14px, 2.2vw, 30px);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 18px;
+      border-bottom: 1px solid var(--line);
+      background: rgba(8, 16, 13, .88);
+      backdrop-filter: blur(18px);
+      position: relative;
+      z-index: 5;
+    }
+
+    .identity { min-width: 0; }
+
+    .eyebrow {
+      margin: 0 0 3px;
+      color: var(--gold);
+      font: 700 10px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
+      letter-spacing: .18em;
+      text-transform: uppercase;
+    }
+
+    h1 {
+      margin: 0;
+      font-family: Georgia, "Times New Roman", serif;
+      font-size: clamp(20px, 2.5vw, 30px);
+      font-weight: 500;
+      letter-spacing: -.025em;
+      white-space: nowrap;
+    }
+
+    .top-status {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      color: var(--muted);
+      font-size: 12px;
+      white-space: nowrap;
+    }
+
+    .pulse {
+      width: 9px;
+      height: 9px;
+      border-radius: 50%;
+      background: var(--moss-bright);
+      box-shadow: 0 0 0 5px rgba(216, 235, 142, .09), 0 0 18px rgba(216, 235, 142, .5);
+    }
+
+    .pulse.paused { background: var(--gold); box-shadow: 0 0 0 5px rgba(232, 194, 103, .09); }
+
+    .layout {
+      min-height: 0;
+      padding: clamp(10px, 1.4vw, 20px);
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 306px;
+      gap: clamp(10px, 1.4vw, 18px);
+    }
+
+    .world-card {
+      min-width: 0;
+      min-height: 0;
+      display: grid;
+      grid-template-rows: auto minmax(420px, 1fr) auto;
+      border: 1px solid var(--line-strong);
+      border-radius: var(--radius);
+      overflow: hidden;
+      background: #080f0d;
+      box-shadow: var(--shadow);
+    }
+
+    .world-toolbar {
+      padding: 10px 12px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      border-bottom: 1px solid var(--line);
+      background: rgba(16, 26, 22, .92);
+      overflow-x: auto;
+      scrollbar-width: none;
+    }
+
+    .world-toolbar::-webkit-scrollbar { display: none; }
+
+    .control-cluster, .view-cluster {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      flex: 0 0 auto;
+    }
+
+    .btn, .view-btn, .speed-select {
+      min-height: 34px;
+      border: 1px solid var(--line-strong);
+      border-radius: 10px;
+      background: rgba(225, 238, 214, .045);
+      transition: background .16s ease, border-color .16s ease, transform .16s ease;
+    }
+
+    .btn, .view-btn {
+      cursor: pointer;
+      touch-action: manipulation;
+    }
+
+    .btn:hover, .view-btn:hover { background: rgba(225, 238, 214, .09); border-color: rgba(220, 232, 205, .34); }
+    .btn:active, .view-btn:active { transform: translateY(1px); }
+    .btn:focus-visible, .view-btn:focus-visible, .speed-select:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
+
+    .btn {
+      padding: 7px 11px;
+      font-size: 12px;
+      font-weight: 700;
+    }
+
+    .btn.primary { background: var(--ink); color: #101713; border-color: var(--ink); }
+    .btn.primary:hover { background: #fffbea; }
+    .btn.icon { width: 36px; padding: 6px; font-size: 15px; }
+
+    .speed-select {
+      color: var(--ink);
+      padding: 6px 27px 6px 9px;
+      font-size: 12px;
+      cursor: pointer;
+    }
+
+    .view-btn {
+      padding: 6px 9px;
+      color: var(--muted);
+      font: 700 10px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
+      letter-spacing: .04em;
+      text-transform: uppercase;
+    }
+
+    .view-btn.active { color: #101713; background: var(--gold); border-color: var(--gold); }
+
+    .canvas-wrap {
+      position: relative;
+      width: 100%;
+      height: 100%;
+      min-height: 420px;
+      overflow: hidden;
+      background: #0a1418;
+      isolation: isolate;
+    }
+
+    #world {
+      display: block;
+      width: 100%;
+      height: 100%;
+      min-height: 420px;
+      image-rendering: pixelated;
+      touch-action: none;
+      cursor: crosshair;
+    }
+
+    .canvas-vignette {
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+      box-shadow: inset 0 0 90px rgba(0, 0, 0, .32);
+      z-index: 2;
+    }
+
+    .canvas-note {
+      position: absolute;
+      left: 12px;
+      bottom: 12px;
+      z-index: 3;
+      max-width: min(430px, calc(100% - 24px));
+      padding: 7px 9px;
+      border: 1px solid rgba(220, 232, 205, .13);
+      border-radius: 9px;
+      background: rgba(6, 12, 10, .77);
+      color: rgba(237, 242, 223, .75);
+      font: 10px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace;
+      backdrop-filter: blur(8px);
+      pointer-events: none;
+    }
+
+    .scrub {
+      height: 38px;
+      padding: 0 12px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      border-top: 1px solid var(--line);
+      background: var(--panel);
+      color: var(--muted);
+      font: 10px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
+    }
+
+    .scrub strong { color: var(--ink); font-weight: 600; }
+    .scrub-line { flex: 1; height: 1px; background: linear-gradient(90deg, var(--moss), var(--gold), var(--rust)); opacity: .6; }
+
+    .sidebar {
+      min-height: 0;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      overflow-y: auto;
+      scrollbar-color: rgba(220,232,205,.2) transparent;
+      padding-right: 2px;
+    }
+
+    .panel {
+      border: 1px solid var(--line);
+      border-radius: 15px;
+      background: rgba(16, 26, 22, .92);
+      overflow: hidden;
+      flex: 0 0 auto;
+    }
+
+    .panel-head {
+      min-height: 42px;
+      padding: 10px 12px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .panel-title {
+      margin: 0;
+      color: var(--ink);
+      font: 700 11px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
+      letter-spacing: .11em;
+      text-transform: uppercase;
+    }
+
+    .panel-kicker {
+      color: var(--dim);
+      font: 10px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
+    }
+
+    .panel-body { padding: 12px; }
+
+    .metrics {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 8px;
+    }
+
+    .metric {
+      min-width: 0;
+      padding: 9px 10px;
+      border: 1px solid rgba(220,232,205,.09);
+      border-radius: 10px;
+      background: rgba(225, 238, 214, .025);
+    }
+
+    .metric-label {
+      display: block;
+      margin-bottom: 5px;
+      color: var(--dim);
+      font: 700 9px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
+      letter-spacing: .07em;
+      text-transform: uppercase;
+    }
+
+    .metric-value {
+      display: block;
+      overflow: hidden;
+      color: var(--ink);
+      font: 600 17px/1.1 Georgia, "Times New Roman", serif;
+      text-overflow: ellipsis;
+    }
+
+    .metric-value.good { color: var(--moss-bright); }
+    .metric-value.warn { color: var(--gold); }
+
+    .ledger {
+      margin-top: 10px;
+      padding: 9px 10px;
+      border: 1px solid rgba(98, 169, 184, .16);
+      border-radius: 10px;
+      background: rgba(98, 169, 184, .035);
+    }
+
+    .ledger-row {
+      display: flex;
+      justify-content: space-between;
+      gap: 10px;
+      color: var(--muted);
+      font: 10px/1.65 ui-monospace, SFMono-Regular, Menlo, monospace;
+    }
+
+    .ledger-row strong { color: var(--ink); font-weight: 600; }
+
+    .legend {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 7px 10px;
+    }
+
+    .legend-item {
+      min-width: 0;
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      color: var(--muted);
+      font-size: 10px;
+    }
+
+    .swatch { width: 10px; height: 10px; border-radius: 3px; flex: 0 0 auto; box-shadow: inset 0 0 0 1px rgba(255,255,255,.13); }
+
+    .inspect-empty {
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.55;
+    }
+
+    .inspect-title {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      margin-bottom: 9px;
+    }
+
+    .inspect-title strong { font: 600 16px/1.1 Georgia, "Times New Roman", serif; }
+    .coord { color: var(--dim); font: 10px/1 ui-monospace, SFMono-Regular, Menlo, monospace; }
+
+    .inspect-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 5px 10px;
+      margin-bottom: 9px;
+    }
+
+    .inspect-row {
+      display: flex;
+      justify-content: space-between;
+      gap: 8px;
+      color: var(--muted);
+      font: 10px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
+    }
+
+    .inspect-row b { color: var(--ink); font-weight: 600; }
+
+    .event-box, .rule-box {
+      margin-top: 8px;
+      padding: 8px 9px;
+      border-left: 2px solid var(--gold);
+      background: rgba(232, 194, 103, .045);
+      color: var(--muted);
+      font: 10px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
+      overflow-wrap: anywhere;
+    }
+
+    .rule-box { border-left-color: var(--moss); background: rgba(152, 188, 101, .04); }
+
+    .assay-copy {
+      margin: 0 0 10px;
+      color: var(--muted);
+      font-size: 11px;
+      line-height: 1.5;
+    }
+
+    .assay-bars { display: grid; gap: 7px; margin: 10px 0; }
+
+    .bar-row {
+      display: grid;
+      grid-template-columns: 68px minmax(0, 1fr) 36px;
+      align-items: center;
+      gap: 7px;
+      color: var(--muted);
+      font: 9px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
+    }
+
+    .bar-track { height: 7px; overflow: hidden; border-radius: 99px; background: rgba(220, 232, 205, .07); }
+    .bar-fill { width: 0%; height: 100%; border-radius: inherit; transition: width .35s ease; }
+    .bar-fill.neutral { background: var(--moss); }
+    .bar-fill.small { background: var(--water); }
+    .bar-fill.large { background: var(--gold); }
+    .bar-fill.dead { background: var(--rust); }
+
+    .assay-summary {
+      min-height: 32px;
+      color: var(--dim);
+      font: 10px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
+    }
+
+    details.panel summary {
+      list-style: none;
+      cursor: pointer;
+      touch-action: manipulation;
+    }
+
+    details.panel summary::-webkit-details-marker { display: none; }
+    details.panel summary::after { content: "+"; color: var(--gold); font-size: 16px; line-height: 1; }
+    details.panel[open] summary::after { content: "−"; }
+
+    .rules-list {
+      margin: 0;
+      padding: 0 0 0 17px;
+      color: var(--muted);
+      font-size: 11px;
+      line-height: 1.55;
+    }
+
+    .rules-list li + li { margin-top: 6px; }
+
+    .tag-dots { display: flex; gap: 3px; }
+    .tag-dot { width: 8px; height: 8px; border-radius: 50%; }
+
+    .fatal {
+      display: none;
+      position: fixed;
+      inset: 12px;
+      z-index: 100;
+      padding: 18px;
+      border: 1px solid #c97859;
+      border-radius: 14px;
+      background: #1c1110;
+      color: #ffe1d5;
+      font: 12px/1.55 ui-monospace, SFMono-Regular, Menlo, monospace;
+      white-space: pre-wrap;
+      overflow: auto;
+    }
+
+    @media (max-width: 920px) {
+      body { overflow-y: auto; }
+      .app { display: block; }
+      .layout { display: block; padding: 9px; }
+      .world-card { grid-template-rows: auto minmax(390px, 60svh) auto; }
+      .canvas-wrap, #world { min-height: 390px; }
+      .sidebar { margin-top: 10px; overflow: visible; padding: 0; display: grid; grid-template-columns: 1fr 1fr; align-items: start; }
+      .sidebar .panel:last-child { grid-column: 1 / -1; }
+    }
+
+    @media (max-width: 640px) {
+      .topbar { min-height: 58px; padding: 10px 12px; }
+      h1 { font-size: 20px; }
+      .eyebrow { font-size: 8px; }
+      .top-status span:last-child { display: none; }
+      .layout { padding: 6px; }
+      .world-card { border-radius: 13px; grid-template-rows: auto minmax(380px, 58svh) auto; }
+      .world-toolbar { align-items: flex-start; flex-direction: column; }
+      .world-toolbar > * { width: 100%; }
+      .view-cluster { overflow-x: auto; padding-bottom: 2px; }
+      .canvas-wrap, #world { min-height: 380px; }
+      .sidebar { grid-template-columns: 1fr; }
+      .sidebar .panel:last-child { grid-column: auto; }
+      .canvas-note { font-size: 9px; bottom: 8px; left: 8px; }
+      .scrub { height: 34px; }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after { scroll-behavior: auto !important; transition-duration: .01ms !important; }
+    }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <header class="topbar">
+      <div class="identity">
+        <p class="eyebrow">Working artificial-life MVP</p>
+        <h1>Palimpsest Garden</h1>
+      </div>
+      <div class="top-status" aria-live="polite">
+        <span class="pulse" id="pulse"></span>
+        <span id="runStatus">Zero-player world running</span>
+      </div>
+    </header>
+
+    <div class="layout">
+      <section class="world-card" aria-label="Simulation world">
+        <div class="world-toolbar">
+          <div class="control-cluster">
+            <button class="btn primary" id="playBtn" type="button">Pause</button>
+            <button class="btn icon" id="stepBtn" type="button" aria-label="Advance one tick" title="Advance one tick">›</button>
+            <select class="speed-select" id="speedSelect" aria-label="Simulation speed">
+              <option value="1">1×</option>
+              <option value="3" selected>3×</option>
+              <option value="8">8×</option>
+              <option value="20">20×</option>
+              <option value="60">60×</option>
+            </select>
+            <button class="btn" id="resetBtn" type="button">New world</button>
+          </div>
+          <div class="view-cluster" role="group" aria-label="World view">
+            <button class="view-btn active" data-view="life" type="button">Life</button>
+            <button class="view-btn" data-view="water" type="button">Water</button>
+            <button class="view-btn" data-view="energy" type="button">Energy</button>
+            <button class="view-btn" data-view="matter" type="button">Matter</button>
+            <button class="view-btn" data-view="tags" type="button">Tags</button>
+            <button class="view-btn" data-view="lineage" type="button">Lineage</button>
+            <button class="view-btn" data-view="support" type="button">Support</button>
+          </div>
+        </div>
+
+        <div class="canvas-wrap" id="canvasWrap">
+          <canvas id="world" aria-label="A cellular garden. Tap a cell to inspect it."></canvas>
+          <div class="canvas-vignette"></div>
+          <div class="canvas-note" id="canvasNote">Tap any cell to inspect its complete local state and last causal event.</div>
+        </div>
+
+        <div class="scrub">
+          <span>Seed <strong id="seedValue">—</strong></span>
+          <span class="scrub-line"></span>
+          <span>One ancestor · no fitness score · no owner IDs</span>
+        </div>
+      </section>
+
+      <aside class="sidebar">
+        <section class="panel">
+          <div class="panel-head">
+            <h2 class="panel-title">World ledger</h2>
+            <span class="panel-kicker" id="tickLabel">tick 0</span>
+          </div>
+          <div class="panel-body">
+            <div class="metrics">
+              <div class="metric"><span class="metric-label">Living cells</span><span class="metric-value" id="livingMetric">0</span></div>
+              <div class="metric"><span class="metric-label">Competent tips</span><span class="metric-value good" id="tipMetric">0</span></div>
+              <div class="metric"><span class="metric-label">Lineages</span><span class="metric-value" id="lineageMetric">1</span></div>
+              <div class="metric"><span class="metric-label">Propagules</span><span class="metric-value" id="birthMetric">0</span></div>
+              <div class="metric"><span class="metric-label">Deaths</span><span class="metric-value" id="deathMetric">0</span></div>
+              <div class="metric"><span class="metric-label">Cross-lineage flow</span><span class="metric-value" id="flowMetric">0</span></div>
+            </div>
+            <div class="ledger">
+              <div class="ledger-row"><span>Matter drift</span><strong id="matterDrift">0</strong></div>
+              <div class="ledger-row"><span>Water drift</span><strong id="waterDrift">0</strong></div>
+              <div class="ledger-row"><span>Genome variants</span><strong id="genomeMetric">1</strong></div>
+              <div class="ledger-row"><span>Tagged detritus</span><strong id="detritusMetric">0</strong></div>
+            </div>
+          </div>
+        </section>
+
+        <section class="panel">
+          <div class="panel-head">
+            <h2 class="panel-title">Inspector</h2>
+            <div class="tag-dots" aria-hidden="true">
+              <span class="tag-dot" style="background:#df7b69"></span>
+              <span class="tag-dot" style="background:#62b9c4"></span>
+              <span class="tag-dot" style="background:#e7c25e"></span>
+              <span class="tag-dot" style="background:#9a83cf"></span>
+            </div>
+          </div>
+          <div class="panel-body" id="inspector">
+            <p class="inspect-empty">Nothing selected. A selected cell reveals every causal quantity stored there; ancestry is shown only as an analytical overlay.</p>
+          </div>
+        </section>
+
+        <section class="panel">
+          <div class="panel-head">
+            <h2 class="panel-title">Mutation smoke test</h2>
+            <span class="panel-kicker">Gate 0 lite</span>
+          </div>
+          <div class="panel-body">
+            <p class="assay-copy">Runs one-edit mutants through the same decision-tree interpreter. It tests whether nearby heredity is navigable before prettier claims are trusted.</p>
+            <button class="btn" id="assayBtn" type="button">Run 256 mutants</button>
+            <div class="assay-bars" aria-live="polite">
+              <div class="bar-row"><span>Neutral</span><span class="bar-track"><span class="bar-fill neutral" id="barNeutral"></span></span><span id="pctNeutral">—</span></div>
+              <div class="bar-row"><span>Incremental</span><span class="bar-track"><span class="bar-fill small" id="barSmall"></span></span><span id="pctSmall">—</span></div>
+              <div class="bar-row"><span>Large</span><span class="bar-track"><span class="bar-fill large" id="barLarge"></span></span><span id="pctLarge">—</span></div>
+              <div class="bar-row"><span>Catastrophic</span><span class="bar-track"><span class="bar-fill dead" id="barDead"></span></span><span id="pctDead">—</span></div>
+            </div>
+            <div class="assay-summary" id="assaySummary">Not yet run. The world does not use these scores as fitness.</div>
+          </div>
+        </section>
+
+        <details class="panel">
+          <summary class="panel-head">
+            <span class="panel-title">Compact rule card</span>
+          </summary>
+          <div class="panel-body">
+            <ol class="rules-list">
+              <li>Light enters from above. Living surfaces with water turn it into dissipating energy.</li>
+              <li>Matter and water never appear from nothing. Matter becomes bodies, corpses, then substrate again.</li>
+              <li>Only visibly competent cells evaluate a small heritable decision tree. Successful extension differentiates the parent and creates a new competent frontier.</li>
+              <li>Rules can only extend, fork, invest, wait, or detach. They contain no leaf, root, seed, species, or ecological-role labels.</li>
+              <li>Matching face tags conduct local resources regardless of ancestry. Touching strangers can graft or tap one another.</li>
+              <li>Shade, maintenance, wear, support loss, death, falling, and decay reopen gaps. Dead structures retain tags while history slowly weathers away.</li>
+              <li>Detached competent cells mutate their decision trees locally. Reproductive success is the only selection process.</li>
+            </ol>
+            <div class="legend" style="margin-top:12px">
+              <span class="legend-item"><i class="swatch" style="background:#79ad63"></i>living structure</span>
+              <span class="legend-item"><i class="swatch" style="background:#e8d77c"></i>competent frontier</span>
+              <span class="legend-item"><i class="swatch" style="background:#7c593e"></i>substrate</span>
+              <span class="legend-item"><i class="swatch" style="background:#9a5f45"></i>tagged remains</span>
+            </div>
+          </div>
+        </details>
+      </aside>
+    </div>
+  </div>
+
+  <pre class="fatal" id="fatal"></pre>
+
+  <script>
+  "use strict";
+  // PALIMPSEST_GARDEN_SCRIPT_START — this marker is intentionally visible in source.
+  (() => {
+    const TYPE = Object.freeze({ AIR: 0, SOIL: 1, LIVE: 2, DEAD: 3 });
+    const TYPE_NAME = ["empty space", "loose substrate", "living structure", "weathering remains"];
+    const DIRS = [
+      [0, -1], [1, -1], [1, 0], [1, 1],
+      [0, 1], [-1, 1], [-1, 0], [-1, -1]
+    ];
+    const TAG_COLORS = ["#df7b69", "#62b9c4", "#e7c25e", "#9a83cf"];
+    const SENSORS = ["phase", "medium", "light", "water", "energy", "crowding", "support", "tagMatch"];
+    const ACTIONS = ["extend", "fork", "invest", "detach", "wait"];
+    const nf = new Intl.NumberFormat("en-US");
+
+    class RNG {
+      constructor(seed) { this.state = (seed >>> 0) || 0x6d2b79f5; }
+      next() {
+        let x = this.state;
+        x ^= x << 13; x ^= x >>> 17; x ^= x << 5;
+        this.state = x >>> 0;
+        return this.state / 4294967296;
+      }
+      int(n) { return Math.floor(this.next() * n); }
+      chance(p) { return this.next() < p; }
+      pick(a) { return a[this.int(a.length)]; }
+    }
+
+    function clamp(v, lo, hi) { return v < lo ? lo : v > hi ? hi : v; }
+    function deepClone(value) { return JSON.parse(JSON.stringify(value)); }
+
+    function act(kind, forward, light, water, space, lateral, jitter) {
+      return { leaf: true, kind, forward, light, water, space, lateral, jitter };
+    }
+
+    function branch(sensor, threshold, low, high) {
+      return { leaf: false, sensor, threshold, low, high };
+    }
+
+    function initialGenome() {
+      const extendLight = act("extend", 1.25, 1.18, .08, .62, .08, .18);
+      const forkLight = act("fork", .55, .88, .05, .5, 1.18, .24);
+      const extendWater = act("extend", .92, 0, 1.28, .05, .18, .16);
+      const forkWater = act("fork", .35, 0, 1.05, .02, .92, .18);
+      const germinate = act("fork", .05, 1.0, 1.0, .22, .7, .08);
+      const detach = act("detach", .58, .86, 0, 1.12, .75, .28);
+      const wait = act("wait", 0, 0, 0, 0, 0, 0);
+
+      const airSequence = branch("phase", .40,
+        extendLight,
+        branch("phase", .49,
+          forkLight,
+          branch("phase", .80,
+            extendLight,
+            branch("energy", .16, wait, detach)
+          )
+        )
+      );
+
+      const groundSequence = branch("phase", .40,
+        extendWater,
+        branch("phase", .49, forkWater, extendWater)
+      );
+
+      return {
+        id: 1,
+        parentId: 0,
+        lineage: 1,
+        born: 0,
+        tag: 0,
+        tree: branch("phase", .04,
+          germinate,
+          branch("medium", .42, airSequence, groundSequence)
+        )
+      };
+    }
+
+    function treeSize(tree) {
+      if (!tree || tree.leaf) return 1;
+      return 1 + treeSize(tree.low) + treeSize(tree.high);
+    }
+
+    function collectPaths(tree, path, leaves, nodes) {
+      if (tree.leaf) { leaves.push(path.slice()); return; }
+      nodes.push(path.slice());
+      path.push("low"); collectPaths(tree.low, path, leaves, nodes); path.pop();
+      path.push("high"); collectPaths(tree.high, path, leaves, nodes); path.pop();
+    }
+
+    function getAt(tree, path) {
+      let node = tree;
+      for (const key of path) node = node[key];
+      return node;
+    }
+
+    function setAt(genome, path, replacement) {
+      if (!path.length) { genome.tree = replacement; return; }
+      let parent = genome.tree;
+      for (let k = 0; k < path.length - 1; k++) parent = parent[path[k]];
+      parent[path[path.length - 1]] = replacement;
+    }
+
+    function mutateGenome(source, rng) {
+      const genome = deepClone(source);
+      genome.parentId = source.id;
+      const leaves = [], nodes = [];
+      collectPaths(genome.tree, [], leaves, nodes);
+      const roll = rng.next();
+
+      if (roll < .42 && leaves.length) {
+        const leaf = getAt(genome.tree, rng.pick(leaves));
+        const fields = ["forward", "light", "water", "space", "lateral", "jitter"];
+        if (rng.chance(.18)) leaf.kind = rng.pick(ACTIONS);
+        else {
+          const field = rng.pick(fields);
+          leaf[field] = clamp(leaf[field] + (rng.next() - .5) * .55, 0, 1.8);
+        }
+      } else if (roll < .64 && nodes.length) {
+        const node = getAt(genome.tree, rng.pick(nodes));
+        if (rng.chance(.32)) node.sensor = rng.pick(SENSORS);
+        else node.threshold = clamp(node.threshold + (rng.next() - .5) * .2, .04, .96);
+      } else if (roll < .86 && leaves.length && treeSize(genome.tree) < 39) {
+        const path = rng.pick(leaves);
+        const oldLeaf = deepClone(getAt(genome.tree, path));
+        setAt(genome, path, branch(rng.pick(SENSORS), .18 + rng.next() * .64,
+          deepClone(oldLeaf), deepClone(oldLeaf)));
+      } else if (nodes.length) {
+        const path = rng.pick(nodes);
+        const node = getAt(genome.tree, path);
+        setAt(genome, path, deepClone(rng.chance(.5) ? node.low : node.high));
+      }
+
+      if (rng.chance(.065)) genome.tag = rng.int(4);
+      return genome;
+    }
+
+    function sensorValue(name, sensors) {
+      return sensors[name] == null ? 0 : sensors[name];
+    }
+
+    function evaluateTree(tree, sensors) {
+      let node = tree;
+      const path = [];
+      let guard = 0;
+      while (node && !node.leaf && guard++ < 16) {
+        const value = sensorValue(node.sensor, sensors);
+        const side = value < node.threshold ? "low" : "high";
+        path.push({ sensor: node.sensor, value, threshold: node.threshold, side });
+        node = node[side];
+      }
+      if (!node || !node.leaf) return { action: act("wait", 0, 0, 0, 0, 0, 0), path };
+      return { action: node, path };
+    }
+
+    function actionSummary(action) {
+      if (!action) return "none";
+      if (action.kind === "wait") return "wait";
+      if (action.kind === "invest") return "invest matter locally";
+      const biases = [
+        ["forward", action.forward], ["light", action.light], ["water", action.water],
+        ["space", action.space], ["lateral", action.lateral]
+      ].sort((a, b) => b[1] - a[1]).slice(0, 2).map(d => d[0]).join(" + ");
+      return action.kind + " toward " + biases;
+    }
+
+    function lineageColor(id, alpha) {
+      const hue = (id * 137.508 + 78) % 360;
+      return `hsla(${hue}, 58%, 62%, ${alpha == null ? 1 : alpha})`;
+    }
+
+    class World {
+      constructor(width, height, seed) {
+        this.W = width;
+        this.H = height;
+        this.N = width * height;
+        this.seed = seed >>> 0;
+        this.rng = new RNG(this.seed);
+        this.type = new Uint8Array(this.N);
+        this.mat = new Uint16Array(this.N);
+        this.nutr = new Uint16Array(this.N);
+        this.water = new Uint16Array(this.N);
+        this.energy = new Uint16Array(this.N);
+        this.age = new Uint16Array(this.N);
+        this.wear = new Uint8Array(this.N);
+        this.potential = new Uint8Array(this.N);
+        this.phase = new Uint8Array(this.N);
+        this.dir = new Uint8Array(this.N);
+        this.genome = new Uint16Array(this.N);
+        this.lineage = new Uint16Array(this.N);
+        this.mobile = new Uint8Array(this.N);
+        this.support = new Uint8Array(this.N);
+        this.light = new Uint8Array(this.N);
+        this.cool = new Uint8Array(this.N);
+        this.tags = new Uint8Array(this.N * 8);
+        this.events = new Array(this.N).fill("");
+        this.ground = new Uint16Array(this.W);
+        this.genomes = [null];
+        this.tick = 0;
+        this.births = 0;
+        this.deaths = 0;
+        this.crossFlows = 0;
+        this.mutations = 0;
+        this.nextLineage = 2;
+        this.baselineMatter = 0;
+        this.baselineWater = 0;
+        this.stats = {};
+        this.reset();
+      }
+
+      idx(x, y) { return y * this.W + ((x % this.W) + this.W) % this.W; }
+      xOf(i) { return i % this.W; }
+      yOf(i) { return Math.floor(i / this.W); }
+
+      neighbor(i, d) {
+        const x = this.xOf(i) + DIRS[d][0];
+        const y = this.yOf(i) + DIRS[d][1];
+        if (y < 0 || y >= this.H) return -1;
+        return this.idx(x, y);
+      }
+
+      isConductive(i) { return i >= 0 && (this.type[i] === TYPE.LIVE || this.type[i] === TYPE.DEAD); }
+
+      compatible(i, j, d) {
+        return j >= 0 && this.tags[i * 8 + d] === this.tags[j * 8 + ((d + 4) & 7)];
+      }
+
+      setAllTags(i, tag) {
+        const base = i * 8;
+        for (let d = 0; d < 8; d++) this.tags[base + d] = tag;
+      }
+
+      clear(i) {
+        this.type[i] = TYPE.AIR;
+        this.mat[i] = this.nutr[i] = this.water[i] = this.energy[i] = 0;
+        this.age[i] = this.wear[i] = this.potential[i] = this.phase[i] = 0;
+        this.dir[i] = this.genome[i] = this.lineage[i] = this.mobile[i] = 0;
+        this.support[i] = this.cool[i] = 0;
+        this.events[i] = "";
+        const base = i * 8;
+        for (let d = 0; d < 8; d++) this.tags[base + d] = 0;
+      }
+
+      moveCell(from, to) {
+        const fields = ["type", "mat", "nutr", "water", "energy", "age", "wear", "potential", "phase", "dir", "genome", "lineage", "mobile", "support", "cool"];
+        for (const field of fields) this[field][to] = this[field][from];
+        for (let d = 0; d < 8; d++) this.tags[to * 8 + d] = this.tags[from * 8 + d];
+        this.events[to] = this.events[from];
+        this.clear(from);
+      }
+
+      totalMatter() {
+        let total = 0;
+        for (let i = 0; i < this.N; i++) total += this.mat[i] + this.nutr[i];
+        return total;
+      }
+
+      totalWater() {
+        let total = 0;
+        for (let i = 0; i < this.N; i++) total += this.water[i];
+        return total;
+      }
+
+      reset() {
+        const arrays = [this.type, this.mat, this.nutr, this.water, this.energy, this.age,
+          this.wear, this.potential, this.phase, this.dir, this.genome, this.lineage,
+          this.mobile, this.support, this.light, this.cool, this.tags];
+        for (const a of arrays) a.fill(0);
+        this.events.fill("");
+        this.rng = new RNG(this.seed);
+        this.genomes = [null, initialGenome()];
+        this.tick = this.births = this.deaths = this.crossFlows = this.mutations = 0;
+        this.nextLineage = 2;
+
+        let drift = 0;
+        for (let x = 0; x < this.W; x++) {
+          drift += (this.rng.next() - .5) * .42;
+          drift *= .82;
+          const wave = Math.sin(x * .084) * 2.8 + Math.sin(x * .031 + 1.7) * 3.9;
+          const g = clamp(Math.floor(this.H * .69 + wave + drift), Math.floor(this.H * .57), this.H - 10);
+          this.ground[x] = g;
+          for (let y = g; y < this.H; y++) {
+            const i = this.idx(x, y);
+            this.type[i] = TYPE.SOIL;
+            const pocket = (Math.sin(x * .13 + y * .17) + 1) * 11;
+            this.mat[i] = 48 + this.rng.int(34) + Math.floor(pocket * .35);
+            this.water[i] = clamp(30 + (y - g) * 5 + Math.floor(pocket), 0, 190);
+            this.support[i] = 255;
+          }
+        }
+
+        const positions = [.08, .22, .37, .52, .67, .81, .93];
+        for (const p of positions) this.placeAncestor(Math.floor(this.W * p));
+        this.computeLight();
+        this.baselineMatter = this.totalMatter();
+        this.baselineWater = this.totalWater();
+        this.updateStats(true);
+      }
+
+      placeAncestor(x) {
+        const y = this.ground[x] - 1;
+        const i = this.idx(x, y);
+        this.type[i] = TYPE.LIVE;
+        this.mat[i] = 20;
+        this.nutr[i] = 58;
+        this.water[i] = 44;
+        this.energy[i] = 128;
+        this.potential[i] = 1;
+        this.phase[i] = 0;
+        this.dir[i] = 0;
+        this.genome[i] = 1;
+        this.lineage[i] = 1;
+        this.support[i] = 210;
+        this.setAllTags(i, 0);
+        this.events[i] = "common-ancestor propagule placed; awaiting local rule evaluation";
+      }
+
+      computeLight() {
+        for (let x = 0; x < this.W; x++) {
+          let beam = 255;
+          for (let y = 0; y < this.H; y++) {
+            const i = this.idx(x, y);
+            this.light[i] = beam;
+            if (this.type[i] === TYPE.LIVE) beam = Math.max(0, beam - 14 - Math.floor(this.mat[i] * .62));
+            else if (this.type[i] === TYPE.DEAD) beam = Math.max(0, beam - 8 - Math.floor(this.mat[i] * .34));
+            else if (this.type[i] === TYPE.SOIL) beam = 0;
+          }
+        }
+      }
+
+      sensorsAt(i) {
+        let medium = 0, crowding = 0, matching = 0;
+        for (let d = 0; d < 8; d++) {
+          const j = this.neighbor(i, d);
+          if (j < 0) continue;
+          if (this.type[j] !== TYPE.AIR) crowding++;
+          if (this.type[j] === TYPE.SOIL || this.type[j] === TYPE.DEAD) medium++;
+          if (this.isConductive(j) && this.compatible(i, j, d)) matching++;
+        }
+        return {
+          phase: this.phase[i] / 15,
+          medium: medium / 8,
+          light: this.light[i] / 255,
+          water: clamp(this.water[i] / 92, 0, 1),
+          energy: clamp(this.energy[i] / 150, 0, 1),
+          crowding: crowding / 8,
+          support: this.support[i] / 255,
+          tagMatch: matching / 8
+        };
+      }
+
+      computeSupport() {
+        if (!this.supportNext) this.supportNext = new Uint8Array(this.N);
+        for (let i = 0; i < this.N; i++) {
+          const t = this.type[i];
+          if (t === TYPE.SOIL) { this.supportNext[i] = 255; continue; }
+          if (t !== TYPE.LIVE && t !== TYPE.DEAD) { this.supportNext[i] = 0; continue; }
+          let best = 0;
+          for (let d = 0; d < 8; d++) {
+            const j = this.neighbor(i, d);
+            if (j < 0) continue;
+            if (this.type[j] === TYPE.SOIL) best = 255;
+            else if (this.isConductive(j) && this.compatible(i, j, d)) best = Math.max(best, this.support[j]);
+          }
+          const loss = 3 + Math.floor(22 / Math.max(4, this.mat[i]));
+          this.supportNext[i] = Math.max(0, best - loss);
+        }
+        const swap = this.support;
+        this.support = this.supportNext;
+        this.supportNext = swap;
+      }
+
+      moveGradient(field, a, b, maxMove) {
+        const values = this[field];
+        const diff = values[a] - values[b];
+        if (Math.abs(diff) < 3) return 0;
+        const move = Math.min(maxMove, Math.floor(Math.abs(diff) / 4));
+        if (move <= 0) return 0;
+        if (diff > 0) { values[a] -= move; values[b] += move; }
+        else { values[b] -= move; values[a] += move; }
+        return move;
+      }
+
+      resourcePass() {
+        const pairDirs = [2, 3, 4, 5];
+        for (let i = 0; i < this.N; i++) {
+          const t = this.type[i];
+          if (t === TYPE.SOIL) {
+            for (const d of [2, 4]) {
+              const j = this.neighbor(i, d);
+              if (j >= 0 && this.type[j] === TYPE.SOIL) this.moveGradient("water", i, j, 2);
+            }
+            continue;
+          }
+          if (t !== TYPE.LIVE && t !== TYPE.DEAD) continue;
+          for (const d of pairDirs) {
+            const j = this.neighbor(i, d);
+            if (!this.isConductive(j) || !this.compatible(i, j, d)) continue;
+            const moved = this.moveGradient("water", i, j, 3)
+              + this.moveGradient("nutr", i, j, 2)
+              + this.moveGradient("energy", i, j, 4);
+            if (moved && this.type[i] === TYPE.LIVE && this.type[j] === TYPE.LIVE
+                && this.lineage[i] && this.lineage[j] && this.lineage[i] !== this.lineage[j]) {
+              this.crossFlows += moved;
+            }
+          }
+        }
+      }
+
+      acquireAndPhotosynthesize() {
+        for (let i = 0; i < this.N; i++) {
+          if (this.type[i] !== TYPE.LIVE || this.mobile[i]) continue;
+          if (this.light[i] > 18 && this.water[i] > 3) {
+            const gain = 1 + Math.floor(this.light[i] / 96);
+            this.energy[i] = Math.min(255, this.energy[i] + gain);
+          }
+          for (let d = 0; d < 8; d++) {
+            const j = this.neighbor(i, d);
+            if (j < 0 || this.type[j] !== TYPE.SOIL) continue;
+            if (this.water[i] < 92 && this.water[j] > 2) {
+              const moved = Math.min(2, this.water[j], 92 - this.water[i]);
+              this.water[j] -= moved;
+              this.water[i] += moved;
+            }
+            if ((this.tick + i + d) % 7 === 0 && this.nutr[i] < 84 && this.mat[j] > 10) {
+              this.mat[j]--;
+              this.nutr[i]++;
+            }
+          }
+        }
+      }
+
+      scoreTarget(i, d, action) {
+        const j = this.neighbor(i, d);
+        if (j < 0 || (this.type[j] !== TYPE.AIR && this.type[j] !== TYPE.SOIL)) return -1e9;
+        const currentDir = this.dir[i] & 7;
+        const [fx, fy] = DIRS[currentDir];
+        const [dx, dy] = DIRS[d];
+        const fLen = Math.hypot(fx, fy) || 1;
+        const dLen = Math.hypot(dx, dy) || 1;
+        const forward = (fx * dx + fy * dy) / (fLen * dLen);
+        const lateral = Math.abs(fx * dy - fy * dx) / (fLen * dLen);
+        const light = this.light[j] / 255;
+        const water = clamp(this.water[j] / 170, 0, 1);
+        const space = this.type[j] === TYPE.AIR ? 1 : .08;
+        let score = action.forward * forward + action.light * light + action.water * water
+          + action.space * space + action.lateral * lateral;
+        if (this.type[j] === TYPE.SOIL && action.water < .18) score -= .72;
+        if (this.type[j] === TYPE.AIR && action.water > .8 && action.light < .2) score -= .42;
+        score += (this.rng.next() - .5) * action.jitter;
+        return score;
+      }
+
+      chooseTargets(i, action, count) {
+        const candidates = [];
+        for (let d = 0; d < 8; d++) {
+          const score = this.scoreTarget(i, d, action);
+          if (score > -1e8) candidates.push({ d, j: this.neighbor(i, d), score });
+        }
+        candidates.sort((a, b) => b.score - a.score);
+        if (count < 2 || candidates.length < 2) return candidates.slice(0, count);
+        const first = candidates[0];
+        let second = null, best = -1e9;
+        const [ax, ay] = DIRS[first.d];
+        for (let k = 1; k < candidates.length; k++) {
+          const c = candidates[k];
+          const [bx, by] = DIRS[c.d];
+          const separation = 1 - (ax * bx + ay * by) / (Math.hypot(ax, ay) * Math.hypot(bx, by));
+          const adjusted = c.score + separation * (.38 + action.lateral * .42);
+          if (adjusted > best) { best = adjusted; second = c; }
+        }
+        return second ? [first, second] : [first];
+      }
+
+      createChild(parent, target, direction, genome, childPhase, mobile) {
+        const targetType = this.type[target];
+        if (targetType !== TYPE.AIR && targetType !== TYPE.SOIL) return false;
+        const complexity = treeSize(genome.tree);
+        const energyCost = 8 + Math.ceil(complexity / 5) + (mobile ? 5 : 0);
+        const structureCost = 8;
+        const localMatter = targetType === TYPE.SOIL ? Math.min(structureCost, this.mat[target]) : 0;
+        const parentMatter = structureCost - localMatter;
+        const waterCost = targetType === TYPE.AIR ? 3 : 0;
+        if (this.energy[parent] < energyCost + 4 || this.nutr[parent] < parentMatter || this.water[parent] < waterCost) return false;
+
+        const inheritedMatter = this.mat[target] + this.nutr[target] - localMatter;
+        const inheritedWater = this.water[target];
+        this.energy[parent] -= energyCost + 4;
+        this.nutr[parent] -= parentMatter;
+        this.water[parent] -= waterCost;
+
+        this.clear(target);
+        this.type[target] = TYPE.LIVE;
+        this.mat[target] = structureCost;
+        this.nutr[target] = inheritedMatter;
+        this.water[target] = inheritedWater + waterCost;
+        this.energy[target] = 4;
+        this.potential[target] = 1;
+        this.phase[target] = childPhase;
+        this.dir[target] = direction;
+        this.genome[target] = genome.id;
+        this.lineage[target] = genome.lineage;
+        this.mobile[target] = mobile ? 1 : 0;
+        this.cool[target] = 2 + Math.floor(complexity / 12);
+        this.support[target] = mobile ? 0 : Math.max(0, this.support[parent] - 8);
+        this.setAllTags(target, genome.tag);
+        this.events[target] = mobile
+          ? `detached propagule born from genome ${genome.parentId || genome.id}; competence visible, phase reset`
+          : `competent child built locally by genome ${genome.id}; parent resources paid here`;
+        return true;
+      }
+
+      differentiate(i, message) {
+        this.potential[i] = 0;
+        this.genome[i] = 0;
+        this.phase[i] = 0;
+        this.cool[i] = 0;
+        this.events[i] = message;
+      }
+
+      performAction(i, genome, action, path) {
+        const nextPhase = Math.min(15, this.phase[i] + 1);
+        const pathText = path.length
+          ? path.map(p => `${p.sensor} ${p.value.toFixed(2)} ${p.side === "low" ? "<" : "≥"} ${p.threshold.toFixed(2)}`).join(" → ")
+          : "direct leaf";
+
+        if (action.kind === "wait") {
+          this.cool[i] = 3;
+          this.events[i] = `rule chose wait · ${pathText}`;
+          return;
+        }
+
+        if (action.kind === "invest") {
+          if (this.nutr[i] >= 2 && this.energy[i] >= 4) {
+            this.nutr[i] -= 2;
+            this.mat[i] += 2;
+            this.energy[i] -= 4;
+            this.wear[i] = Math.max(0, this.wear[i] - 2);
+            this.phase[i] = nextPhase;
+            this.cool[i] = 3;
+            this.events[i] = `invested two conserved matter units; strength and future persistence rose · ${pathText}`;
+          } else {
+            this.events[i] = `investment rule blocked by local matter or energy shortage · ${pathText}`;
+          }
+          return;
+        }
+
+        if (action.kind === "extend" || action.kind === "fork") {
+          const targets = this.chooseTargets(i, action, action.kind === "fork" ? 2 : 1);
+          let made = 0;
+          for (const target of targets) {
+            if (this.createChild(i, target.j, target.d, genome, nextPhase, false)) made++;
+          }
+          if (made) {
+            this.differentiate(i, `${action.kind} created ${made} competent frontier${made > 1 ? "s" : ""}; this cell differentiated · ${pathText}`);
+          } else {
+            this.cool[i] = 3;
+            this.events[i] = `${action.kind} rule blocked by space or locally held resources · ${pathText}`;
+          }
+          return;
+        }
+
+        if (action.kind === "detach") {
+          const targets = this.chooseTargets(i, action, 1).filter(t => this.type[t.j] === TYPE.AIR);
+          if (!targets.length) {
+            this.cool[i] = 4;
+            this.events[i] = `detach rule blocked: no adjacent empty space · ${pathText}`;
+            return;
+          }
+          let childGenome = genome;
+          let mutated = false;
+          if (this.rng.chance(.22)) {
+            childGenome = mutateGenome(genome, this.rng);
+            childGenome.id = this.genomes.length;
+            childGenome.lineage = this.nextLineage;
+            childGenome.born = this.tick;
+            mutated = true;
+          }
+          const target = targets[0];
+          if (this.createChild(i, target.j, target.d, childGenome, 0, true)) {
+            if (mutated) {
+              this.genomes.push(childGenome);
+              this.nextLineage++;
+              this.mutations++;
+            }
+            this.births++;
+            this.differentiate(i, `detached propagule ${childGenome.id === genome.id ? "copied" : "mutated"}; terminal cell differentiated · ${pathText}`);
+          } else {
+            this.cool[i] = 4;
+            this.events[i] = `detach rule lacked the local energy, matter, or water required to copy genome · ${pathText}`;
+          }
+        }
+      }
+
+      updateCompetentCells() {
+        const active = [];
+        for (let i = 0; i < this.N; i++) {
+          if (this.type[i] === TYPE.LIVE && this.potential[i] && !this.mobile[i] && !this.cool[i]) active.push(i);
+        }
+        for (let i = active.length - 1; i > 0; i--) {
+          const j = this.rng.int(i + 1);
+          const tmp = active[i]; active[i] = active[j]; active[j] = tmp;
+        }
+        for (const i of active) {
+          if (this.type[i] !== TYPE.LIVE || !this.potential[i] || this.mobile[i]) continue;
+          const genome = this.genomes[this.genome[i]];
+          if (!genome) {
+            this.differentiate(i, "competence exhausted because no local genome copy remained");
+            continue;
+          }
+          const sensors = this.sensorsAt(i);
+          const result = evaluateTree(genome.tree, sensors);
+          this.performAction(i, genome, result.action, result.path);
+        }
+      }
+
+      updateMobileSeeds() {
+        for (let y = this.H - 2; y >= 0; y--) {
+          for (let x = 0; x < this.W; x++) {
+            const i = this.idx(x, y);
+            if (this.type[i] !== TYPE.LIVE || !this.mobile[i]) continue;
+            this.age[i]++;
+            const below = this.neighbor(i, 4);
+            if (below >= 0 && this.type[below] === TYPE.AIR) {
+              let target = below;
+              if (this.rng.chance(.24)) {
+                const driftDir = this.rng.chance(.5) ? 3 : 5;
+                const diagonal = this.neighbor(i, driftDir);
+                if (diagonal >= 0 && this.type[diagonal] === TYPE.AIR) target = diagonal;
+              }
+              this.events[i] = "propagule moved one local gravity step";
+              this.moveCell(i, target);
+            } else {
+              this.mobile[i] = 0;
+              this.support[i] = 20;
+              this.events[i] = "propagule landed; phase 0 will evaluate local germination conditions";
+            }
+            if (this.type[i] === TYPE.LIVE && this.mobile[i] && this.age[i] > 230) this.kill(i, "propagule reserve expired before establishment");
+          }
+        }
+      }
+
+      kill(i, reason) {
+        if (this.type[i] !== TYPE.LIVE) return;
+        this.type[i] = TYPE.DEAD;
+        this.energy[i] = 0;
+        this.potential[i] = 0;
+        this.genome[i] = 0;
+        this.mobile[i] = 0;
+        this.cool[i] = 0;
+        this.age[i] = 0;
+        this.events[i] = `${reason}; matter, water, geometry, lineage overlay, and face tags remain`;
+        this.deaths++;
+      }
+
+      maintenancePass() {
+        for (let i = 0; i < this.N; i++) {
+          if (this.type[i] !== TYPE.LIVE) continue;
+          if (!this.mobile[i]) this.age[i]++;
+          if (this.cool[i]) this.cool[i]--;
+          if ((this.tick + i) % 11 === 0) {
+            const cost = 1 + Math.floor(this.mat[i] / 32);
+            if (this.energy[i] >= cost) {
+              this.energy[i] -= cost;
+              if (this.wear[i] && this.energy[i] > 18 && this.rng.chance(.22)) this.wear[i]--;
+            } else {
+              this.wear[i] += 1 + (this.energy[i] === 0 ? 1 : 0);
+            }
+          }
+          const x = this.xOf(i), y = this.yOf(i);
+          if (y < this.ground[x] && this.support[i] < 8 && (this.tick + i) % 7 === 0) this.wear[i] += 2;
+          const senescence = 430 + Math.min(70, this.mat[i]) * 7;
+          if (this.age[i] > senescence && (this.tick + i) % 13 === 0) this.wear[i]++;
+          const tolerance = 9 + Math.floor(this.mat[i] * .55);
+          if (this.wear[i] > tolerance) this.kill(i, this.support[i] < 8 ? "local support and repair failed" : "maintenance and senescence exceeded repair");
+        }
+      }
+
+      weatherPass() {
+        for (let y = this.H - 2; y >= 0; y--) {
+          for (let x = 0; x < this.W; x++) {
+            const i = this.idx(x, y);
+            if (this.type[i] === TYPE.DEAD) {
+              this.age[i]++;
+              const below = this.neighbor(i, 4);
+              if (below >= 0 && this.type[below] === TYPE.AIR && this.support[i] < 7) {
+                this.events[i] = "unsupported tagged remains fell one local step";
+                this.moveCell(i, below);
+                continue;
+              }
+              const decayAge = 150 + this.mat[i] * 6;
+              if (this.age[i] > decayAge && this.rng.chance(.035)) {
+                this.type[i] = TYPE.SOIL;
+                this.mat[i] += this.nutr[i];
+                this.nutr[i] = 0;
+                this.energy[i] = 0;
+                this.lineage[i] = 0;
+                this.support[i] = 255;
+                this.events[i] = "historical structure weathered into loose substrate; face-tag memory faded";
+                this.setAllTags(i, 0);
+              }
+            } else if (this.type[i] === TYPE.SOIL) {
+              const below = this.neighbor(i, 4);
+              if (below >= 0 && this.type[below] === TYPE.AIR && this.rng.chance(.38)) {
+                this.events[i] = "loose matter settled under gravity";
+                this.moveCell(i, below);
+              }
+            }
+          }
+        }
+      }
+
+      updateStats(force) {
+        if (!force && this.tick % 8) return;
+        let living = 0, tips = 0, dead = 0, mobile = 0;
+        const lineages = new Set();
+        for (let i = 0; i < this.N; i++) {
+          if (this.type[i] === TYPE.LIVE) {
+            living++;
+            if (this.potential[i]) tips++;
+            if (this.mobile[i]) mobile++;
+            if (this.lineage[i]) lineages.add(this.lineage[i]);
+          } else if (this.type[i] === TYPE.DEAD) dead++;
+        }
+        this.stats = {
+          living, tips, dead, mobile,
+          lineages: lineages.size,
+          matterDrift: this.totalMatter() - this.baselineMatter,
+          waterDrift: this.totalWater() - this.baselineWater
+        };
+      }
+
+      step() {
+        this.tick++;
+        this.computeLight();
+        this.computeSupport();
+        this.resourcePass();
+        this.acquireAndPhotosynthesize();
+        this.updateMobileSeeds();
+        this.updateCompetentCells();
+        this.maintenancePass();
+        this.weatherPass();
+        this.updateStats(false);
+      }
+    }
+
+    function blueprintPhenotype(genome, seed) {
+      const rng = new RNG(seed);
+      const W = 31, H = 29, ground = 18;
+      const occupied = new Set();
+      const key = (x, y) => `${(x + W) % W},${y}`;
+      occupied.add(key(15, ground - 1));
+      let active = [{ x: 15, y: ground - 1, dir: 0, phase: 0 }];
+      let branches = 0, seeds = 0;
+
+      const localSensors = tip => {
+        let neighbors = 0, medium = 0;
+        for (let d = 0; d < 8; d++) {
+          const nx = (tip.x + DIRS[d][0] + W) % W;
+          const ny = tip.y + DIRS[d][1];
+          if (occupied.has(key(nx, ny))) neighbors++;
+          if (ny >= ground) medium++;
+        }
+        return {
+          phase: tip.phase / 15,
+          medium: medium / 8,
+          light: clamp(1 - tip.y / H, 0, 1),
+          water: clamp((tip.y - ground + 5) / 9, 0, 1),
+          energy: tip.y < ground ? .72 : .55,
+          crowding: neighbors / 8,
+          support: .8,
+          tagMatch: .5
+        };
+      };
+
+      const targets = (tip, action, count) => {
+        const choices = [];
+        const [fx, fy] = DIRS[tip.dir & 7];
+        for (let d = 0; d < 8; d++) {
+          const [dx, dy] = DIRS[d];
+          const nx = (tip.x + dx + W) % W;
+          const ny = tip.y + dy;
+          if (ny < 1 || ny >= H - 1 || occupied.has(key(nx, ny))) continue;
+          const forward = (fx * dx + fy * dy) / ((Math.hypot(fx, fy) || 1) * (Math.hypot(dx, dy) || 1));
+          const lateral = Math.abs(fx * dy - fy * dx) / ((Math.hypot(fx, fy) || 1) * (Math.hypot(dx, dy) || 1));
+          const light = clamp(1 - ny / H, 0, 1);
+          const water = clamp((ny - ground + 5) / 9, 0, 1);
+          let score = action.forward * forward + action.light * light + action.water * water
+            + action.space + action.lateral * lateral + (rng.next() - .5) * action.jitter;
+          if (ny >= ground && action.water < .18) score -= .7;
+          choices.push({ x: nx, y: ny, d, score });
+        }
+        choices.sort((a, b) => b.score - a.score);
+        if (count === 1 || choices.length < 2) return choices.slice(0, count);
+        const first = choices[0];
+        let second = null, best = -1e9;
+        for (let k = 1; k < choices.length; k++) {
+          const c = choices[k];
+          const separation = Math.abs((c.d - first.d + 8) % 8 - 4) / 4;
+          const adjusted = c.score + separation * (.4 + action.lateral * .4);
+          if (adjusted > best) { best = adjusted; second = c; }
+        }
+        return second ? [first, second] : [first];
+      };
+
+      for (let step = 0; step < 76 && active.length && occupied.size < 420; step++) {
+        const next = [];
+        for (const tip of active) {
+          const result = evaluateTree(genome.tree, localSensors(tip));
+          const action = result.action;
+          if (action.kind === "detach") { seeds++; continue; }
+          if (action.kind === "wait" || action.kind === "invest") {
+            if (step < 60) next.push({ ...tip, phase: Math.min(15, tip.phase + 1) });
+            continue;
+          }
+          if (action.kind !== "extend" && action.kind !== "fork") continue;
+          const chosen = targets(tip, action, action.kind === "fork" ? 2 : 1);
+          if (chosen.length > 1) branches++;
+          for (const t of chosen) {
+            occupied.add(key(t.x, t.y));
+            next.push({ x: t.x, y: t.y, dir: t.d, phase: Math.min(15, tip.phase + 1) });
+          }
+        }
+        active = next.slice(0, 100);
+      }
+
+      const points = [...occupied].map(k => k.split(",").map(Number));
+      const xs = points.map(p => p[0]), ys = points.map(p => p[1]);
+      const below = points.filter(p => p[1] >= ground).length;
+      const width = Math.max(...xs) - Math.min(...xs) + 1;
+      const height = Math.max(...ys) - Math.min(...ys) + 1;
+      const viable = occupied.size >= 7 && (seeds > 0 || active.length > 0);
+      return {
+        viable,
+        vector: [
+          clamp(occupied.size / 150, 0, 2), width / W, height / H,
+          clamp(branches / 18, 0, 2), below / Math.max(1, occupied.size),
+          clamp(seeds / 8, 0, 2), clamp(active.length / 28, 0, 2)
+        ],
+        cells: occupied.size,
+        branches,
+        seeds
+      };
+    }
+
+    function phenotypeDistance(a, b) {
+      let sum = 0;
+      for (let i = 0; i < a.vector.length; i++) sum += (a.vector[i] - b.vector[i]) ** 2;
+      return Math.sqrt(sum / a.vector.length);
+    }
+
+    function assayGenome(genome, count, seed) {
+      const rng = new RNG(seed ^ 0xa53c9e21);
+      const base = blueprintPhenotype(genome, seed ^ 0x932f4a11);
+      const bins = { neutral: 0, small: 0, large: 0, dead: 0 };
+      let distances = 0, viableCount = 0;
+
+      for (let n = 0; n < count; n++) {
+        const mutant = mutateGenome(genome, rng);
+        const phenotype = blueprintPhenotype(mutant, rng.state ^ (n * 2654435761));
+        if (!phenotype.viable) { bins.dead++; continue; }
+        const distance = phenotypeDistance(base, phenotype);
+        distances += distance;
+        viableCount++;
+        if (distance < .055) bins.neutral++;
+        else if (distance < .24) bins.small++;
+        else bins.large++;
+      }
+
+      let accepted = 0, opportunities = 0, displacement = 0;
+      for (let walk = 0; walk < 14; walk++) {
+        let current = deepClone(genome);
+        let currentPhenotype = blueprintPhenotype(current, rng.state ^ walk);
+        for (let step = 0; step < 18; step++) {
+          opportunities++;
+          const proposal = mutateGenome(current, rng);
+          const proposedPhenotype = blueprintPhenotype(proposal, rng.state ^ step ^ (walk << 8));
+          if (proposedPhenotype.viable && phenotypeDistance(currentPhenotype, proposedPhenotype) < .065) {
+            current = proposal;
+            currentPhenotype = proposedPhenotype;
+            accepted++;
+          }
+        }
+        displacement += phenotypeDistance(base, currentPhenotype);
+      }
+
+      return {
+        count,
+        bins,
+        base,
+        viableFraction: viableCount / count,
+        meanDistance: distances / Math.max(1, viableCount),
+        neutralAcceptance: accepted / opportunities,
+        neutralDisplacement: displacement / 14
+      };
+    }
+
+    const $ = id => document.getElementById(id);
+    const canvas = $("world");
+    const canvasWrap = $("canvasWrap");
+    const ctx = canvas.getContext("2d", { alpha: false });
+    const pixelCanvas = document.createElement("canvas");
+    const pixelCtx = pixelCanvas.getContext("2d", { alpha: false });
+    const CELL_PIXELS = 3;
+    const WORLD_W = 144;
+    const WORLD_H = 82;
+    pixelCanvas.width = WORLD_W * CELL_PIXELS;
+    pixelCanvas.height = WORLD_H * CELL_PIXELS;
+
+    let currentSeed = (() => {
+      const fromUrl = Number(new URLSearchParams(location.search).get("seed"));
+      return Number.isFinite(fromUrl) && fromUrl > 0 ? fromUrl >>> 0 : 0x051af2d3;
+    })();
+    let world = new World(WORLD_W, WORLD_H, currentSeed);
+    let running = true;
+    let view = "life";
+    let selected = -1;
+    let tickBudget = 0;
+    let lastFrame = performance.now();
+    let lastMetrics = 0;
+    let renderMap = { left: 0, top: 0, width: 1, height: 1 };
+
+    function color(r, g, b) {
+      return `rgb(${clamp(Math.round(r), 0, 255)},${clamp(Math.round(g), 0, 255)},${clamp(Math.round(b), 0, 255)})`;
+    }
+
+    function cellColor(i) {
+      const t = world.type[i];
+      const y = world.yOf(i);
+      const water = clamp(world.water[i] / 150, 0, 1);
+      const matter = clamp((world.mat[i] + world.nutr[i]) / 120, 0, 1);
+      const energy = clamp(world.energy[i] / 180, 0, 1);
+      const support = world.support[i] / 255;
+
+      if (t === TYPE.AIR) {
+        if (view === "water") return color(5, 14 + water * 30, 19 + water * 58);
+        const horizon = y / world.H;
+        return color(7 + horizon * 5, 18 + horizon * 4, 22 + horizon * 4);
+      }
+
+      if (view === "water") {
+        if (t === TYPE.LIVE) return color(20 + water * 32, 48 + water * 90, 52 + water * 132);
+        return color(24 + water * 22, 31 + water * 76, 29 + water * 90);
+      }
+      if (view === "energy") {
+        if (t === TYPE.LIVE) return color(32 + energy * 208, 43 + energy * 166, 17 + energy * 45);
+        return t === TYPE.DEAD ? color(66, 48, 33) : color(40, 43, 28);
+      }
+      if (view === "matter") {
+        const base = t === TYPE.LIVE ? 58 : t === TYPE.DEAD ? 42 : 32;
+        return color(base + matter * 145, base + matter * 92, 24 + matter * 45);
+      }
+      if (view === "support") {
+        if (t === TYPE.LIVE || t === TYPE.DEAD) return color(25 + support * 120, 35 + support * 165, 35 + support * 155);
+        return t === TYPE.SOIL ? color(76, 76, 60) : color(7, 16, 19);
+      }
+      if (view === "lineage") {
+        if (t === TYPE.LIVE || t === TYPE.DEAD) return lineageColor(world.lineage[i] || 0, t === TYPE.DEAD ? .48 : 1);
+        return t === TYPE.SOIL ? color(55 + water * 20, 43 + water * 15, 33 + water * 18) : color(7, 16, 19);
+      }
+      if (view === "tags") {
+        if (t === TYPE.LIVE || t === TYPE.DEAD) {
+          const tag = world.tags[i * 8];
+          return t === TYPE.LIVE ? TAG_COLORS[tag] : color(89 + tag * 7, 62 + tag * 4, 48 + tag * 5);
+        }
+        return t === TYPE.SOIL ? color(57 + water * 18, 45 + water * 14, 33 + water * 13) : color(7, 16, 19);
+      }
+
+      if (t === TYPE.SOIL) return color(72 - water * 16, 51 + water * 18, 36 + water * 30);
+      if (t === TYPE.DEAD) {
+        const weather = clamp(world.age[i] / (160 + world.mat[i] * 6), 0, 1);
+        return color(145 - weather * 54, 86 - weather * 31, 58 - weather * 18);
+      }
+      const wear = clamp(world.wear[i] / 35, 0, 1);
+      return color(53 + energy * 60 + matter * 20, 102 + energy * 75 - wear * 45, 54 + water * 55 - wear * 20);
+    }
+
+    function resizeCanvas() {
+      const rect = canvasWrap.getBoundingClientRect();
+      const cssW = Math.max(320, Math.floor(rect.width || window.innerWidth || 800));
+      const cssH = Math.max(380, Math.floor(rect.height || window.innerHeight * .62 || 480));
+      const dpr = Math.min(2, window.devicePixelRatio || 1);
+      const w = Math.floor(cssW * dpr), h = Math.floor(cssH * dpr);
+      if (canvas.width !== w || canvas.height !== h) {
+        canvas.width = w;
+        canvas.height = h;
+      }
+    }
+
+    function drawWorld() {
+      resizeCanvas();
+      const cp = CELL_PIXELS;
+      pixelCtx.fillStyle = "#071013";
+      pixelCtx.fillRect(0, 0, pixelCanvas.width, pixelCanvas.height);
+
+      for (let i = 0; i < world.N; i++) {
+        const x = world.xOf(i) * cp;
+        const y = world.yOf(i) * cp;
+        pixelCtx.fillStyle = cellColor(i);
+        pixelCtx.fillRect(x, y, cp, cp);
+
+        if (world.type[i] === TYPE.LIVE || world.type[i] === TYPE.DEAD) {
+          const showFaces = view === "life" || view === "tags" || view === "lineage";
+          if (showFaces) {
+            pixelCtx.fillStyle = TAG_COLORS[world.tags[i * 8 + 0]];
+            pixelCtx.fillRect(x + 1, y, 1, 1);
+            pixelCtx.fillStyle = TAG_COLORS[world.tags[i * 8 + 2]];
+            pixelCtx.fillRect(x + 2, y + 1, 1, 1);
+            pixelCtx.fillStyle = TAG_COLORS[world.tags[i * 8 + 4]];
+            pixelCtx.fillRect(x + 1, y + 2, 1, 1);
+            pixelCtx.fillStyle = TAG_COLORS[world.tags[i * 8 + 6]];
+            pixelCtx.fillRect(x, y + 1, 1, 1);
+          }
+          if (world.mobile[i]) {
+            pixelCtx.fillStyle = "#ffb3c7";
+            pixelCtx.fillRect(x + 1, y + 1, 1, 1);
+          } else if (world.potential[i]) {
+            pixelCtx.fillStyle = "#fff0a8";
+            pixelCtx.fillRect(x + 1, y + 1, 1, 1);
+          }
+        }
+      }
+
+      ctx.imageSmoothingEnabled = false;
+      ctx.fillStyle = "#050b0d";
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      const scale = Math.min(canvas.width / pixelCanvas.width, canvas.height / pixelCanvas.height);
+      const drawW = pixelCanvas.width * scale;
+      const drawH = pixelCanvas.height * scale;
+      const left = (canvas.width - drawW) / 2;
+      const top = (canvas.height - drawH) / 2;
+      renderMap = { left, top, width: drawW, height: drawH };
+      ctx.drawImage(pixelCanvas, left, top, drawW, drawH);
+
+      if (selected >= 0) {
+        const sx = world.xOf(selected), sy = world.yOf(selected);
+        const cellW = drawW / world.W, cellH = drawH / world.H;
+        ctx.strokeStyle = "rgba(255,255,238,.95)";
+        ctx.lineWidth = Math.max(1.5, scale * .55);
+        ctx.strokeRect(left + sx * cellW - 1, top + sy * cellH - 1, cellW + 2, cellH + 2);
+      }
+    }
+
+    function signed(value) { return value > 0 ? `+${nf.format(value)}` : nf.format(value); }
+
+    function updateMetrics() {
+      const s = world.stats;
+      $("tickLabel").textContent = `tick ${nf.format(world.tick)}`;
+      $("livingMetric").textContent = nf.format(s.living || 0);
+      $("tipMetric").textContent = nf.format(s.tips || 0);
+      $("lineageMetric").textContent = nf.format(s.lineages || 0);
+      $("birthMetric").textContent = nf.format(world.births);
+      $("deathMetric").textContent = nf.format(world.deaths);
+      $("flowMetric").textContent = nf.format(world.crossFlows);
+      $("matterDrift").textContent = signed(s.matterDrift || 0);
+      $("waterDrift").textContent = signed(s.waterDrift || 0);
+      $("genomeMetric").textContent = nf.format(world.genomes.length - 1);
+      $("detritusMetric").textContent = nf.format(s.dead || 0);
+      $("matterDrift").style.color = s.matterDrift === 0 ? "var(--moss-bright)" : "var(--rust)";
+      $("waterDrift").style.color = s.waterDrift === 0 ? "var(--moss-bright)" : "var(--rust)";
+      $("seedValue").textContent = String(currentSeed >>> 0);
+    }
+
+    function escapeHtml(value) {
+      return String(value).replace(/[&<>"']/g, ch => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;", "'": "&#39;" }[ch]));
+    }
+
+    function updateInspector() {
+      const el = $("inspector");
+      if (selected < 0) {
+        el.innerHTML = '<p class="inspect-empty">Nothing selected. A selected cell reveals every causal quantity stored there; ancestry is shown only as an analytical overlay.</p>';
+        return;
+      }
+      const i = selected;
+      const x = world.xOf(i), y = world.yOf(i);
+      const typeName = TYPE_NAME[world.type[i]];
+      const tags = [0, 2, 4, 6].map(d => world.tags[i * 8 + d]);
+      let rule = "No genome evaluated here. Passive structure only stores, conducts, supports, wears, and decays.";
+      let genomeLine = "—";
+      if (world.type[i] === TYPE.LIVE && world.potential[i] && world.genome[i]) {
+        const genome = world.genomes[world.genome[i]];
+        const result = evaluateTree(genome.tree, world.sensorsAt(i));
+        const path = result.path.map(p => `${p.sensor} ${p.value.toFixed(2)} ${p.side === "low" ? "<" : "≥"} ${p.threshold.toFixed(2)}`).join(" → ");
+        rule = `${path || "direct leaf"} → ${actionSummary(result.action)}`;
+        genomeLine = `G${genome.id} · ${treeSize(genome.tree)} nodes · tag ${genome.tag}`;
+      }
+      el.innerHTML = `
+        <div class="inspect-title"><strong>${escapeHtml(typeName)}</strong><span class="coord">x${x} y${y}</span></div>
+        <div class="inspect-grid">
+          <div class="inspect-row"><span>matter</span><b>${world.mat[i]} + ${world.nutr[i]}</b></div>
+          <div class="inspect-row"><span>water</span><b>${world.water[i]}</b></div>
+          <div class="inspect-row"><span>energy</span><b>${world.energy[i]}</b></div>
+          <div class="inspect-row"><span>light</span><b>${world.light[i]}</b></div>
+          <div class="inspect-row"><span>support</span><b>${world.support[i]}</b></div>
+          <div class="inspect-row"><span>wear</span><b>${world.wear[i]}</b></div>
+          <div class="inspect-row"><span>competence</span><b>${world.potential[i] ? "active" : "spent"}</b></div>
+          <div class="inspect-row"><span>phase</span><b>${world.phase[i]}</b></div>
+          <div class="inspect-row"><span>lineage*</span><b>${world.lineage[i] || "—"}</b></div>
+          <div class="inspect-row"><span>age</span><b>${world.age[i]}</b></div>
+        </div>
+        <div class="inspect-row"><span>face tags N/E/S/W</span><b>${tags.join(" / ")}</b></div>
+        <div class="inspect-row"><span>local genome</span><b>${escapeHtml(genomeLine)}</b></div>
+        <div class="rule-box">${escapeHtml(rule)}</div>
+        <div class="event-box">Last event: ${escapeHtml(world.events[i] || "no recorded transition yet")}</div>
+        <p style="margin:8px 0 0;color:var(--dim);font-size:9px;line-height:1.4">*Lineage is analytical and never changes the physics.</p>`;
+    }
+
+    function pickCell(event) {
+      const rect = canvas.getBoundingClientRect();
+      const px = (event.clientX - rect.left) * canvas.width / Math.max(1, rect.width);
+      const py = (event.clientY - rect.top) * canvas.height / Math.max(1, rect.height);
+      const x = Math.floor((px - renderMap.left) / renderMap.width * world.W);
+      const y = Math.floor((py - renderMap.top) / renderMap.height * world.H);
+      if (x < 0 || y < 0 || x >= world.W || y >= world.H) return;
+      selected = world.idx(x, y);
+      updateInspector();
+      $("canvasNote").textContent = `${TYPE_NAME[world.type[selected]]} at x${x}, y${y} selected · complete local state is shown in the inspector.`;
+      drawWorld();
+    }
+
+    function setRunning(value) {
+      running = value;
+      $("playBtn").textContent = running ? "Pause" : "Resume";
+      $("runStatus").textContent = running ? "Zero-player world running" : "World paused for inspection";
+      $("pulse").classList.toggle("paused", !running);
+    }
+
+    function runAssayUI() {
+      const button = $("assayBtn");
+      button.disabled = true;
+      button.textContent = "Running…";
+      $("assaySummary").textContent = "Developing one-edit mutants and walking neutral neighborhoods…";
+      setTimeout(() => {
+        try {
+          const report = assayGenome(world.genomes[1], 256, currentSeed);
+          const total = report.count;
+          const mapping = [
+            ["Neutral", report.bins.neutral], ["Small", report.bins.small],
+            ["Large", report.bins.large], ["Dead", report.bins.dead]
+          ];
+          for (const [name, value] of mapping) {
+            const pct = value / total * 100;
+            $(`bar${name}`).style.width = `${pct}%`;
+            $(`pct${name}`).textContent = `${Math.round(pct)}%`;
+          }
+          const navigable = (report.bins.neutral + report.bins.small) / total;
+          const verdict = navigable >= .55 && report.viableFraction >= .68
+            ? "Promising neighborhood, not a proof."
+            : "Brittleness warning: representation needs revision before scale.";
+          $("assaySummary").textContent = `${verdict} Viable ${(report.viableFraction * 100).toFixed(0)}%; neutral-walk acceptance ${(report.neutralAcceptance * 100).toFixed(0)}%; mean viable distance ${report.meanDistance.toFixed(3)}. Scores never affect the world.`;
+        } catch (error) {
+          $("assaySummary").textContent = `Assay failed safely: ${error.message}`;
+        } finally {
+          button.disabled = false;
+          button.textContent = "Run 256 mutants";
+        }
+      }, 30);
+    }
+
+    function resetWorld() {
+      const seedRng = new RNG((currentSeed ^ 0x9e3779b9) >>> 0);
+      currentSeed = Math.floor(seedRng.next() * 4294967295) >>> 0;
+      if (!currentSeed) currentSeed = 1;
+      world = new World(WORLD_W, WORLD_H, currentSeed);
+      window.__PALIMPSEST_WORLD__ = world;
+      selected = -1;
+      $("canvasNote").textContent = "Tap any cell to inspect its complete local state and last causal event.";
+      updateInspector();
+      updateMetrics();
+      drawWorld();
+    }
+
+    function frame(now) {
+      try {
+        const dt = Math.min(80, now - lastFrame);
+        lastFrame = now;
+        if (running) {
+          const speed = Number($("speedSelect").value) || 1;
+          tickBudget += dt / 16.667 * speed;
+          const started = performance.now();
+          let steps = 0;
+          while (tickBudget >= 1 && steps < 80 && performance.now() - started < 13) {
+            world.step();
+            tickBudget--;
+            steps++;
+          }
+          if (tickBudget > 120) tickBudget = 120;
+        }
+        drawWorld();
+        if (now - lastMetrics > 110) {
+          updateMetrics();
+          if (selected >= 0) updateInspector();
+          lastMetrics = now;
+        }
+        requestAnimationFrame(frame);
+      } catch (error) {
+        showFatal(error);
+      }
+    }
+
+    function showFatal(error) {
+      running = false;
+      const fatal = $("fatal");
+      fatal.style.display = "block";
+      fatal.textContent = `Palimpsest Garden stopped safely.\n\n${error && error.stack ? error.stack : error}`;
+    }
+
+    window.addEventListener("error", event => showFatal(event.error || event.message));
+    window.addEventListener("unhandledrejection", event => showFatal(event.reason));
+    window.addEventListener("resize", drawWorld, { passive: true });
+    if (window.ResizeObserver) new ResizeObserver(drawWorld).observe(canvasWrap);
+
+    $("playBtn").addEventListener("click", () => setRunning(!running));
+    $("stepBtn").addEventListener("click", () => {
+      setRunning(false);
+      world.step();
+      drawWorld(); updateMetrics(); updateInspector();
+    });
+    $("resetBtn").addEventListener("click", resetWorld);
+    $("assayBtn").addEventListener("click", runAssayUI);
+    canvas.addEventListener("pointerdown", pickCell);
+    document.querySelectorAll(".view-btn").forEach(button => button.addEventListener("click", () => {
+      view = button.dataset.view;
+      document.querySelectorAll(".view-btn").forEach(b => b.classList.toggle("active", b === button));
+      drawWorld();
+    }));
+    document.addEventListener("keydown", event => {
+      if (event.code === "Space" && event.target === document.body) {
+        event.preventDefault(); setRunning(!running);
+      } else if (event.key === ".") {
+        setRunning(false); world.step(); drawWorld(); updateMetrics();
+      }
+    });
+
+    updateMetrics();
+    drawWorld();
+    window.__PALIMPSEST_READY__ = true;
+    window.__PALIMPSEST_WORLD__ = world;
+    requestAnimationFrame(frame);
+  })();
+  </script>
+</body>
+</html>

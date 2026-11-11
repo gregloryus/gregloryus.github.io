@@ -1,0 +1,311 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="theme-color" content="#000000"><meta name="description" content="A closed-matter red and blue volcanic lattice. Heat, fracture, discharge, cooling. An autonomous experiment."><title>FAULT — earth & water</title>
+<style>
+:root{color-scheme:dark;font-family:ui-sans-serif,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;background:#000;color:#d6d6d6;font-synthesis:none}*{box-sizing:border-box}body{margin:0;overflow:hidden}main{height:100svh;min-height:420px;max-width:820px;margin:auto;display:flex;flex-direction:column;padding:calc(18px + env(safe-area-inset-top)) 22px calc(16px + env(safe-area-inset-bottom));gap:10px}header{display:flex;justify-content:space-between;align-items:center;flex-shrink:0}h1{font-size:18px;letter-spacing:.24em;font-weight:500;margin:0}header p{margin:5px 0 0;color:#777;font-size:11px;letter-spacing:.09em}.legend{display:flex;gap:12px;font-size:11px;align-items:center}.red{color:#ed2929}.blue{color:#7777ff}.dot{display:inline-block;width:5px;height:5px;margin-right:5px;background:currentColor}.view{position:relative;flex:1;min-height:100px;overflow:hidden}canvas{display:block;width:100%;height:100%;touch-action:none;outline:none}canvas:focus-visible{outline:1px solid #555;outline-offset:-2px}.hint{position:absolute;top:5px;left:0;right:0;color:#626262;font-size:10px;letter-spacing:.04em;text-align:center;pointer-events:none}.stamp{position:absolute;bottom:6px;left:0;right:0;text-align:center;font-size:10px;color:#666;pointer-events:none}.readout{flex-shrink:0;padding:12px 0 3px;border-top:1px solid #202020}.eyebrow{display:flex;justify-content:space-between;font-size:10px;letter-spacing:.1em;color:#858585}.track{height:3px;background:#252020;margin:9px 0 12px}.track span{display:block;height:100%;width:0;background:#b90000;transition:width .18s linear}.burst .track span{background:#ff0000}#status{font-size:12px;margin:0;min-height:30px;color:#bbb}.sub{display:flex;justify-content:space-between;font-size:10px;color:#747474;margin:5px 0 14px}.controls{display:flex;align-items:center;gap:7px}button,summary{font:inherit;-webkit-tap-highlight-color:transparent}button{border:1px solid #292929;background:#080808;color:#bdbdbd;border-radius:8px;padding:0 11px;min-height:42px;font-size:11px;cursor:pointer}button:hover{border-color:#666;color:#fff}button:focus-visible,summary:focus-visible{outline:2px solid #a4a4a4;outline-offset:3px}#pause{min-width:59px}#speed{min-width:42px}#home{margin-left:auto}details{font-size:11px;color:#8b8b8b;margin-top:12px}summary{cursor:pointer;width:max-content;padding:3px 0}details[open]{position:absolute;bottom:calc(16px + env(safe-area-inset-bottom));left:16px;right:16px;max-width:788px;margin:auto;max-height:70svh;overflow:auto;background:#0a0a0a;border:1px solid #303030;padding:18px;border-radius:12px;z-index:2}details p{line-height:1.65;margin:12px 0}details strong{color:#ddd;font-weight:500}.counts{display:flex;gap:22px}.counts span{font-variant-numeric:tabular-nums}#energy{color:#777;font-size:10px}a{color:#bbb}noscript{display:block;padding:24px}@media(max-width:370px){main{padding-left:13px;padding-right:13px}button{padding:0 8px}.legend{gap:7px}}@media(max-height:580px){main{padding-top:10px;padding-bottom:8px;gap:3px}.hint,.stamp{display:none}.readout{padding-top:7px}.sub{margin-bottom:6px}details{margin-top:4px}header p{display:none}}
+.layer-label{position:absolute;font-size:8px;letter-spacing:.06em;line-height:14px;color:#aaa;background:#000b;padding:0 3px;pointer-events:none;transform:translateY(-50%)}
+</style></head>
+<body><main>
+<header><div><h1>FAULT</h1><p>EARTH & WATER · A CLOSED MATTER STUDY</p></div><div class="legend"><span class="red"><i class="dot"></i>earth</span><span class="blue"><i class="dot"></i>water</span></div></header>
+<section class="view" aria-label="Interactive 3D simulation"><canvas tabindex="0" aria-label="Volcanic chamber cutaway. Drag to rotate, pinch to zoom. Keyboard arrow keys rotate."></canvas><div class="hint">DRAG TO TURN · PINCH TO LOOK CLOSER</div><span class="layer-label" id="ocean-label">WATER</span><span class="layer-label" id="crust-label">CRUST</span><span class="layer-label" id="chamber-label">CHAMBER</span><div class="stamp">A real slice through one volume · no painted horizon</div></section>
+<section class="readout" id="meter"><div class="eyebrow"><span>PRESSURE / CRUST STRENGTH</span><span id="pressure-value">0.00 / 0.82</span></div><div class="track" aria-hidden="true"><span id="pressure"></span></div><p id="status" role="status">Warming the chamber…</p><div class="sub"><span><span id="bursts">0</span> ruptures · <span id="tick">0s</span></span><span id="balance">No matter created or lost</span></div>
+<nav class="controls" aria-label="Observation controls"><button id="pause" aria-pressed="false">Pause</button><button id="speed" aria-label="Change simulation speed">1×</button><button id="cut" aria-pressed="true">Cutaway</button><button id="home" aria-label="Reset camera">Recenter</button><button id="reset" aria-label="Start a fresh world with a new seed">New</button></nav>
+<details><summary>What am I watching?</summary>
+<p><strong>Bottom: a heated red chamber. Middle: red crust, then blue ocean. Above: empty black space.</strong> Cutaway hides the front of the same volume so you can look inside. It does not remove simulated matter. Tap “Whole” to see all of it.</p>
+<p>Heat enters at the floor. Hot earth exchanges places with cooler earth, guided by a coarse fluid field. A simplified chamber stores pressure from heating. When that exceeds the weakest roof’s strength, a connected column moves upward: magma leaves its chamber, displacing real crust and water. Discharge lowers pressure. Lava transfers heat to water and freezes into rock; sufficiently hot water becomes vapor, then cools and falls again.</p>
+<p><strong>Every occupied cube is one persistent parcel.</strong> Red stays earth, blue stays water. The brighter melt is hotter; dull red grains are loose earth. Blue vapor is fainter than liquid. Purple can appear only where blue water is seen in front of red earth. The camera changes nothing in the physics.</p>
+<div class="counts"><span class="red">Earth <span id="earth-count">—</span></span><span class="blue">Water <span id="water-count">—</span></span></div>
+<p><strong>Honest limits.</strong> This is a stylized lattice experiment, not a calibrated geology model or full multiphase Navier–Stokes simulation. The pressure law is a reduced-order approximation; the flow solver only guides local exchanges. Heat is accounted for against an external heater and cooling boundary, but pressure work and gravitational energy are not included. Solid islands and water-driven grain transport are experimental; rivers, glaciers and the poster’s full geography are not implemented. A finite closed world may eventually settle.</p>
+<p id="energy"></p><p>Reset creates a new initial world. It is the only control that changes the matter inventory’s history.</p>
+</details></section>
+</main><noscript>This simulation needs JavaScript and WebGL 2.</noscript><script>
+/* FAULT: a reduced-order, closed-matter lattice experiment. No parcel is spawned. */
+(function(root){
+'use strict';
+const X=32,Y=48,Z=24,N=X*Y*Z,AREA=X*Z,ROOF=14,SEA=21;
+const at=(x,y,z)=>x+X*(z+Z*y),clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
+class World{
+ constructor(seed=7){
+  this.seed=seed;this.rng=seed>>>0;this.t=0;this.kind=new Uint8Array(N);this.h=new Float32Array(N);this.id=new Uint32Array(N);this.loose=new Uint8Array(N);this.moved=new Uint32Array(N);this.strength=new Float32Array(AREA);this.damage=new Float32Array(AREA);this.flow=new Float32Array(N);this.pressure=0;this.bursts=0;this.discharge=0;this.vent=null;this.flash=0;this.heatIn=0;this.heatOut=0;this.events=[];this.phase='Heating the sealed chamber';this.initialEarth=0;this.initialWater=0;
+  let id=0;
+  for(let z=0;z<Z;z++)for(let x=0;x<X;x++){
+   const c=x+X*z;this.strength[c]=.82+.38*this.random();
+   for(let y=0;y<Y;y++){
+    const i=at(x,y,z);
+    if(y<=ROOF+2){this.kind[i]=1;this.h[i]=y<ROOF?1.65+(ROOF-y)*.013+Math.sin(x*.47)*Math.sin(z*.43)*.12+(this.random()-.5)*.045:.64;this.initialEarth++;}
+    else if(y<=SEA){this.kind[i]=2;this.h[i]=.25;this.initialWater++;}
+    if(this.kind[i])this.id[i]=++id;
+   }
+  }
+  this.totalIds=id;this.initialEnergy=this.energy();this.initialExpansion=this.expansion();this.lastHeatInput=0;
+  this.gx=8;this.gy=12;this.gz=6;this.gn=576;
+  this.vx=new Float32Array(this.gn);this.vy=new Float32Array(this.gn);this.vz=new Float32Array(this.gn);this.p=new Float32Array(this.gn);this.tmp=new Float32Array(this.gn);this.div=new Float32Array(this.gn);this.temp=new Float32Array(this.gn);this.num=new Float32Array(this.gn);this.support=new Uint8Array(N);this.queue=new Int32Array(N);
+ }
+ random(){let a=this.rng+=0x6D2B79F5;a=Math.imul(a^(a>>>15),a|1);a^=a+Math.imul(a^(a>>>7),a|61);return((a^(a>>>14))>>>0)/4294967296;}
+ phaseOf(i){if(this.kind[i]===1)return this.h[i]>=1.12?2:(this.loose[i]?3:1);if(this.kind[i]===2)return this.h[i]>=.94?5:(this.h[i]<.06?6:4);return 0;}
+ temperature(i){const h=this.h[i];if(this.kind[i]===1)return h<.86?h:(h<1.12?.86:h-.26);return h<.06?h:(h<.14?.06:(h<.7?h-.08:(h<.94?.62:h-.32)));}
+ swap(a,b){for(const arr of [this.kind,this.h,this.id,this.loose]){const v=arr[a];arr[a]=arr[b];arr[b]=v;}this.moved[a]=this.moved[b]=this.t;}
+ energy(){let n=0;for(let i=0;i<N;i++)n+=this.h[i];return n;}
+ expansion(){let filled=0,hot=0;for(let y=0;y<ROOF;y++)for(let z=0;z<Z;z++)for(let x=0;x<X;x++){let i=at(x,y,z);if(this.kind[i]){filled++;if(this.kind[i]===1)hot+=Math.max(0,this.h[i]-1.4)*.42;}}return filled+hot;}
+ heat(){
+  // Pairwise heat exchange: one pair gains exactly what the other loses.
+  for(let pass=0;pass<2;pass++)for(let n=0;n<N;n++){
+   const i=(this.random()*N)|0;if(!this.kind[i])continue;
+   const y=(i/AREA)|0,z=((i-y*AREA)/X)|0,x=i%X,d=(this.random()*3)|0;
+   if(d===0&&x===X-1||d===1&&y===Y-1||d===2&&z===Z-1)continue;
+   const j=i+(d===0?1:d===1?AREA:X);if(!this.kind[j])continue;
+   const pi=this.phaseOf(i),pj=this.phaseOf(j);
+   const contact=this.kind[i]!==this.kind[j]?.42:((pi===1||pj===1)?.003:.047);
+   const q=(this.temperature(i)-this.temperature(j))*contact;
+   this.h[i]-=q;this.h[j]+=q;
+  }
+  for(let i=0;i<N;i++)if(this.kind[i]){
+   const y=(i/AREA)|0;
+   if(y<2&&this.kind[i]===1){const q=Math.max(0,2.9-this.h[i])*.035;this.h[i]+=q;this.heatIn+=q;}
+   if(y>ROOF&&((y<Y-1&&!this.kind[i+AREA])||this.phaseOf(i)===5)){
+    const q=Math.max(0,this.h[i]-(this.kind[i]===2?.25:.45))*(this.kind[i]===2?.012:.014);this.h[i]-=q;this.heatOut+=q;
+   }
+  }
+ }
+ solveFlow(){
+  // A small divergence-projected buoyancy field guides lattice exchanges.
+  // This is NOT the stored chamber pressure, nor a full free-surface NS solver.
+  const {vx,vy,vz,temp,num,p,tmp,div}=this;temp.fill(0);num.fill(0);
+  for(let y=0;y<ROOF;y++)for(let z=0;z<Z;z++)for(let x=0;x<X;x++){const i=at(x,y,z);if(this.kind[i]!==1)continue;const g=(x>>2)+8*((z>>2)+6*(y>>2));temp[g]+=this.h[i];num[g]++;}
+  for(let y=0;y<12;y++){
+   let mean=0,n=0;for(let c=0;c<48;c++){let i=y*48+c;temp[i]=num[i]?temp[i]/num[i]:0;if(num[i]){mean+=temp[i];n++;}}mean/=n||1;
+   for(let c=0;c<48;c++){let i=y*48+c;vx[i]*=.92;vz[i]*=.92;vy[i]=vy[i]*.92+(num[i]?temp[i]-mean:0)*.09;}
+  }
+  const gi=(x,y,z)=>x+8*(z+6*y);
+  const sample=(a,x,y,z)=>a[gi(clamp(x,0,7),clamp(y,0,11),clamp(z,0,5))];
+  for(let y=0;y<12;y++)for(let z=0;z<6;z++)for(let x=0;x<8;x++){
+   let i=gi(x,y,z);div[i]=.5*(sample(vx,x+1,y,z)-sample(vx,x-1,y,z)+sample(vy,x,y+1,z)-sample(vy,x,y-1,z)+sample(vz,x,y,z+1)-sample(vz,x,y,z-1));p[i]=0;
+  }
+  for(let k=0;k<12;k++){
+   for(let y=0;y<12;y++)for(let z=0;z<6;z++)for(let x=0;x<8;x++){const i=gi(x,y,z);tmp[i]=(sample(p,x+1,y,z)+sample(p,x-1,y,z)+sample(p,x,y+1,z)+sample(p,x,y-1,z)+sample(p,x,y,z+1)+sample(p,x,y,z-1)-div[i])/6;}
+   p.set(tmp);
+  }
+  for(let y=0;y<12;y++)for(let z=0;z<6;z++)for(let x=0;x<8;x++){let i=gi(x,y,z);vx[i]-=.5*(sample(p,x+1,y,z)-sample(p,x-1,y,z));vy[i]-=.5*(sample(p,x,y+1,z)-sample(p,x,y-1,z));vz[i]-=.5*(sample(p,x,y,z+1)-sample(p,x,y,z-1));if(x===0||x===7)vx[i]=0;if(y===0||y===11)vy[i]=0;if(z===0||z===5)vz[i]=0;}
+ }
+ pressureStep(){
+  // Reduced-order chamber compliance: basal heating adds compressive strain;
+  // actual export across the chamber roof relieves it. This explicit storage
+  // law is separate from the flow projection. Pressure-work energy is omitted.
+  const addedHeat=this.heatIn-this.lastHeatInput;this.lastHeatInput=this.heatIn;
+  this.pressure=Math.max(0,this.pressure+addedHeat*.00038-this.pressure*.00012);
+  let best=-1,score=Infinity;
+  for(let z=3;z<Z-3;z++)for(let x=3;x<X-3;x++){
+   const c=x+X*z;let heat=this.h[at(x,ROOF-1,z)];
+   this.damage[c]=clamp(this.damage[c]+Math.max(0,heat-1.55)*.0006-.00007,0,.34);
+   const s=this.strength[c]-this.damage[c];
+   if(s<score){score=s;best=c;}
+  }
+  this.threshold=score;
+  if(!this.vent&&this.pressure>score){
+   this.vent={x:best%X,z:(best/X)|0,start:this.t,out:0};this.damage[best]=Math.min(.34,this.damage[best]+.14);this.bursts++;this.flash=1;this.phase='Crust ruptures · stored pressure releases';
+   this.events.push({tick:this.t,type:'rupture',pressure:this.pressure});
+  }
+  if(this.vent){
+   const v=this.vent;
+   for(let n=0;n<22;n++){
+    if(this.pressure<.15)break;
+    // Pressure prefers the less-buried nearby route; it cannot keep lifting
+    // one frozen tower indefinitely. A short local search spreads the outlet.
+    let x=v.x,z=v.z,bestResistance=Infinity;
+    for(let trial=0;trial<6;trial++){
+     const xx=clamp(v.x+((this.random()*5)|0)-2,1,X-2),zz=clamp(v.z+((this.random()*5)|0)-2,1,Z-2);
+     let roof=ROOF;for(let yy=ROOF;yy<Y-2;yy++)if(this.kind[at(xx,yy,zz)]===1)roof=yy;
+     const resistance=roof+Math.hypot(xx-v.x,zz-v.z)*2.2+this.random()*.8;
+     if(resistance<bestResistance){bestResistance=resistance;x=xx;z=zz;}
+    }
+    // Move a connected column one lattice step at a time. Water and crust
+    // are displaced, not deleted; an actual cavity is left in the chamber.
+    let donor=-1;
+    for(let y=ROOF-1;y>=2;y--){let i=at(x,y,z);if(this.kind[i]===1&&this.h[i]>=1.12){donor=y;break;}}
+    if(donor<0)continue;
+    let top=ROOF+3;while(top<Y-2&&this.kind[at(x,top,z)])top++;
+    if(top>=Y-2)continue;
+    // Fracture the rock plug; its parcel IDs remain unchanged.
+    for(let y=ROOF;y<=Math.min(top,ROOF+3);y++){let i=at(x,y,z);if(this.kind[i]===1)this.loose[i]=1;}
+    const exported=this.kind[at(x,ROOF-1,z)]===1;
+    for(let y=top;y>donor;y--)this.swap(at(x,y,z),at(x,y-1,z));
+    if(exported){v.out++;this.discharge++;this.pressure=Math.max(0,this.pressure-.0035);}
+   }
+   if(this.pressure<.2){
+    this.events.push({tick:this.t,type:'release',out:v.out,pressure:this.pressure});
+    this.strength[v.x+X*v.z]+=.018;this.vent=null;this.phase='Discharged · lava cools and the vent seals';
+   }
+  }else this.phase=this.pressure>.52?'Pressure building beneath the crust':'Heating · red parcels circulate';
+  this.flash*=.94;
+ }
+ move(){
+  const dirs=[[1,0],[-1,0],[0,1],[0,-1]];
+  // Random sequential updates remove a persistent left/right scan bias.
+  for(let n=0;n<N;n++){
+   const i=(this.random()*N)|0;if(!this.kind[i]||this.moved[i]===this.t)continue;
+   const y=(i/AREA)|0,z=((i-y*AREA)/X)|0,x=i%X,ph=this.phaseOf(i);
+   this.flow[i]*=.96;
+   if(ph===1||ph===6){
+    if(ph===1&&y>ROOF+2){
+     // Only exposed grains loosen; there is no terrain-height injection.
+     let wet=false;for(const [dx,dz]of dirs){if(x+dx>=0&&x+dx<X&&z+dz>=0&&z+dz<Z){const j=at(x+dx,y,z+dz);if(this.phaseOf(j)===4&&this.flow[j]>.2)wet=true;}}
+     if(wet&&this.random()<.0008)this.loose[i]=1;
+    }continue;
+   }
+   if(ph===5){
+    const d=dirs[(this.random()*4)|0],xx=clamp(x+d[0],0,X-1),zz=clamp(z+d[1],0,Z-1);
+    const j=at(xx,Math.min(Y-1,y+(this.random()<.75?1:0)),zz);
+    if(!this.kind[j])this.swap(i,j);continue;
+   }
+   if(ph===2&&y<ROOF){
+    const g=(x>>2)+8*((z>>2)+6*(y>>2));
+    const axis=(this.random()*3)|0,sgn=this.random()<.5?-1:1;
+    const dx=axis===0?sgn:0,dy=axis===1?sgn:0,dz=axis===2?sgn:0;
+    if(x+dx<0||x+dx>=X||y+dy<0||y+dy>=ROOF||z+dz<0||z+dz>=Z)continue;
+    const j=at(x+dx,y+dy,z+dz),other=this.phaseOf(j);
+    if(!other){if(dy<=0||this.pressure>.2)this.swap(i,j);}
+    else if(other===2){
+     const drive=(axis===0?this.vx[g]:axis===1?this.vy[g]:this.vz[g])*sgn;
+     const buoyancy=dy*(this.h[i]-this.h[j]);
+     if(this.random()<clamp(.08+drive*2+buoyancy*.7,0,.9))this.swap(i,j);
+    }continue;
+   }
+   // Surface liquid/sediment: gravity, displacement, then lateral spreading.
+   if(y>0){const j=i-AREA;const below=this.phaseOf(j);
+    if(!below||below===5||(ph===3&&below===4)||(ph===2&&below===4&&this.random()<.22)){
+     this.swap(i,j);this.flow[j]=Math.min(1,this.flow[j]+.45);continue;
+    }
+   }
+   const d=dirs[(this.random()*4)|0],xx=x+d[0],zz=z+d[1];
+   if(xx<0||xx>=X||zz<0||zz>=Z)continue;
+   const j=at(xx,y,zz),down=y>0?j-AREA:j;
+   if(y>0&&!this.kind[down]){this.swap(i,down);this.flow[down]=.7;continue;}
+   if(ph!==3&&(!this.kind[j]||this.phaseOf(j)===5)&&this.random()<(ph===4?.65:.2)){this.swap(i,j);this.flow[j]=.5;}
+   // Mobile rubble settles into rock when cool and resting on earth.
+   if(ph===3&&y>0&&this.kind[i-AREA]===1&&this.random()<.025)this.loose[i]=0;
+  }
+ }
+ settle(){
+  // Disconnected quenched droplets cannot turn into levitating rock.
+  this.support.fill(0);let head=0,tail=0;
+  for(let i=0;i<(ROOF+3)*AREA;i++)if(this.phaseOf(i)===1){this.support[i]=1;this.queue[tail++]=i;}
+  while(head<tail){const i=this.queue[head++],y=(i/AREA)|0,z=((i-y*AREA)/X)|0,x=i%X;
+   const ns=[];if(x>0)ns.push(i-1);if(x<X-1)ns.push(i+1);if(z>0)ns.push(i-X);if(z<Z-1)ns.push(i+X);if(y>0)ns.push(i-AREA);if(y<Y-1)ns.push(i+AREA);
+   for(const j of ns)if(!this.support[j]&&this.phaseOf(j)===1){this.support[j]=1;this.queue[tail++]=j;}
+  }
+  for(let i=(ROOF+3)*AREA;i<N;i++)if(this.phaseOf(i)===1&&!this.support[i])this.loose[i]=1;
+ }
+ step(){this.t++;this.heat();if(this.t%3===0)this.solveFlow();this.pressureStep();this.move();if(this.t%8===0)this.settle();}
+ stats(checkIds=false){
+  let earth=0,water=0,magma=0,steam=0,land=0,solidLand=0,maxLand=0;const seen=checkIds?new Uint8Array(this.totalIds+1):null;let duplicates=0;
+  for(let i=0;i<N;i++){const k=this.kind[i],y=(i/AREA)|0;if(k===1){earth++;if(this.phaseOf(i)===2)magma++;if(y>SEA){land++;if(this.phaseOf(i)===1&&this.support[i])solidLand++;maxLand=Math.max(maxLand,y);}}if(k===2){water++;if(this.phaseOf(i)===5)steam++;}if(seen&&k){if(!this.id[i]||seen[this.id[i]])duplicates++;seen[this.id[i]]=1;}if(!k&&(this.id[i]||this.h[i]))duplicates++;}
+  const energy=this.energy(),balance=energy-this.initialEnergy-this.heatIn+this.heatOut;
+  return{tick:this.t,earth,water,magma,steam,land,solidLand,maxLand,bursts:this.bursts,discharge:this.discharge,pressure:this.pressure,energy,balance,duplicates,conserved:earth===this.initialEarth&&water===this.initialWater&&duplicates===0};
+ }
+}
+root.Fault={World,X,Y,Z,N,AREA,ROOF,SEA,at};
+if(typeof module!=='undefined')module.exports=root.Fault;
+})(typeof globalThis!=='undefined'?globalThis:this);
+
+</script><script>
+(function(){
+'use strict';
+const {X,Y,Z,N,AREA,SEA}=Fault;
+const canvas=document.querySelector('canvas'),gl=canvas.getContext('webgl2',{alpha:false,antialias:false,powerPreference:'low-power'});
+if(!gl){document.querySelector('#status').textContent='This view needs WebGL 2. Try a recent Safari or Chrome.';return;}
+const vertex=`#version 300 es
+in vec2 a;out vec2 uv;void main(){uv=a*.5+.5;gl_Position=vec4(a,0,1);}`;
+const fragment=`#version 300 es
+precision highp float;precision highp sampler3D;
+in vec2 uv;out vec4 frag;
+uniform sampler3D cells;uniform vec2 resolution;uniform vec3 rightV,upV,eyeV;uniform float zoom,cut;
+const vec3 box=vec3(32.,48.,24.);
+vec4 cell(ivec3 c){return texelFetch(cells,c,0);}
+void main(){
+ vec2 q=(uv-.5)*vec2(resolution.x/resolution.y,1.);
+ vec3 ro=box*.5+eyeV*110.+(rightV*q.x+upV*q.y)*zoom;
+ vec3 rd=-eyeV,inv=1./(rd+vec3(.000001));
+ vec3 ta=(vec3(0)-ro)*inv,tb=(box-ro)*inv;
+ vec3 lo=min(ta,tb),hi=max(ta,tb);float enter=max(max(lo.x,lo.y),lo.z),leave=min(min(hi.x,hi.y),hi.z);
+ if(leave<max(enter,0.)){frag=vec4(0,0,0,1);return;}
+ float t=max(enter,0.)+.0001;vec3 pos=ro+rd*t;ivec3 c=ivec3(clamp(floor(pos),vec3(0),box-1.));
+ ivec3 st=ivec3(sign(rd));vec3 delta=abs(inv);
+ vec3 next=(vec3(c)+step(vec3(0),rd)-ro)*inv;
+ vec3 normal=vec3(0,0,1);vec3 color=vec3(0);float remain=1.;int waterRun=0;
+ for(int j=0;j<130;j++){
+  if(any(lessThan(c,ivec3(0)))||any(greaterThanEqual(c,ivec3(box)))||t>leave||remain<.025)break;
+  vec4 d=cell(c);int phase=int(d.r*255.+.5);
+  bool clipped=cut>.5&&float(c.z)>16.;
+  if(phase>0&&!clipped){
+   vec3 local=fract(ro+rd*(t+.001));
+   vec3 edge=min(local,1.-local);float grid;
+   if(abs(normal.x)>.5)grid=min(edge.y,edge.z);else if(abs(normal.y)>.5)grid=min(edge.x,edge.z);else grid=min(edge.x,edge.y);
+   float shade=.62+.22*max(0.,dot(normal,normalize(vec3(.6,1.,.8))));
+   if(grid<.035)shade*=.46;
+   if(phase==1||phase==2||phase==3){
+    float r=phase==1?.78:phase==3?.4:.39+d.g*.61;
+    // Solid faces and emissive melt remain red-channel only.
+    if(phase==2)shade=.68+d.g*.25-(grid<.045?.15:0.);
+    color+=remain*vec3(r*shade,0,0);remain=0.;
+   }else if(phase==4){
+    // Sparse blue interfaces, not an opaque ocean hiding its own cause.
+    if(waterRun==0){float a=grid<.06?.75:.24;color+=remain*vec3(0,0,1)*a;remain*=1.-a;}waterRun++;
+   }else if(phase==5){
+    // Vapor keeps a countable blue cell but does not occlude everything.
+    if(grid>.15){float a=.5;color+=remain*vec3(0,0,.686)*a;remain*=1.-a;}
+   }else {color+=remain*vec3(0,0,.392)*.7;remain*=.3;}
+  }else waterRun=0;
+  if(next.x<next.y&&next.x<next.z){t=next.x;next.x+=delta.x;c.x+=st.x;normal=vec3(float(-st.x),0,0);}
+  else if(next.y<next.z){t=next.y;next.y+=delta.y;c.y+=st.y;normal=vec3(0,float(-st.y),0);}
+  else{t=next.z;next.z+=delta.z;c.z+=st.z;normal=vec3(0,0,float(-st.z));}
+ }
+ frag=vec4(color,1);
+}`;
+function shader(type,src){const s=gl.createShader(type);gl.shaderSource(s,src);gl.compileShader(s);if(!gl.getShaderParameter(s,gl.COMPILE_STATUS))throw Error(gl.getShaderInfoLog(s));return s;}
+let program;
+try{program=gl.createProgram();gl.attachShader(program,shader(gl.VERTEX_SHADER,vertex));gl.attachShader(program,shader(gl.FRAGMENT_SHADER,fragment));gl.linkProgram(program);if(!gl.getProgramParameter(program,gl.LINK_STATUS))throw Error(gl.getProgramInfoLog(program));}
+catch(e){document.querySelector('#status').textContent='Could not start the 3D view. '+e.message;return;}
+gl.useProgram(program);const buffer=gl.createBuffer();gl.bindBuffer(gl.ARRAY_BUFFER,buffer);gl.bufferData(gl.ARRAY_BUFFER,new Float32Array([-1,-1,1,-1,-1,1,-1,1,1,-1,1,1]),gl.STATIC_DRAW);const loc=gl.getAttribLocation(program,'a');gl.enableVertexAttribArray(loc);gl.vertexAttribPointer(loc,2,gl.FLOAT,false,0,0);
+const tex=gl.createTexture();gl.bindTexture(gl.TEXTURE_3D,tex);gl.texParameteri(gl.TEXTURE_3D,gl.TEXTURE_MIN_FILTER,gl.NEAREST);gl.texParameteri(gl.TEXTURE_3D,gl.TEXTURE_MAG_FILTER,gl.NEAREST);for(const a of [gl.TEXTURE_WRAP_S,gl.TEXTURE_WRAP_T,gl.TEXTURE_WRAP_R])gl.texParameteri(gl.TEXTURE_3D,a,gl.CLAMP_TO_EDGE);gl.texImage3D(gl.TEXTURE_3D,0,gl.RGBA8,X,Y,Z,0,gl.RGBA,gl.UNSIGNED_BYTE,null);
+const uniforms={};for(const name of ['resolution','rightV','upV','eyeV','zoom','cut'])uniforms[name]=gl.getUniformLocation(program,name);
+const rgba=new Uint8Array(N*4);let world=new Fault.World(7),paused=false,speed=1,yaw=.46,pitch=.24,zoom=66,cut=true,last=0,acc=0,uiTime=0,drawTime=0,dirty=true,viewDirty=true,hidden=false,contextLost=false;
+function upload(){
+ for(let z=0;z<Z;z++)for(let y=0;y<Y;y++)for(let x=0;x<X;x++){const i=Fault.at(x,y,z),j=(x+X*(y+Y*z))*4;rgba[j]=world.phaseOf(i);rgba[j+1]=Math.max(0,Math.min(255,(world.h[i]-1.1)/1.8*255));rgba[j+2]=0;rgba[j+3]=255;}
+ gl.bindTexture(gl.TEXTURE_3D,tex);gl.texSubImage3D(gl.TEXTURE_3D,0,0,0,0,X,Y,Z,gl.RGBA,gl.UNSIGNED_BYTE,rgba);
+}
+function render(){
+ const r=canvas.getBoundingClientRect();const scale=Math.min(1.4,window.devicePixelRatio||1,600/r.height);const w=Math.max(1,Math.round(r.width*scale)),h=Math.max(1,Math.round(r.height*scale));
+ if(canvas.width!==w||canvas.height!==h){canvas.width=w;canvas.height=h;gl.viewport(0,0,w,h);}
+ const c=Math.cos(pitch),s=Math.sin(pitch),cy=Math.cos(yaw),sy=Math.sin(yaw);
+ gl.uniform2f(uniforms.resolution,w,h);gl.uniform3f(uniforms.eyeV,sy*c,s,cy*c);gl.uniform3f(uniforms.rightV,cy,0,-sy);gl.uniform3f(uniforms.upV,-sy*s,c,-cy*s);gl.uniform1f(uniforms.zoom,zoom);gl.uniform1f(uniforms.cut,cut?1:0);gl.drawArrays(gl.TRIANGLES,0,6);
+ for(const [id,y] of [['ocean-label',19],['crust-label',15.5],['chamber-label',7]]){
+  const el=document.getElementById(id);if(!el)continue;
+  const px=-16,py=y-24,pz=5,sx=(.5+(px*cy-pz*sy)/zoom/(w/h))*r.width,syScreen=(.5-(-px*sy*s+py*c-pz*cy*s)/zoom)*r.height;
+  el.style.left=Math.max(0,Math.min(r.width-70,sx-62))+'px';el.style.top=syScreen+'px';el.style.display=cut?'block':'none';
+ }
+}
+const $=s=>document.querySelector(s);
+function ui(){const s=world.stats();if($('#status').textContent!==world.phase)$('#status').textContent=world.phase;$('#pressure').style.width=Math.min(100,s.pressure/(world.threshold||.82)*100)+'%';$('#pressure-value').textContent=s.pressure.toFixed(2)+' / '+(world.threshold||.82).toFixed(2);$('#bursts').textContent=s.bursts;$('#earth-count').textContent=s.earth.toLocaleString();$('#water-count').textContent=s.water.toLocaleString();$('#balance').textContent=s.conserved?'No matter created or lost':'Accounting error';$('#energy').textContent='Thermal balance error: '+s.balance.toExponential(1)+' units. Heat in: '+world.heatIn.toFixed(0)+' · out: '+world.heatOut.toFixed(0);$('#tick').textContent=(world.t/20).toFixed(0)+'s';$('#meter').classList.toggle('burst',!!world.vent);}
+function frame(now){
+ requestAnimationFrame(frame);if(hidden||contextLost){last=now;return;}const dt=Math.min(.1,(now-last)/1000);last=now;
+ if(!paused){acc+=dt*20*speed;let steps=0;while(acc>=1&&steps<4){world.step();acc--;steps++;dirty=true;}}
+ if(now-drawTime>=33&&(dirty||viewDirty)){if(dirty){upload();dirty=false;}render();viewDirty=false;drawTime=now;}if(now-uiTime>250){ui();uiTime=now;}
+}
+$('#pause').onclick=()=>{paused=!paused;$('#pause').textContent=paused?'Play':'Pause';$('#pause').setAttribute('aria-pressed',paused);};
+$('#speed').onclick=()=>{speed=speed===1?2:speed===2?.5:1;$('#speed').textContent=speed+'×';};
+$('#cut').onclick=()=>{cut=!cut;viewDirty=true;$('#cut').textContent=cut?'Cutaway':'Whole';$('#cut').setAttribute('aria-pressed',cut);};
+$('#home').onclick=()=>{yaw=.46;pitch=.24;zoom=66;viewDirty=true;};
+$('#reset').onclick=()=>{world=new Fault.World((world.seed+1)>>>0);acc=0;dirty=true;ui();};
+const pointers=new Map();let pinchDistance=0;
+canvas.addEventListener('pointerdown',e=>{canvas.setPointerCapture(e.pointerId);pointers.set(e.pointerId,[e.clientX,e.clientY]);});
+canvas.addEventListener('pointermove',e=>{if(!pointers.has(e.pointerId))return;viewDirty=true;const old=pointers.get(e.pointerId);pointers.set(e.pointerId,[e.clientX,e.clientY]);if(pointers.size===1){yaw-=(e.clientX-old[0])*.006;pitch=Math.max(-.05,Math.min(.95,pitch+(e.clientY-old[1])*.005));pinchDistance=0;}else{const a=[...pointers.values()],d=Math.hypot(a[0][0]-a[1][0],a[0][1]-a[1][1]);if(pinchDistance&&d>1)zoom=Math.max(43,Math.min(95,zoom*pinchDistance/d));pinchDistance=d;}});
+for(const name of ['pointerup','pointercancel','lostpointercapture'])canvas.addEventListener(name,e=>{pointers.delete(e.pointerId);pinchDistance=0;});
+canvas.addEventListener('wheel',e=>{e.preventDefault();viewDirty=true;zoom=Math.max(43,Math.min(95,zoom+e.deltaY*.03));},{passive:false});
+canvas.addEventListener('keydown',e=>{if(e.key==='ArrowLeft')yaw-=.1;else if(e.key==='ArrowRight')yaw+=.1;else if(e.key==='ArrowUp')pitch=Math.min(.95,pitch+.08);else if(e.key==='ArrowDown')pitch=Math.max(-.05,pitch-.08);else return;viewDirty=true;e.preventDefault();});
+window.addEventListener('resize',()=>{viewDirty=true;});
+canvas.addEventListener('webglcontextlost',e=>{e.preventDefault();contextLost=true;$('#status').textContent='Graphics paused by the browser. Reload to resume.';});
+document.addEventListener('visibilitychange',()=>{hidden=document.hidden;acc=0;});
+window.__fault={get world(){return world;},get renderer(){return{gl,program,fragment,vertex};},step(n){for(let i=0;i<n;i++)world.step();dirty=true;ui();},pause(){paused=true;},render(){upload();render();}};
+ui();requestAnimationFrame(frame);
+})();
+
+</script></body></html>

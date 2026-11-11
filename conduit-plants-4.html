@@ -1,0 +1,1441 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>conduit plants 4 — body plans</title>
+    <style>
+      :root {
+        --ink: #8b9a90;
+        --dim: #4a544d;
+        --hi: #cfe3d4;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        background: #06080a;
+        color: var(--ink);
+        font: 11px/1.5 ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+        letter-spacing: 0.04em;
+      }
+      body {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 10px;
+        padding: 14px;
+        overflow: hidden;
+      }
+      #stage {
+        image-rendering: pixelated;
+        display: block;
+        box-shadow: 0 0 0 1px #131a17;
+      }
+      #bar {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 4px 18px;
+        justify-content: center;
+        max-width: 100%;
+      }
+      #bar b {
+        color: var(--hi);
+        font-weight: 500;
+      }
+      #keys {
+        color: var(--dim);
+      }
+      #keys kbd {
+        color: var(--ink);
+        font: inherit;
+      }
+      .paused {
+        color: #d8a657;
+      }
+    </style>
+  </head>
+  <body>
+    <canvas id="stage"></canvas>
+    <div id="bar"></div>
+    <div id="keys">
+      <kbd>space</kbd> pause · <kbd>.</kbd> step · <kbd>1</kbd><kbd>2</kbd
+      ><kbd>3</kbd><kbd>4</kbd> speed · <kbd>c</kbd> colour · <kbd>r</kbd> new
+      world
+    </div>
+
+    <script>
+      /* ==== SIM CORE ==== */
+      // conduit-plants core — tip agents lay conduit through a 2D lattice.
+      // No DOM in this file. Renderer lives in the HTML wrapper.
+
+      function createSim(cfg) {
+        cfg = cfg || {};
+        const COLS = cfg.cols || 200;
+        const ROWS = cfg.rows || 140;
+        const N = COLS * ROWS;
+        const SOIL_TOP = cfg.soilTop || Math.floor(ROWS * 0.66);
+
+        const P = Object.assign(
+          {
+            LIGHT_MAX: 12,
+            LIGHT_ABSORB: 4,
+            WATER_ABSORB: 6,
+            LIT_MIN: 4,
+            ABSORB_RATE: 0.4,
+            PACKET_STEPS: 2,
+            ENERGY_DECAY: 0.004,
+            VIGOR_START: 10,
+            VIGOR_MAX: 12,
+            SENESCE: 8,
+            LITTER: 1,
+            VIGOR_BUMP: 6,
+            VIGOR_HUNGRY: 4,
+            DECAY_PERIOD: 24,
+            SOIL_FLOW: 0.05,
+            FIELD_CAP: 3,
+            CAPILLARY: 0.25,
+            WICK_UP: 0.6,
+            UPTAKE: 0.7,
+            VAPOR_UP: 0.55,
+            CONDENSE: 0.04,
+            SOIL_PUSH: 0.4,
+            SEED_COST: 6,
+            MAX_SEEDS: 2000,
+            SEED_RESERVE: 14,
+            SEED_LIFE: 4000,
+            SEED_ROLL: 0.5,
+            SEED_DRIFT: 0.3,
+            MUT_RATE: 0.35,
+            MUT_DUP: 0.06,
+            FUEL_GAIN: 3,
+            FUEL_MAX: 9,
+            STEP_COST: 2,
+            STUCK_MAX: 14,
+            MAX_TIPS_PLANT: 40,
+            MAX_TIPS: 5000,
+            WATER_TOTAL: 2600,
+            START_SEEDS: 36,
+          },
+          cfg.params || {}
+        );
+
+        // --- cell types
+        const AIR = 0,
+          SOIL = 1,
+          CONDUIT = 2,
+          SEEDSITE = 3;
+
+        // --- how a module finishes
+        const END_NEXT = 0, // hand the tip to another module
+          END_SEED = 1, // set a seed site and stop
+          END_FORK = 2, // split into two children, no parent survivor
+          END_STOP = 3;
+
+        // --- 64 headings. 0 = up, clockwise. HX/HY are fixed point, 1024 = 1 cell
+        const HDIRS = 64;
+        const HX = new Int32Array(HDIRS);
+        const HY = new Int32Array(HDIRS);
+        for (let h = 0; h < HDIRS; h++) {
+          const a = (h / HDIRS) * Math.PI * 2;
+          HX[h] = Math.round(Math.sin(a) * 1024);
+          HY[h] = Math.round(-Math.cos(a) * 1024);
+        }
+        const H_UP = 0,
+          H_DOWN = 32;
+
+        // --- 8 directions, 0 = N, clockwise
+        const DX = [0, 1, 1, 1, 0, -1, -1, -1];
+        const DY = [-1, -1, 0, 1, 1, 1, 0, -1];
+
+        // --- rng
+        let rngState = (cfg.seed || 1337) >>> 0;
+        function rand() {
+          rngState ^= rngState << 13;
+          rngState >>>= 0;
+          rngState ^= rngState >>> 17;
+          rngState ^= rngState << 5;
+          rngState >>>= 0;
+          return rngState / 4294967296;
+        }
+        const ri = (n) => (rand() * n) | 0;
+
+        // --- fields
+        const type = new Uint8Array(N);
+        const owner = new Int32Array(N);
+        const vigor = new Uint8Array(N);
+        const water = new Uint8Array(N);
+        const energy = new Uint8Array(N);
+        const vapor = new Uint8Array(N);
+        const store = new Uint8Array(N);
+        const light = new Uint8Array(N);
+        const lout = new Uint8Array(N);
+        const age = new Uint16Array(N);
+        const leaf = new Uint8Array(N);
+        const movedE = new Uint8Array(N);
+        const movedW = new Uint8Array(N);
+
+        // --- neighbour table (x wraps, y does not)
+        const nb = new Int32Array(N * 8);
+        for (let y = 0; y < ROWS; y++) {
+          for (let x = 0; x < COLS; x++) {
+            const i = y * COLS + x;
+            for (let d = 0; d < 8; d++) {
+              const ny = y + DY[d];
+              let nx = x + DX[d];
+              if (ny < 0 || ny >= ROWS) {
+                nb[i * 8 + d] = -1;
+                continue;
+              }
+              if (nx < 0) nx += COLS;
+              else if (nx >= COLS) nx -= COLS;
+              nb[i * 8 + d] = ny * COLS + nx;
+            }
+          }
+        }
+        const NB = (i, d) => nb[i * 8 + d];
+
+        // --- plants, tips, falling seeds
+        let nextPid = 1;
+        const plants = new Map();
+        let tips = [];
+        let seeds = [];
+        let tick = 0;
+        const stats = { born: 0, died: 0, seedsMade: 0, maxGen: 0, photo: 0, transpired: 0, upkeep: 0, grew: 0, push: 0, noE: 0, noW: 0, blocked: 0, decayed: 0 };
+
+        // ---------------------------------------------------------------- genome
+        // A body plan is 8 modules of 4 bytes. A tip is always executing exactly
+        // one module, and everything it needs is carried on the tip itself.
+        //
+        //  b0 : length(4) | curve(4)          steps in the module, turn per step
+        //  b1 : branchEvery(3) | branchAngle(4) | paired(1)
+        //  b2 : childModule(3) | nextModule(3) | endOp(2)
+        //  b3 : photoGain(3) | gravGain(3) | maxOrder(2)
+        //
+        // curve and branchAngle are in heading units of 5.6 degrees, so a plan can
+        // ask for angles the lattice has no exact answer for.
+        const MODULES = 8;
+        const GBYTES = MODULES * 4;
+        const M_SHOOT = 0; // the shoot starts here
+        const M_ROOT = 4; // the radicle starts here
+
+        const mLength = (g, m) => (g[m * 4] & 15) + 1;
+        const mCurve = (g, m) => ((g[m * 4] >> 4) & 15) - 8;
+        const mBranchEvery = (g, m) => g[m * 4 + 1] & 7;
+        const mBranchAngle = (g, m) => (g[m * 4 + 1] >> 3) & 15;
+        const mPaired = (g, m) => (g[m * 4 + 1] >> 7) & 1;
+        const mChild = (g, m) => g[m * 4 + 2] & 7;
+        const mNext = (g, m) => (g[m * 4 + 2] >> 3) & 7;
+        const mEnd = (g, m) => (g[m * 4 + 2] >> 6) & 3;
+        const mPhoto = (g, m) => g[m * 4 + 3] & 7;
+        const mGrav = (g, m) => (g[m * 4 + 3] >> 3) & 7;
+        const mOrder = (g, m) => ((g[m * 4 + 3] >> 6) & 3) + 1;
+
+        function setModule(g, m, o) {
+          g[m * 4] = ((o.length - 1) & 15) | (((o.curve + 8) & 15) << 4);
+          g[m * 4 + 1] =
+            (o.branchEvery & 7) | ((o.branchAngle & 15) << 3) | ((o.paired & 1) << 7);
+          g[m * 4 + 2] =
+            (o.child & 7) | ((o.next & 7) << 3) | ((o.end & 3) << 6);
+          g[m * 4 + 3] =
+            (o.photo & 7) | ((o.grav & 7) << 3) | (((o.order - 1) & 3) << 6);
+        }
+
+        // The ancestor: a leader that sets alternating laterals, laterals that set
+        // short leaflets, leaflets that end in a seed site. A radicle that dives
+        // and sets its own laterals. Everything after this is mutation.
+        function defaultGenome() {
+          const g = new Uint8Array(GBYTES);
+          setModule(g, 0, { length: 6, curve: 0, branchEvery: 2, branchAngle: 9,
+            paired: 0, child: 1, next: 0, end: END_NEXT, photo: 3, grav: 4, order: 3 });
+          setModule(g, 1, { length: 4, curve: 1, branchEvery: 2, branchAngle: 7,
+            paired: 1, child: 2, next: 1, end: END_NEXT, photo: 4, grav: 2, order: 3 });
+          setModule(g, 2, { length: 2, curve: 0, branchEvery: 0, branchAngle: 0,
+            paired: 0, child: 2, next: 2, end: END_SEED, photo: 5, grav: 0, order: 3 });
+          setModule(g, 3, { length: 3, curve: 0, branchEvery: 0, branchAngle: 0,
+            paired: 0, child: 2, next: 2, end: END_SEED, photo: 4, grav: 1, order: 3 });
+          setModule(g, 4, { length: 6, curve: 0, branchEvery: 3, branchAngle: 10,
+            paired: 0, child: 5, next: 4, end: END_NEXT, photo: 0, grav: 5, order: 3 });
+          setModule(g, 5, { length: 5, curve: 1, branchEvery: 3, branchAngle: 8,
+            paired: 1, child: 5, next: 5, end: END_STOP, photo: 0, grav: 3, order: 3 });
+          setModule(g, 6, { length: 4, curve: 0, branchEvery: 0, branchAngle: 0,
+            paired: 0, child: 2, next: 0, end: END_STOP, photo: 3, grav: 3, order: 3 });
+          setModule(g, 7, { length: 4, curve: 0, branchEvery: 0, branchAngle: 0,
+            paired: 0, child: 2, next: 0, end: END_STOP, photo: 3, grav: 3, order: 3 });
+          return g;
+        }
+
+        function mutate(g) {
+          const out = new Uint8Array(g);
+          if (rand() < P.MUT_RATE) {
+            let flips = 1 + (rand() < 0.3 ? 1 : 0);
+            while (flips-- > 0) out[ri(GBYTES)] ^= 1 << ri(8);
+          }
+          // module duplication: one module overwrites another wholesale. The copy
+          // is then free to diverge, which is how the plan gains new parts.
+          if (rand() < P.MUT_DUP) {
+            const a = ri(MODULES),
+              b = ri(MODULES);
+            if (a !== b) for (let k = 0; k < 4; k++) out[b * 4 + k] = out[a * 4 + k];
+          }
+          return out;
+        }
+
+        function genomeHash(g) {
+          let h = 2166136261;
+          for (let i = 0; i < g.length; i++) {
+            h ^= g[i];
+            h = Math.imul(h, 16777619);
+          }
+          return h >>> 0;
+        }
+
+        // ---------------------------------------------------------------- world
+        function reset() {
+          type.fill(AIR);
+          owner.fill(0);
+          vigor.fill(0);
+          water.fill(0);
+          energy.fill(0);
+          vapor.fill(0);
+          store.fill(0);
+          age.fill(0);
+          plants.clear();
+          tips = [];
+          seeds = [];
+          tick = 0;
+          nextPid = 1;
+          stats.born = stats.died = stats.seedsMade = stats.maxGen = 0;
+          stats.upkeep = stats.photo = stats.transpired = stats.grew = stats.push = stats.noE = stats.noW = stats.blocked = stats.decayed = 0;
+
+          // No soil, no pool. All the water in the world starts as vapour in the
+          // air, so it has to condense and rain down before anything can drink.
+          // Every grain of soil in a run is dead plant tissue.
+          let placed = 0;
+          let guard = P.WATER_TOTAL * 40;
+          while (placed < P.WATER_TOTAL && guard-- > 0) {
+            const i = ri(N);
+            if (type[i] === AIR && !vapor[i] && !water[i]) {
+              vapor[i] = 1;
+              placed++;
+            }
+          }
+          // ancestral seeds, resting on the bare floor
+          for (let k = 0; k < P.START_SEEDS; k++) {
+            seeds.push({
+              x: ri(COLS),
+              y: ROWS - 1,
+              g: k === 0 ? defaultGenome() : mutate(defaultGenome()),
+              age: 0,
+              gen: 0,
+            });
+          }
+        }
+
+        function newPlant(genome, gen) {
+          const pid = nextPid++;
+          const h = genomeHash(genome);
+          plants.set(pid, {
+            pid,
+            genome,
+            hash: h,
+            hue: 70 + (h % 110), // yellow-green .. teal
+            cells: 0,
+            tipCount: 0,
+            reserve: P.SEED_RESERVE,
+            origin: -1,
+            gen,
+            born: tick,
+          });
+          stats.born++;
+          if (gen > stats.maxGen) stats.maxGen = gen;
+          return pid;
+        }
+
+        // ---------------------------------------------------------------- light
+        function lightPass() {
+          for (let x = 0; x < COLS; x++) {
+            const i = x;
+            light[i] = P.LIGHT_MAX;
+            lout[i] =
+              type[i] === SOIL
+                ? 0
+                : type[i] >= CONDUIT
+                ? Math.max(0, P.LIGHT_MAX - P.LIGHT_ABSORB)
+                : P.LIGHT_MAX;
+          }
+          for (let y = 1; y < ROWS; y++) {
+            const row = y * COLS;
+            const prow = row - COLS;
+            for (let x = 0; x < COLS; x++) {
+              const i = row + x;
+              const xl = x === 0 ? COLS - 1 : x - 1;
+              const xr = x === COLS - 1 ? 0 : x + 1;
+              const inc = (lout[prow + x] * 2 + lout[prow + xl] + lout[prow + xr]) >> 2;
+              light[i] = inc;
+              const t = type[i];
+              const drag =
+                t === SOIL
+                  ? P.LIGHT_MAX
+                  : (t >= CONDUIT ? P.LIGHT_ABSORB : 0) +
+                    // only water with water directly above it counts: a droplet in
+                    // the air is transparent, a body of water is dark
+                    (water[i] && water[prow + x] ? P.WATER_ABSORB : 0);
+              lout[i] = drag >= inc ? 0 : inc - drag;
+            }
+          }
+        }
+
+        function leafPass() {
+          leaf.fill(0);
+          for (let i = 0; i < N; i++) {
+            if (type[i] < CONDUIT) continue;
+            if (light[i] < P.LIT_MIN) continue;
+            if (openAir(i) === 0) continue;
+            leaf[i] = 1;
+          }
+        }
+
+        function openAir(i) {
+          let n = 0;
+          for (let d = 0; d < 8; d += 2) {
+            const j = NB(i, d);
+            if (j >= 0 && type[j] === AIR) n++;
+          }
+          return n;
+        }
+
+        // Buried: hemmed in by soil grains or standing water rather than open air.
+        // One percept covers a root in mud and a root in the primordial pool.
+        function buriedAround(i) {
+          let n = 0;
+          for (let d = 0; d < 8; d++) {
+            const j = NB(i, d);
+            if (j < 0 || type[j] === SOIL || water[j]) n++;
+          }
+          return n;
+        }
+
+        // Foreign tissue touching this cell. Plants may not grow into contact.
+        function foreignTouch(i, pid) {
+          for (let d = 0; d < 8; d++) {
+            const j = NB(i, d);
+            if (j >= 0 && type[j] >= CONDUIT && owner[j] !== pid) return true;
+          }
+          return false;
+        }
+
+        // --------------------------------------------------- absorption + vapour
+        // A lit green cell with an open side trades its water packet for an energy
+        // packet and breathes the water out as vapour. Sugar costs water.
+        function absorb() {
+          for (let i = 0; i < N; i++) {
+            if (!leaf[i] || !water[i] || energy[i]) continue;
+            if (rand() > P.ABSORB_RATE * (light[i] / P.LIGHT_MAX)) continue;
+            let sink = -1;
+            const d0 = ri(8);
+            for (let k = 0; k < 8; k++) {
+              const j = NB(i, (d0 + k) & 7);
+              if (j >= 0 && type[j] === AIR && !vapor[j] && !water[j]) {
+                sink = j;
+                break;
+              }
+            }
+            if (sink < 0) continue; // nowhere to breathe out, so no sugar either
+            water[i] = 0;
+            vapor[sink] = 1;
+            energy[i] = 1;
+            stats.photo++;
+            stats.transpired++;
+          }
+        }
+
+        function vaporPass() {
+          const start = ri(N);
+          for (let k = 0; k < N; k++) {
+            const i = (start + k) % N;
+            if (!vapor[i]) continue;
+            // condense in a crowd
+            let crowd = 0;
+            for (let d = 0; d < 8; d++) {
+              const j = NB(i, d);
+              if (j >= 0 && vapor[j]) crowd++;
+            }
+            if (crowd >= 2 && rand() < P.CONDENSE && !water[i]) {
+              vapor[i] = 0;
+              water[i] = 1;
+              continue;
+            }
+            const d = rand() < P.VAPOR_UP ? [7, 0, 1][ri(3)] : ri(8);
+            const j = NB(i, d);
+            if (j < 0) {
+              // hit the sky: condense and fall back
+              if (!water[i]) {
+                vapor[i] = 0;
+                water[i] = 1;
+              }
+              continue;
+            }
+            if (type[j] !== AIR) {
+              if (!water[i]) {
+                vapor[i] = 0;
+                water[i] = 1;
+              }
+              continue;
+            }
+            if (vapor[j] || water[j]) continue;
+            vapor[i] = 0;
+            vapor[j] = 1;
+          }
+        }
+
+        // ------------------------------------------------------------- transport
+        // A packet steps to a uniformly random adjacent conduit cell of the same
+        // plant. Reversal at a tip is automatic: the only neighbour is backwards.
+        function transport() {
+          for (let pass = 0; pass < P.PACKET_STEPS; pass++) {
+            movedE.fill(0);
+            movedW.fill(0);
+            const start = ri(N);
+            for (let k = 0; k < N; k++) {
+              const i = (start + k) % N;
+              const t = type[i];
+              if (t < CONDUIT) continue;
+              const pid = owner[i];
+
+              if (energy[i] && !movedE[i]) {
+                if (vigor[i] <= P.VIGOR_HUNGRY && t === CONDUIT) {
+                  // starving tissue eats the sugar passing through it
+                  energy[i] = 0;
+                  bump(i);
+                  stats.upkeep++;
+                } else if (rand() < P.ENERGY_DECAY) {
+                  energy[i] = 0;
+                } else {
+                  const j = pickConduit(i, pid, energy);
+                  if (j >= 0) {
+                    energy[i] = 0;
+                    energy[j] = 1;
+                    movedE[j] = 1;
+                  }
+                }
+              }
+              if (water[i] && !movedW[i] && !leaf[i]) {
+                // water held at a lit surface is what pulls the rest of it upward
+                const j = pickConduit(i, pid, water);
+                if (j >= 0) {
+                  water[i] = 0;
+                  water[j] = 1;
+                  movedW[j] = 1;
+                }
+              }
+            }
+          }
+        }
+
+        function pickConduit(i, pid, field) {
+          // lazy walk: staying put is one of the options, which is both more
+          // physical and avoids a two-cell path oscillating on a fixed parity
+          let count = 1;
+          let pick = -1;
+          for (let d = 0; d < 8; d++) {
+            const j = NB(i, d);
+            if (j < 0) continue;
+            if (type[j] < CONDUIT || owner[j] !== pid) continue;
+            if (field[j]) continue;
+            count++;
+            if (ri(count) === 0) pick = j;
+          }
+          return pick;
+        }
+
+        // A cell's ceiling falls with age. Traffic keeps tissue alive but cannot
+        // make it young, so a plant either keeps building and seeding or it goes.
+        function ceiling(i) {
+          const c = P.VIGOR_MAX - ((age[i] / P.SENESCE) | 0);
+          return c < 0 ? 0 : c;
+        }
+
+        function bump(i) {
+          const c = ceiling(i);
+          const v = vigor[i] + P.VIGOR_BUMP;
+          vigor[i] = v > c ? c : v;
+        }
+
+        // Soil is a grain, not a fixture: it falls, piles, and finds its angle.
+        // Every grain here was a plant cell, so the ground is accumulated history.
+        function soilPass() {
+          for (let y = ROWS - 2; y >= 0; y--) {
+            const row = y * COLS;
+            const x0 = ri(COLS);
+            for (let k = 0; k < COLS; k++) {
+              const i = row + ((x0 + k) % COLS);
+              if (type[i] !== SOIL) continue;
+              if (drop(i, 4)) continue;
+              const first = rand() < 0.5 ? 3 : 5;
+              if (drop(i, first)) continue;
+              drop(i, first === 3 ? 5 : 3);
+            }
+          }
+        }
+
+        function drop(i, d) {
+          const j = NB(i, d);
+          if (j < 0 || type[j] !== AIR) return false;
+          // a grain sinking through water trades places with it
+          type[j] = SOIL;
+          type[i] = AIR;
+          const wj = water[j];
+          water[j] = water[i];
+          water[i] = wj;
+          const aj = age[j];
+          age[j] = age[i];
+          age[i] = aj;
+          if (vapor[j]) {
+            vapor[j] = 0;
+            if (!water[i]) water[i] = 1;
+          }
+          return true;
+        }
+
+        // ------------------------------------------------------------- free water
+        function waterPass() {
+          for (let y = ROWS - 1; y >= 0; y--) {
+            const row = y * COLS;
+            const x0 = ri(COLS);
+            for (let k = 0; k < COLS; k++) {
+              const x = (x0 + k) % COLS;
+              const i = row + x;
+              if (!water[i]) continue;
+              const t = type[i];
+              if (t >= CONDUIT) continue; // inside a plant: transport handles it
+              if (t === AIR && rand() < P.CAPILLARY) {
+                // dry soil in contact with open water pulls some of it in
+                const d = rand() < P.WICK_UP ? [7, 0, 1][ri(3)] : ri(8);
+                const j = NB(i, d);
+                if (j >= 0 && type[j] === SOIL && !water[j]) {
+                  water[i] = 0;
+                  water[j] = 1;
+                  continue;
+                }
+              }
+              if (t === SOIL) {
+                if (rand() > P.SOIL_FLOW) continue;
+                // field capacity: soil holds its water until the pore space is full
+                let wet = 0;
+                for (let d = 0; d < 8; d++) {
+                  const j = NB(i, d);
+                  if (j < 0 || water[j]) wet++;
+                }
+                if (wet < P.FIELD_CAP) {
+                  // below field capacity the soil holds on, but moisture still
+                  // creeps sideways into whatever has been drained dry
+                  if (rand() < P.CAPILLARY) {
+                    // wicking, biased upward: this is what keeps the surface damp
+                    // once litter has buried the open water
+                    const d = rand() < P.WICK_UP ? [7, 0, 1][ri(3)] : ri(8);
+                    const j = NB(i, d);
+                    if (j >= 0 && type[j] === SOIL && !water[j]) {
+                      water[i] = 0;
+                      water[j] = 1;
+                    }
+                  }
+                  continue;
+                }
+              }
+
+              if (flow(i, 4)) continue;
+              const first = rand() < 0.5 ? 3 : 5;
+              if (flow(i, first)) continue;
+              if (flow(i, first === 3 ? 5 : 3)) continue;
+              const side = rand() < 0.5 ? 2 : 6;
+              if (flow(i, side)) continue;
+              flow(i, side === 2 ? 6 : 2);
+            }
+          }
+        }
+
+        function flow(i, d) {
+          const j = NB(i, d);
+          if (j < 0) return false;
+          const tj = type[j];
+          if (tj >= CONDUIT) return false;
+          if (water[j]) return false;
+          water[i] = 0;
+          water[j] = 1;
+          return true;
+        }
+
+        function uptake() {
+          for (let i = 0; i < N; i++) {
+            if (type[i] < CONDUIT || water[i]) continue;
+            if (rand() > P.UPTAKE) continue;
+            const d0 = ri(4) * 2;
+            for (let k = 0; k < 4; k++) {
+              const j = NB(i, (d0 + k * 2) & 7);
+              if (j >= 0 && type[j] < CONDUIT && water[j]) {
+                water[j] = 0;
+                water[i] = 1;
+                break;
+              }
+            }
+          }
+        }
+
+        // -------------------------------------------------------------- the tips
+        function enterable(j) {
+          return j >= 0 && type[j] < CONDUIT && owner[j] === 0;
+        }
+
+        // Which cell a heading points at, from a sub-cell position. The tip keeps
+        // a fixed-point position, so a 37 degree plan rasterises as a stepped
+        // curve instead of snapping to the nearest 45.
+        function stepCell(tp, h) {
+          let px = tp.px,
+            py = tp.py;
+          for (let n = 0; n < 3; n++) {
+            px += HX[h];
+            py += HY[h];
+            const nx = Math.round(px / 1024);
+            const ny = Math.round(py / 1024);
+            if (nx !== tp.x || ny !== tp.y) return { px, py, nx, ny };
+          }
+          return null;
+        }
+
+        // Tropism: the world bends the heading, it does not rewrite the plan.
+        function tropism(tp, i, g, m) {
+          const ph = mPhoto(g, m);
+          if (ph) {
+            // compare light to either side of the heading and lean brighter
+            const hl = (tp.h + 48) & 63,
+              hr = (tp.h + 16) & 63;
+            const jl = cellAt(tp, hl),
+              jr = cellAt(tp, hr);
+            const ll = jl < 0 ? 0 : light[jl];
+            const lr = jr < 0 ? 0 : light[jr];
+            if (ll !== lr) {
+              const pull = ll > lr ? -1 : 1;
+              if (ri(8) < ph) tp.h = (tp.h + pull + 64) & 63;
+            }
+          }
+          const gv = mGrav(g, m);
+          if (gv && ri(8) < gv) {
+            const want = tp.root ? H_DOWN : H_UP;
+            let d = (want - tp.h + 96) & 63;
+            d = d > 32 ? d - 64 : d; // signed shortest way round
+            if (d !== 0) tp.h = (tp.h + (d > 0 ? 1 : -1) + 64) & 63;
+          }
+        }
+
+        function cellAt(tp, h) {
+          const nx = Math.round((tp.px + HX[h] * 2) / 1024);
+          const ny = Math.round((tp.py + HY[h] * 2) / 1024);
+          if (ny < 0 || ny >= ROWS) return -1;
+          return ny * COLS + ((nx % COLS) + COLS) % COLS;
+        }
+
+        function makeTip(x, y, h, m, pid, root, order) {
+          return {
+            x,
+            y,
+            px: x * 1024,
+            py: y * 1024,
+            h,
+            m, // module being executed
+            step: 0, // how far into it — this is the plan's clock
+            order, // branch order, inherited and incremented at a fork
+            root,
+            pid,
+            side: 1,
+            fuel: 0,
+            stuck: 0,
+            alive: true,
+          };
+        }
+
+        function tipPass() {
+          const born = [];
+          for (let ti = 0; ti < tips.length; ti++) {
+            const tp = tips[ti];
+            if (!tp.alive) continue;
+            const i = tp.y * COLS + tp.x;
+            if (type[i] < CONDUIT || owner[i] !== tp.pid) {
+              tp.alive = false;
+              continue;
+            }
+            const pl = plants.get(tp.pid);
+            if (!pl) {
+              tp.alive = false;
+              continue;
+            }
+            const g = pl.genome;
+            const m = tp.m;
+
+            // ---- the clock: sugar accumulates into a reserve and buys steps, so
+            // growth is a supply-throttled rhythm rather than a coin flip
+            if (energy[i] && tp.fuel < P.FUEL_MAX) {
+              energy[i] = 0;
+              tp.fuel += P.FUEL_GAIN;
+            }
+
+            // ---- module finished?
+            if (tp.step >= mLength(g, m)) {
+              let end = mEnd(g, m);
+              if (tp.order >= mOrder(g, m) && end === END_NEXT) end = END_SEED;
+              if (end === END_SEED) {
+                type[i] = SEEDSITE;
+                store[i] = 0;
+                tp.alive = false;
+              } else if (end === END_STOP) {
+                tp.alive = false;
+              } else if (end === END_FORK) {
+                const c = mChild(g, m);
+                const a = mBranchAngle(g, m);
+                if (pl.tipCount < P.MAX_TIPS_PLANT && tips.length < P.MAX_TIPS) {
+                  born.push(
+                    makeTip(tp.x, tp.y, (tp.h + a) & 63, c, tp.pid, tp.root, tp.order + 1)
+                  );
+                  born.push(
+                    makeTip(tp.x, tp.y, (tp.h - a + 64) & 63, c, tp.pid, tp.root, tp.order + 1)
+                  );
+                  pl.tipCount += 2;
+                }
+                tp.alive = false;
+              } else {
+                tp.m = mNext(g, m);
+                tp.step = 0;
+              }
+              continue;
+            }
+
+            if (tp.fuel < P.STEP_COST || !water[i]) {
+              if (tp.fuel < P.STEP_COST) stats.noE++;
+              else stats.noW++;
+              continue;
+            }
+
+            // ---- the plan's own curve, then the world's bend on top of it
+            tp.h = (tp.h + mCurve(g, m) + 64) & 63;
+            tropism(tp, i, g, m);
+
+            const st = stepCell(tp, tp.h);
+            if (!st) continue;
+            const target = ((st.ny % ROWS) + ROWS) % ROWS * COLS + ((st.nx % COLS) + COLS) % COLS;
+            if (st.ny < 0 || st.ny >= ROWS) {
+              tp.alive = false;
+              continue;
+            }
+
+            if (!enterable(target) || foreignTouch(target, tp.pid)) {
+              // Perturbation deflects the path, never the progress: the tip bends
+              // and tries again, and the module still lays its full length.
+              tp.h = (tp.h + (rand() < 0.5 ? 3 : -3) + 64) & 63;
+              stats.blocked++;
+              if (++tp.stuck > P.STUCK_MAX) tp.alive = false;
+              continue;
+            }
+            if (type[target] === SOIL && rand() > P.SOIL_PUSH) {
+              stats.push++;
+              continue;
+            }
+
+            tp.fuel -= P.STEP_COST;
+            tp.stuck = 0;
+            type[target] = CONDUIT;
+            owner[target] = tp.pid;
+            vigor[target] = P.VIGOR_START;
+            age[target] = 0;
+            if (!water[target]) {
+              water[target] = 1;
+              water[i] = 0;
+            }
+            pl.cells++;
+            stats.grew++;
+
+            tp.px = st.px;
+            tp.py = st.py;
+            tp.x = st.nx;
+            tp.y = st.ny;
+            tp.step++;
+
+            // ---- branching is written into the plan: this is what makes a
+            // repeated architecture like pinnate spacing possible at all
+            const be = mBranchEvery(g, m);
+            if (
+              be &&
+              tp.step % be === 0 &&
+              tp.order < mOrder(g, m) &&
+              pl.tipCount < P.MAX_TIPS_PLANT &&
+              tips.length < P.MAX_TIPS
+            ) {
+              const a = mBranchAngle(g, m);
+              const c = mChild(g, m);
+              if (mPaired(g, m)) {
+                born.push(makeTip(tp.x, tp.y, (tp.h + a) & 63, c, tp.pid, tp.root, tp.order + 1));
+                born.push(makeTip(tp.x, tp.y, (tp.h - a + 64) & 63, c, tp.pid, tp.root, tp.order + 1));
+                pl.tipCount += 2;
+              } else {
+                born.push(
+                  makeTip(tp.x, tp.y, (tp.h + a * tp.side + 64) & 63, c, tp.pid, tp.root, tp.order + 1)
+                );
+                tp.side = -tp.side;
+                pl.tipCount++;
+              }
+            }
+          }
+          for (const b of born) tips.push(b);
+          if (tips.length > 512) {
+            const keep = [];
+            for (const tp of tips) {
+              if (tp.alive) keep.push(tp);
+              else {
+                const pl = plants.get(tp.pid);
+                if (pl) pl.tipCount--;
+              }
+            }
+            tips = keep;
+          }
+        }
+
+        // ------------------------------------------------------------- seed sites
+        function seedPass() {
+          for (let i = 0; i < N; i++) {
+            if (type[i] !== SEEDSITE) continue;
+            if (energy[i]) {
+              energy[i] = 0;
+              store[i]++;
+              bump(i);
+            }
+            if (store[i] < P.SEED_COST) continue;
+            const pl = plants.get(owner[i]);
+            if (!pl) continue;
+            let sink = -1;
+            const d0 = ri(8);
+            for (let k = 0; k < 8; k++) {
+              const j = NB(i, (d0 + k) & 7);
+              if (j >= 0 && type[j] === AIR) {
+                sink = j;
+                break;
+              }
+            }
+            if (sink < 0) continue;
+            store[i] = 0;
+            bump(i);
+            // The site keeps bearing for as long as it lives. Senescence, not a
+            // one-shot rule, is what bounds a plant's total output.
+            stats.seedsMade++;
+            if (seeds.length >= P.MAX_SEEDS) continue;
+            seeds.push({
+              x: sink % COLS,
+              y: (sink / COLS) | 0,
+              g: mutate(pl.genome),
+              age: 0,
+              gen: pl.gen + 1,
+            });
+          }
+        }
+
+        function fallingSeeds() {
+          const keep = [];
+          for (const s of seeds) {
+            s.age++;
+            if (s.age > P.SEED_LIFE) continue;
+            const i = s.y * COLS + s.x;
+            const down = NB(i, 4);
+            let moved = false;
+            if (down >= 0 && type[down] === AIR) {
+              s.y++;
+              moved = true;
+            } else {
+              const first = rand() < 0.5 ? 3 : 5;
+              for (const d of [first, first === 3 ? 5 : 3]) {
+                const j = NB(i, d);
+                if (j >= 0 && type[j] === AIR) {
+                  s.x = j % COLS;
+                  s.y = (j / COLS) | 0;
+                  moved = true;
+                  break;
+                }
+              }
+            }
+            if (moved) {
+              if (rand() < P.SEED_DRIFT) {
+                const j = NB(s.y * COLS + s.x, rand() < 0.5 ? 2 : 6);
+                if (j >= 0 && type[j] === AIR) s.x = j % COLS;
+              }
+              keep.push(s);
+              continue;
+            }
+            if (germinate(s)) continue;
+            // Settled but unable to take: roll along the surface looking for a gap.
+            // This is the only dispersal there is, so shade and crowding push the
+            // next generation sideways instead of killing it outright.
+            if (rand() < P.SEED_ROLL) {
+              const j = NB(s.y * COLS + s.x, rand() < 0.5 ? 2 : 6);
+              if (j >= 0 && type[j] === AIR) {
+                s.x = j % COLS;
+                s.y = (j / COLS) | 0;
+              }
+            }
+            keep.push(s);
+          }
+          seeds = keep;
+        }
+
+        function germinate(s) {
+          const i = s.y * COLS + s.x;
+          if (type[i] !== AIR || owner[i] !== 0) return false;
+          // The floor of the world counts as ground; standing water does not.
+          let anchored = s.y === ROWS - 1;
+          for (let d = 0; d < 8; d++) {
+            const j = NB(i, d);
+            if (j < 0) continue;
+            if (type[j] >= CONDUIT) return false; // no germinating against a plant
+            if (type[j] === SOIL) anchored = true;
+          }
+          if (!anchored) return false;
+          // germination drinks one nearby water packet
+          let src = -1;
+          if (water[i]) src = i;
+          else {
+            for (let d = 0; d < 8; d++) {
+              const j = NB(i, d);
+              if (j >= 0 && water[j] && type[j] < CONDUIT) {
+                src = j;
+                break;
+              }
+            }
+          }
+          if (src < 0) return false;
+          water[src] = 0;
+
+          const pid = newPlant(s.g, s.gen);
+          const pl = plants.get(pid);
+          type[i] = CONDUIT;
+          owner[i] = pid;
+          vigor[i] = P.VIGOR_START;
+          age[i] = 0;
+          water[i] = 1;
+          energy[i] = 1;
+          pl.cells = 1;
+          pl.origin = i;
+          // radicle first, then the shoot — the root gets first call on the reserves
+          tips.push(makeTip(s.x, s.y, H_DOWN, M_ROOT, pid, 1, 0));
+          tips.push(makeTip(s.x, s.y, H_UP, M_SHOOT, pid, 0, 0));
+          pl.tipCount = 2;
+          return true;
+        }
+
+        // the seed's own reserve, trickled into the cell it germinated in
+        function reservePass() {
+          for (const pl of plants.values()) {
+            if (pl.reserve <= 0) continue;
+            const i = pl.origin;
+            if (i < 0 || type[i] < CONDUIT || owner[i] !== pl.pid) {
+              pl.reserve = 0;
+              continue;
+            }
+            if (energy[i]) continue;
+            energy[i] = 1;
+            pl.reserve--;
+          }
+        }
+
+        // ------------------------------------------------------------------ decay
+        function decayPass() {
+          for (let i = 0; i < N; i++) {
+            const t = type[i];
+            if (t < CONDUIT) continue;
+            if (age[i] < 65000) age[i]++;
+            if (vigor[i] > ceiling(i)) vigor[i] = ceiling(i);
+            if (vigor[i] > 0) vigor[i]--;
+            if (vigor[i] > 0) continue;
+            const pl = plants.get(owner[i]);
+            if (pl) pl.cells--;
+            stats.decayed++;
+            age[i] = 0;
+            if (rand() > P.LITTER) {
+              // most of the dead cell disperses; only some of it leaves a grain
+              type[i] = AIR;
+              owner[i] = 0;
+              energy[i] = 0;
+              store[i] = 0;
+              continue;
+            }
+            type[i] = SOIL; // litter becomes soil: all soil here was once a plant
+            owner[i] = 0;
+            energy[i] = 0;
+            store[i] = 0;
+            if (water[i]) {
+              // the new grain displaces its water into open space
+              const d0 = ri(8);
+              for (let k = 0; k < 8; k++) {
+                const j = NB(i, (d0 + k) & 7);
+                if (j >= 0 && type[j] === AIR && !water[j]) {
+                  water[j] = 1;
+                  water[i] = 0;
+                  break;
+                }
+              }
+            }
+          }
+          for (const [pid, pl] of plants) {
+            if (pl.cells <= 0) {
+              plants.delete(pid);
+              stats.died++;
+            }
+          }
+        }
+
+        // ------------------------------------------------------------------- tick
+        function step() {
+          lightPass();
+          leafPass();
+          reservePass();
+          absorb();
+          transport();
+          soilPass();
+          waterPass();
+          vaporPass();
+          uptake();
+          tipPass();
+          seedPass();
+          fallingSeeds();
+          if (tick % P.DECAY_PERIOD === 0) decayPass();
+          tick++;
+        }
+
+        function snapshot() {
+          let w = 0,
+            e = 0,
+            v = 0,
+            cells = 0,
+            soil = 0,
+            liveTips = 0;
+          for (let i = 0; i < N; i++) {
+            w += water[i];
+            e += energy[i];
+            v += vapor[i];
+            if (type[i] === SOIL) soil++;
+            else if (type[i] >= CONDUIT) cells++;
+          }
+          for (const tp of tips) if (tp.alive) liveTips++;
+          const hashes = new Set();
+          for (const pl of plants.values()) hashes.add(pl.hash);
+          return {
+            tick,
+            plants: plants.size,
+            cells,
+            soil,
+            tips: liveTips,
+            seeds: seeds.length,
+            water: w,
+            vapor: v,
+            energy: e,
+            strains: hashes.size,
+            gen: stats.maxGen,
+            born: stats.born,
+            seedsMade: stats.seedsMade,
+            photo: stats.photo,
+            transp: stats.transpired,
+            upkeep: stats.upkeep,
+            grew: stats.grew,
+            push: stats.push,
+            noE: stats.noE,
+            noW: stats.noW,
+            blocked: stats.blocked,
+            decayed: stats.decayed,
+          };
+        }
+
+        reset();
+
+        return {
+          COLS,
+          ROWS,
+          N,
+          P,
+          AIR,
+          SOIL,
+          CONDUIT,
+          SEEDSITE,
+          type,
+          owner,
+          vigor,
+          water,
+          energy,
+          vapor,
+          store,
+          light,
+          plants,
+          get tips() {
+            return tips;
+          },
+          get seeds() {
+            return seeds;
+          },
+          get tick() {
+            return tick;
+          },
+          step,
+          reset,
+          snapshot,
+          defaultGenome,
+        };
+      }
+
+
+
+      /* ==== RENDERER ==== */
+      (function () {
+        var seed = (Math.random() * 1e9) | 0;
+        var sim = createSim({ cols: 200, rows: 140, seed: seed });
+        var COLS = sim.COLS,
+          ROWS = sim.ROWS,
+          N = sim.N;
+
+        var stage = document.getElementById("stage");
+        var sctx = stage.getContext("2d");
+        var buf = document.createElement("canvas");
+        buf.width = COLS;
+        buf.height = ROWS;
+        var bctx = buf.getContext("2d");
+        var img = bctx.createImageData(COLS, ROWS);
+        var px = img.data;
+        for (var k = 3; k < px.length; k += 4) px[k] = 255;
+
+        var scale = 1;
+        function fit() {
+          var w = window.innerWidth - 28,
+            h = window.innerHeight - 90;
+          scale = Math.max(1, Math.floor(Math.min(w / COLS, h / ROWS)));
+          stage.width = COLS * scale;
+          stage.height = ROWS * scale;
+          sctx.imageSmoothingEnabled = false;
+        }
+        window.addEventListener("resize", fit);
+        fit();
+
+        // hue -> rgb, for the lineage view
+        function hue2rgb(hDeg, s, l) {
+          var c = (1 - Math.abs(2 * l - 1)) * s;
+          var hp = (hDeg % 360) / 60;
+          var x = c * (1 - Math.abs((hp % 2) - 1));
+          var r = 0,
+            g = 0,
+            b = 0;
+          if (hp < 1) {
+            r = c;
+            g = x;
+          } else if (hp < 2) {
+            r = x;
+            g = c;
+          } else if (hp < 3) {
+            g = c;
+            b = x;
+          } else if (hp < 4) {
+            g = x;
+            b = c;
+          } else if (hp < 5) {
+            r = x;
+            b = c;
+          } else {
+            r = c;
+            b = x;
+          }
+          var m = l - c / 2;
+          return [(r + m) * 255, (g + m) * 255, (b + m) * 255];
+        }
+
+        var MODES = ["channels", "lineage", "light"];
+        var mode = 0;
+        var LMAX = sim.P.LIGHT_MAX;
+
+        function draw() {
+          var type = sim.type,
+            vigor = sim.vigor,
+            water = sim.water,
+            energy = sim.energy,
+            vapor = sim.vapor,
+            light = sim.light,
+            owner = sim.owner;
+          var m = MODES[mode];
+          for (var i = 0, j = 0; i < N; i++, j += 4) {
+            var t = type[i],
+              r,
+              g,
+              b;
+            if (m === "light") {
+              var v = (light[i] * 255) / LMAX;
+              r = g = b = v;
+              if (t === 1) {
+                r = 30;
+                g = 26;
+                b = 22;
+              } else if (t >= 2) {
+                r = 20;
+                g = 90;
+                b = 40;
+              }
+              px[j] = r;
+              px[j + 1] = g;
+              px[j + 2] = b;
+              continue;
+            }
+            if (t === 0) {
+              var l = light[i];
+              r = 5 + l * 0.5;
+              g = 7 + l * 0.6;
+              b = 13 + l * 1.4;
+            } else if (t === 1) {
+              r = 41;
+              g = 35;
+              b = 30;
+            } else {
+              var vg = vigor[i];
+              if (m === "lineage") {
+                var pl = sim.plants.get(owner[i]);
+                var c = hue2rgb(pl ? pl.hue : 100, 0.25 + (vg / 15) * 0.6, 0.42);
+                r = c[0];
+                g = c[1];
+                b = c[2];
+              } else {
+                r = 8 + vg * 2;
+                g = 34 + vg * 14;
+                b = 18 + vg * 3;
+              }
+              if (t === 3) {
+                r += 110;
+                g += 70;
+                b += 5;
+              }
+            }
+            if (water[i]) {
+              // a droplet in air is bright; water with water above it is
+              // inside a body of water and reads deeper, as the light does
+              var above = i >= COLS ? water[i - COLS] : 0;
+              if (above) {
+                r = r * 0.2 + 6;
+                g = g * 0.3 + 30;
+                b = b * 0.4 + 96;
+              } else {
+                b += 150;
+                g += 30;
+                r += 10;
+              }
+            }
+            if (energy[i]) {
+              r += 175;
+              g += 20;
+            }
+            if (vapor[i]) {
+              r += 62;
+              g += 68;
+              b += 78;
+            }
+            px[j] = r > 255 ? 255 : r;
+            px[j + 1] = g > 255 ? 255 : g;
+            px[j + 2] = b > 255 ? 255 : b;
+          }
+          // falling seeds, then the tips on top of everything
+          var sd = sim.seeds;
+          for (var q = 0; q < sd.length; q++) {
+            var o = (sd[q].y * COLS + sd[q].x) * 4;
+            px[o] = 235;
+            px[o + 1] = 205;
+            px[o + 2] = 120;
+          }
+          var tp = sim.tips;
+          for (var q2 = 0; q2 < tp.length; q2++) {
+            if (!tp[q2].alive) continue;
+            var o2 = (tp[q2].y * COLS + tp[q2].x) * 4;
+            px[o2] = 250;
+            px[o2 + 1] = 255;
+            px[o2 + 2] = 225;
+          }
+          bctx.putImageData(img, 0, 0);
+          sctx.drawImage(buf, 0, 0, stage.width, stage.height);
+        }
+
+        var bar = document.getElementById("bar");
+        var paused = false;
+        var speed = 2;
+        function hud() {
+          var s = sim.snapshot();
+          bar.innerHTML =
+            (paused ? '<span class="paused">paused</span>' : "") +
+            "tick <b>" +
+            s.tick +
+            "</b>  plants <b>" +
+            s.plants +
+            "</b>  cells <b>" +
+            s.cells +
+            "</b>  soil <b>" +
+            s.soil +
+            "</b>  tips <b>" +
+            s.tips +
+            "</b>  seeds <b>" +
+            s.seeds +
+            "</b>  strains <b>" +
+            s.strains +
+            "</b>  generation <b>" +
+            s.gen +
+            "</b>  germinated <b>" +
+            s.born +
+            "</b>  water <b>" +
+            s.water +
+            "</b>  vapour <b>" +
+            s.vapor +
+            "</b>  energy <b>" +
+            s.energy +
+            "</b>  view <b>" +
+            MODES[mode] +
+            "</b>  x<b>" +
+            speed +
+            "</b>";
+        }
+
+        document.addEventListener("keydown", function (e) {
+          if (e.key === " ") {
+            paused = !paused;
+            e.preventDefault();
+          } else if (e.key === ".") {
+            sim.step();
+            draw();
+            hud();
+          } else if (e.key >= "1" && e.key <= "4") {
+            speed = [1, 2, 4, 8][+e.key - 1];
+          } else if (e.key === "c" || e.key === "C") {
+            mode = (mode + 1) % MODES.length;
+            draw();
+            hud();
+          } else if (e.key === "r" || e.key === "R") {
+            sim = createSim({
+              cols: COLS,
+              rows: ROWS,
+              seed: (Math.random() * 1e9) | 0,
+            });
+            draw();
+            hud();
+          }
+        });
+
+        var acc = 0;
+        function loop() {
+          if (!paused) for (var n = 0; n < speed; n++) sim.step();
+          draw();
+          if (++acc % 6 === 0) hud();
+          requestAnimationFrame(loop);
+        }
+        draw();
+        hud();
+        loop();
+      })();
+    </script>
+  </body>
+</html>

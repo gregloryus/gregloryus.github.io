@@ -1,0 +1,837 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#000">
+<title>Godsroll 3 — leaf/flower organs</title>
+<style>
+  html,body{margin:0;padding:0;background:#000;color:#9a9;font:12px/1.4 ui-monospace,Menlo,monospace;overflow:hidden;height:100%;-webkit-tap-highlight-color:transparent}
+  #view{display:block;touch-action:none;image-rendering:pixelated;width:100vw}
+  #hud{position:fixed;top:calc(52px + env(safe-area-inset-top));left:6px;right:110px;pointer-events:none;text-shadow:0 1px 2px #000;white-space:pre-wrap}
+  #bar{position:fixed;top:calc(22px + env(safe-area-inset-top));right:4px;display:flex;gap:2px;padding:2px;background:#000a;border-radius:8px}
+  #bar button{background:#1a1a1a;color:#9a9;border:1px solid #333;border-radius:6px;padding:7px 11px;font:14px ui-monospace,monospace;touch-action:manipulation}
+  #bar button:active{background:#333}
+  #scrub{position:fixed;top:calc(2px + env(safe-area-inset-top));left:4px;right:4px;width:calc(100vw - 8px);margin:0;accent-color:#3a5}
+  #panel{position:fixed;top:calc(64px + env(safe-area-inset-top));right:0;width:min(340px,92vw);max-height:72vh;overflow-y:auto;background:#0a0a0acc;border:1px solid #242;border-radius:10px 0 0 10px;padding:8px;display:none}
+  #panel h3{margin:6px 0 2px;color:#5c5;font-size:12px}
+  #panel button{background:#1a1a1a;color:#9a9;border:1px solid #333;border-radius:4px;margin:1px;padding:3px 7px;font:11px ui-monospace,monospace}
+  #panel .sel{color:#fff}
+  #panel input,#panel select{background:#111;color:#9a9;border:1px solid #333;width:70px;font:11px ui-monospace,monospace}
+  #panel textarea{width:98%;height:60px;background:#111;color:#9a9;border:1px solid #333;font:10px ui-monospace,monospace}
+  #panel .seedrow{border-top:1px solid #222;padding:3px 0}
+  #panel canvas{background:#050505;border:1px solid #222;vertical-align:middle;margin-right:6px}
+  .dial{display:flex;justify-content:space-between;align-items:center;padding:1px 0}
+</style>
+</head>
+<body>
+<canvas id="view"></canvas>
+<div id="hud"></div>
+<input id="scrub" type="range" min="0" max="0" value="0">
+<div id="bar">
+  <button id="bPlay">⏸</button>
+  <button id="bStep">⏭</button>
+  <button id="bSpeed">30/s</button>
+  <button id="bCompare" style="display:none">↔H?</button>
+  <button id="bPanel">☰</button>
+</div>
+<div id="panel"></div>
+<script>
+// ==== GODSROLL CORE BEGIN ====
+'use strict';
+const GR = (() => {
+
+// ---------- config ----------
+function defaults(){ return {
+  worldSeed: 1, cellPx: 4, skyFrac: 0.20,
+  // aerial perspective: front row is vivid; the horizon fades to a dim, desaturated cool forest green
+  stemFrontR: 0, stemFrontG: 255, stemFrontB: 0,
+  stemBackR: 45, stemBackG: 100, stemBackB: 75,
+  sunlight: 1, cellCost: 8, seedCost: 96, cellStore: 128, seedlingEnergy: 0,
+  gracePeriod: 16, minExpression: 0.5, lifespan: 256,
+  walkMin: 10, walkMax: 100, sprout3x3: 1, baseLocked: 1,
+  mutationChance: 0.25, growCutCoin: 0, urnMode: 'linear', urnMult: 2, slotChance: 1/3,
+  strikes: 3, spillDiff: 2,
+  seedLitter: 0, // off: failed seeds leave no litter; only dead plant cells increment the ground
+  fertilityLaw: 0, fertilityMin: 2, fertilityGateTick: 1500, // on: seeds root only where litter >= min (after gate tick)
+  terrainLaw: 0, heightUnit: 4, // on: litter is elevation; new plants root at floor((litter-min)/heightUnit)
+  litterProjected: 1, // dead cells deposit at their drawn row (g−z), wrapping sky overshoot to the front
+  haloSelf: 1,   // new genes need their forward arc (L, L-up, up, R-up, R) clear in the blueprint
+  haloOthers: 1, // physical growth needs the 8-neighborhood free of other plants (crown shyness)
+  leafChance: 0.5, leafAbsorb: 3, leafCostMult: 3, // tips are flowers (y=0) or leaves (y=1)
+  upkeep: 0.5,   // energy per living cell per tick; pool below zero starves the whole plant
+  exposureAbsorption: 1, // energy = lit x open in-plane faces (earth below is closed)
+  faceCount: 4,  // 4 cardinal or 8 incl. diagonals
+  fullSun: 1,    // a plant with ANY shaded cell dies after shadeGrace consecutive shaded ticks
+  shadeGrace: 16,
+  haloShadow: 1, // every cell also shades the 8 screen pixels around it for layers strictly behind
+  sunGrowth: 1,  // a bud only builds into a pixel that is lit for its layer (never grow into shade)
+  litterR: 160, litterG: 95, litterB: 45, // ground tint: black (0 alpha) up to this colour at max
+  litterNorm: 1, // ground brightness spans min..max of current litter values (relative)
+  litterNormTicks: 100, // smoothing window for the normalization bounds (visual stability)
+  litterAlpha: 0.0025, skyAlpha: 0.20, seedAlpha: 0.12,
+}; }
+
+// ---------- keyed dice: hash64(worldSeed, key) -> independent stream ----------
+function cyrb128(str){
+  let h1=1779033703,h2=3144134277,h3=1013904242,h4=2773480762;
+  for(let i=0;i<str.length;i++){ const k=str.charCodeAt(i);
+    h1=h2^Math.imul(h1^k,597399067); h2=h3^Math.imul(h2^k,2869860233);
+    h3=h4^Math.imul(h3^k,951274213); h4=h1^Math.imul(h4^k,2716044179); }
+  h1=Math.imul(h3^(h1>>>18),597399067); h2=Math.imul(h4^(h2>>>22),2869860233);
+  h3=Math.imul(h1^(h3>>>17),951274213); h4=Math.imul(h2^(h4>>>19),2716044179);
+  return [(h1^h2^h3^h4)>>>0,(h2^h1)>>>0,(h3^h1)>>>0,(h4^h1)>>>0];
+}
+function sfc32(a,b,c,d){ return function(){
+  a>>>=0;b>>>=0;c>>>=0;d>>>=0; let t=(a+b)|0; a=b^(b>>>9); b=(c+(c<<3))|0;
+  c=(c<<21)|(c>>>11); d=(d+1)|0; t=(t+d)|0; c=(c+t)|0; return (t>>>0)/4294967296; }; }
+function dice(worldSeed,key){ const h=cyrb128(worldSeed+'§'+key); return sfc32(h[0],h[1],h[2],h[3]); }
+
+// ---------- triple-bit-tree genomes ----------
+// node: {c:[L,F,R] of null|node, k: consecutive-unbuilt-generation strikes}
+// facings 0 up,1 right,2 down,3 left in the plant plane; DX horizontal, DZ elevation
+const DX=[0,1,0,-1], DZ=[1,0,-1,0];
+const SLOT_FACING=[]; // [facing*3+slot] -> child facing
+for(let f=0;f<4;f++){ SLOT_FACING[f*3+0]=(f+3)%4; SLOT_FACING[f*3+1]=f; SLOT_FACING[f*3+2]=(f+1)%4; }
+
+function newNode(){ return {c:[null,null,null], k:0, y:0}; }
+function cloneTree(n){ return n?{c:[cloneTree(n.c[0]),cloneTree(n.c[1]),cloneTree(n.c[2])],k:n.k,y:n.y||0}:null; }
+function countNodes(n){ return n?1+countNodes(n.c[0])+countNodes(n.c[1])+countNodes(n.c[2]):0; }
+function isTip(n){ return !n.c[0]&&!n.c[1]&&!n.c[2]; }
+function bits(n){ return (n.c[0]?'1':'0')+(n.c[1]?'1':'0')+(n.c[2]?'1':'0'); }
+// compact preorder bit-string encoding (L/F/R per gene) for lineage records
+function encodeBits(tree){ let s=''; (function w(n){ s+=bits(n); for(let i=0;i<3;i++) if(n.c[i]) w(n.c[i]); })(tree); return s; }
+function decodeBits(str){ let i=0;
+  function r(){ const n=newNode(); const b=str.slice(i*3,i*3+3); i++;
+    for(let s=0;s<3;s++) if(b[s]==='1') n.c[s]=r(); return n; }
+  return r(); }
+// full encoding incl. strike counts — the form seeds carry in flight
+function encodeFull(tree){ const b=[],k=[],y=[];
+  (function w(n){ b.push(bits(n)); k.push(n.k); y.push(n.y||0); for(let i=0;i<3;i++) if(n.c[i]) w(n.c[i]); })(tree);
+  return {b:b.join(''),k,y}; }
+function decodeFull(enc){ let i=0;
+  function r(){ const n=newNode(); const bs=enc.b.slice(i*3,i*3+3); n.k=enc.k[i]; n.y=(enc.y&&enc.y[i])||0; i++;
+    for(let s=0;s<3;s++) if(bs[s]==='1') n.c[s]=r(); return n; }
+  return r(); }
+
+// preorder layout: positions relative to base, facing, depth
+function layoutTree(tree){
+  const cells=[], posSet=new Set(), byPath=new Map();
+  (function walk(node,path,px,pz,facing,depth){
+    const rec={node,path,px,pz,facing,depth};
+    cells.push(rec); posSet.add(px+','+pz); byPath.set(path,rec);
+    for(let s=0;s<3;s++){ const ch=node.c[s]; if(!ch) continue;
+      const f2=SLOT_FACING[facing*3+s];
+      walk(ch,path+s,px+DX[f2],pz+DZ[f2],f2,depth+1); }
+  })(tree,'',0,0,0,1);
+  return {cells,posSet,byPath};
+}
+
+// forward-arc positions of a cell at (px,pz) with a facing: L, L-fwd, fwd, R-fwd, R
+function arcPositions(px,pz,f){
+  const lf=(f+3)%4, rf=(f+1)%4;
+  return [[px+DX[lf],pz+DZ[lf]],[px+DX[lf]+DX[f],pz+DZ[lf]+DZ[f]],[px+DX[f],pz+DZ[f]],
+          [px+DX[rf]+DX[f],pz+DZ[rf]+DZ[f]],[px+DX[rf],pz+DZ[rf]]];
+}
+function arcClear(posSet,px,pz,f){
+  for(const [ax,az] of arcPositions(px,pz,f)) if(posSet.has(ax+','+az)) return false;
+  return true;
+}
+// mutation sites: a site is one slot of one gene; weight by OWNER gene depth
+function eligibleSites(tree,cfg){
+  const {cells,posSet}=layoutTree(tree);
+  const fills=[],cuts=[];
+  for(const rec of cells){
+    const lockedBase = cfg.baseLocked && rec.path==='';
+    if(lockedBase) continue; // base keeps 010: no fills, F child never cut
+    for(let s=0;s<3;s++){
+      if(rec.node.c[s]) cuts.push({rec,s});
+      else {
+        const f2=SLOT_FACING[rec.facing*3+s];
+        const qx=rec.px+DX[f2], qz=rec.pz+DZ[f2];
+        if(posSet.has(qx+','+qz)) continue;
+        if(cfg.haloSelf&&!arcClear(posSet,qx,qz,f2)) continue;
+        fills.push({rec,s});
+      }
+    }
+  }
+  return {fills,cuts};
+}
+function siteWeight(site,cfg){
+  const d=site.rec.depth;
+  return cfg.urnMode==='mult'?Math.pow(cfg.urnMult,d-1):cfg.urnMode==='flat'?1:d;
+}
+// grow: new child present; its slots each sampled [0,0,1]; BFS L/F/R reservation
+// against the full unchanged inherited blueprint + already-accepted new cells
+function growAt(tree,site,rng,cfg){
+  const {posSet}=layoutTree(tree);
+  const f2=SLOT_FACING[site.rec.facing*3+site.s];
+  const child=newNode(); child.y=rng()<cfg.leafChance?1:0;
+  site.rec.node.c[site.s]=child;
+  posSet.add((site.rec.px+DX[f2])+','+(site.rec.pz+DZ[f2]));
+  let count=1;
+  const queue=[{node:child,px:site.rec.px+DX[f2],pz:site.rec.pz+DZ[f2],facing:f2}];
+  while(queue.length){
+    const cur=queue.shift();
+    for(let s=0;s<3;s++){
+      if(rng()>=cfg.slotChance) continue;
+      const ff=SLOT_FACING[cur.facing*3+s];
+      const nx=cur.px+DX[ff], nz=cur.pz+DZ[ff], key=nx+','+nz;
+      if(posSet.has(key)) continue; // blocked intrinsic target stays absent
+      if(cfg.haloSelf&&!arcClear(posSet,nx,nz,ff)) continue;
+      const nn=newNode(); nn.y=rng()<cfg.leafChance?1:0; cur.node.c[s]=nn; posSet.add(key); count++;
+      queue.push({node:nn,px:nx,pz:nz,facing:ff});
+    }
+  }
+  return count;
+}
+// slot-first mutation: single urn over fills+cuts unless the optional coin toggle is on
+function mutateGenome(tree,rng,cfg){
+  const {fills,cuts}=eligibleSites(tree,cfg);
+  let sites;
+  if(cfg.growCutCoin){
+    const first=rng()<0.5?fills:cuts;
+    sites=first.length?first:(first===fills?cuts:fills);
+  } else sites=fills.concat(cuts);
+  if(!sites.length) return {t:'none'};
+  let total=0; const w=sites.map(s=>{const v=siteWeight(s,cfg); total+=v; return v;});
+  let t=rng()*total, i=0;
+  while(i<w.length-1 && t>=w[i]){ t-=w[i]; i++; }
+  const site=sites[i];
+  if(site.rec.node.c[site.s]){
+    const n=countNodes(site.rec.node.c[site.s]);
+    site.rec.node.c[site.s]=null;
+    return {t:'cut',n,d:site.rec.depth};
+  }
+  const n=growAt(tree,site,rng,cfg);
+  return {t:'grow',n,d:site.rec.depth};
+}
+
+// ---------- simulation ----------
+const WDX=[0,1,0,-1], WDG=[-1,0,1,0]; // seed-walk cardinals on the ground map
+
+class Sim {
+  // rerolls: {seedId:{g,j,tick}} — extra reroll counts for player-edited events
+  constructor(cfg,dims,rerolls){
+    this.cfg=cfg; this.C=dims.C; this.S=dims.S; this.G=dims.G;
+    this.rerolls=rerolls||{};
+    this.tick=0; this.nextPlantId=1;
+    this.litter=new Int32Array(this.C*this.G);
+    this.plants=[]; this.seeds=[];
+    this.records=new Map(); // seedId -> lineage record
+    this.frontG=new Int32Array(this.C*(this.S+this.G));
+    this.frontP=new Array(this.C*(this.S+this.G));
+    this.frontC=new Array(this.C*(this.S+this.G));
+    this.haloG=new Int32Array(this.C*(this.S+this.G));
+    this.tmpG=new Int32Array(this.C*(this.S+this.G));
+    this.litG=this.frontG; // which depth map decides lighting (haloG when haloShadow is on)
+    this.occ=new Map(); // (g*C+x)*(S+G+1)+z -> plantId
+    // founder: one seed already landed at the ground center, genome 010,000
+    const g=newNode(); g.c[1]=newNode();
+    const enc=encodeFull(g);
+    const founder={id:'R',gb:enc.b,gk:enc.k,gy:enc.y,x:Math.floor(this.C/2),g:Math.floor(this.G/2),
+      steps:[],i:0,bornTick:0};
+    this.seeds.push(founder);
+    this.records.set('R',{id:'R',parentSeedId:null,flowerPath:'',ordinal:0,releaseTick:0,
+      mut:{t:'founder'},budget:0,fate:'flying',geno:encodeBits(g)});
+  }
+  occKey(x,g,z){ return (g*this.C+x)*(this.S+this.G+1)+z; }
+  scr(x,g,z){ return x+(this.S+g-z)*this.C; }
+  dice(key){ return dice(this.cfg.worldSeed,key); }
+
+  step(){
+    const t=++this.tick, cfg=this.cfg, C=this.C, S=this.S, G=this.G;
+    // 1. occlusion: frontmost (largest g) living active cell per screen cell
+    this.frontG.fill(-1); this.frontP.fill(null); this.frontC.fill(null);
+    for(const p of this.plants){
+      p.activeCount=0; p.litCount=0;
+      for(const cell of p.cells){
+        if(cell.bornTick>=t) continue;
+        p.activeCount++;
+        const sc=this.scr(cell.x,p.rootG,cell.z);
+        if(p.rootG>this.frontG[sc]){ this.frontG[sc]=p.rootG; this.frontP[sc]=p; this.frontC[sc]=cell; }
+      }
+    }
+    // halo shadow: dilate the depth map so each cell also shades its 8 screen neighbours
+    // for layers strictly behind (separable 3-tap max; x wraps, rows clamp)
+    if(cfg.haloShadow){
+      const R=S+G, F=this.frontG, T=this.tmpG, H=this.haloG;
+      for(let row=0;row<R;row++){ const o=row*C;
+        for(let x=0;x<C;x++){
+          const a=F[o+(x+C-1)%C], b=F[o+x], c=F[o+(x+1)%C];
+          T[o+x]=a>b?(a>c?a:c):(b>c?b:c);
+        } }
+      for(let row=0;row<R;row++){ const o=row*C, up=row>0?o-C:o, dn=row<R-1?o+C:o;
+        for(let x=0;x<C;x++){
+          const a=T[up+x], b=T[o+x], c=T[dn+x];
+          H[o+x]=a>b?(a>c?a:c):(b>c?b:c);
+        } }
+      this.litG=H;
+    } else this.litG=this.frontG;
+    // 2. capture into plant-wide pool; cap = cellStore × cells; overflow discarded
+    // a cell is lit iff nothing strictly nearer shades its pixel (or its halo when enabled)
+    const litG=this.litG;
+    const OFFS=cfg.faceCount===8?[[1,0],[-1,0],[0,1],[0,-1],[1,1],[1,-1],[-1,1],[-1,-1]]:[[1,0],[-1,0],[0,1],[0,-1]];
+    for(const p of this.plants){
+      for(const cell of p.cells){
+        if(cell.bornTick>=t) continue;
+        if(litG[this.scr(cell.x,p.rootG,cell.z)]<=p.rootG){
+          p.litCount++;
+          let gain=cfg.sunlight;
+          if(cfg.exposureAbsorption){
+            let faces=0;
+            for(const o of OFFS){
+              const nz=cell.z+o[1]; if(nz<0) continue;
+              if(!this.occ.has(this.occKey((cell.x+o[0]+C)%C,p.rootG,nz))) faces++;
+            }
+            gain=cfg.sunlight*faces;
+          }
+          const nd=p.layout.byPath.get(cell.path).node;
+          if(isTip(nd)&&nd.y) gain*=cfg.leafAbsorb;
+          p.pool+=gain;
+        }
+      }
+    }
+    for(const p of this.plants){ const cap=cfg.cellStore*p.cells.length; if(p.pool>cap) p.pool=cap; }
+    if(cfg.upkeep>0) for(const p of this.plants) if(p.bornTick<t) p.pool-=cfg.upkeep*p.activeCount;
+    // 3. growth: collect candidates (canonical order), allocate pool, resolve contests
+    const attempts=[];
+    for(const p of this.plants){
+      if(p.state!=='growing') continue;
+      let budget=p.pool;
+      for(const rec of p.layout.cells){ // preorder
+        if(!p.builtSet.has(rec.path)) continue;
+        const cell=p.cellByPath.get(rec.path);
+        if(cell.bornTick>=t) continue; // one-tick activation delay
+        for(let s=0;s<3;s++){
+          if(!rec.node.c[s]) continue;
+          const childPath=rec.path+s;
+          if(p.builtSet.has(childPath)) continue;
+          const f2=SLOT_FACING[cell.facing*3+s];
+          const nx=(cell.x+DX[f2]+C)%C, nz=cell.z+DZ[f2];
+          if(nz<0||nz>S+p.rootG) continue; // below ground / past top edge: never buildable
+          if(cfg.sunGrowth&&this.litG[this.scr(nx,p.rootG,nz)]>p.rootG) continue; // shaded: bud waits
+          const key=this.occKey(nx,p.rootG,nz);
+          if(this.occ.has(key)) continue;  // blocked: bud waits
+          if(cfg.haloOthers){ // crown shyness: 8-neighborhood free of other plants
+            let shy=false;
+            for(let ddx=-1;ddx<=1&&!shy;ddx++) for(let ddz=-1;ddz<=1;ddz++){
+              if(!ddx&&!ddz) continue;
+              const o=this.occ.get(this.occKey((nx+ddx+C)%C,p.rootG,nz+ddz));
+              if(o!==undefined&&o!==p.id){ shy=true; break; }
+            }
+            if(shy) continue; // bud waits; the neighbour may die later
+          }
+          const cNode=rec.node.c[s];
+          const cost=cfg.cellCost*(isTip(cNode)&&cNode.y?cfg.leafCostMult:1);
+          if(budget>=cost){ budget-=cost;
+            attempts.push({p,childPath,nx,nz,facing:f2,key,cost}); }
+        }
+      }
+    }
+    const byKey=new Map();
+    for(const a of attempts){ let l=byKey.get(a.key); if(!l){l=[];byKey.set(a.key,l);} l.push(a); }
+    for(const [key,list] of byKey){
+      let win=list[0];
+      if(list.length>1){
+        list.sort((a,b)=>a.p.id-b.p.id||(a.childPath<b.childPath?-1:1));
+        const rng=this.dice('grow|'+t+'|'+key);
+        win=list[Math.floor(rng()*list.length)]; // losers wait without spending
+      }
+      win.p.pool-=win.cost;
+      this.addCell(win.p,win.childPath,win.nx,win.nz,win.facing,t);
+      win.p.grew=true;
+    }
+    // 4. reproduction: hardened plants, flowers in preorder, one attempt each
+    for(const p of this.plants){
+      if(p.state!=='hardened') continue;
+      for(const rec of p.layout.cells){
+        if(!isTip(rec.node)||rec.node.y||!p.builtSet.has(rec.path)) continue;
+        if(p.pool<cfg.seedCost) break;
+        p.pool-=cfg.seedCost;
+        const cell=p.cellByPath.get(rec.path);
+        const ordinal=(p.flowerCounts[rec.path]=(p.flowerCounts[rec.path]||0)+1)-1;
+        // identity by birth, fixed length: hash of (parent identity, flower, ordinal).
+        // Stable across histories and genome rerolls; never derived from genome or tick.
+        const h=cyrb128(p.seedId+'·'+rec.path+':'+ordinal);
+        const seedId=h[0].toString(36)+'-'+h[1].toString(36);
+        const rr=this.rerolls[seedId]||{g:0,j:0};
+        // genes dice: gate + urn + recursive additions, keyed to birth identity
+        const genome=cloneTree(p.baseline);
+        const grng=this.dice(seedId+'|genes|'+(rr.g||0));
+        let mut={t:'copy'};
+        if(grng()<cfg.mutationChance) mut=mutateGenome(genome,grng,cfg);
+        // journey dice: budget + every step, independent of genome
+        const jrng=this.dice(seedId+'|journey|'+(rr.j||0));
+        const budget=cfg.walkMin+Math.floor(jrng()*(cfg.walkMax-cfg.walkMin+1));
+        const steps=new Array(budget);
+        for(let i=0;i<budget;i++) steps[i]=Math.floor(jrng()*4);
+        let launchG=p.rootG-cell.z; if(launchG<0) launchG=0; // sky clamps to back row
+        const genc=encodeFull(genome);
+        this.seeds.push({id:seedId,gb:genc.b,gk:genc.k,gy:genc.y,x:cell.x,g:launchG,steps,i:0,bornTick:t});
+        this.records.set(seedId,{id:seedId,parentSeedId:p.seedId,flowerPath:rec.path,
+          ordinal,releaseTick:t,mut,budget,fate:'flying'});
+      }
+    }
+    // 5. seed journeys: one cardinal step per tick; establishment after the last step
+    const establishing=[], flying=[];
+    for(const seed of this.seeds){
+      if(seed.bornTick>=t){ flying.push(seed); continue; }
+      if(seed.i<seed.steps.length){
+        const d=seed.steps[seed.i++];
+        seed.x=(seed.x+WDX[d]+C)%C;
+        const ng=seed.g+WDG[d];
+        if(ng>=0&&ng<G) seed.g=ng; // front/back over-step consumes budget in place
+      }
+      if(seed.i>=seed.steps.length) establishing.push(seed); else flying.push(seed);
+    }
+    this.seeds=flying;
+    const byDest=new Map();
+    for(const s of establishing){ const k=s.g*C+s.x; let l=byDest.get(k); if(!l){l=[];byDest.set(k,l);} l.push(s); }
+    for(const [k,list] of byDest){
+      let win=list[0];
+      if(list.length>1){
+        list.sort((a,b)=>a.id<b.id?-1:1);
+        const rng=this.dice('root|'+t+'|'+k);
+        win=list[Math.floor(rng()*list.length)];
+      }
+      const z0=this.groundZ(win.x,win.g);
+      let ok=!this.occ.has(this.occKey(win.x,win.g,z0));
+      if(ok){ // lit-ground test (3×3 default / center-only toggle), wrap x, clip g
+        const r=cfg.sprout3x3?1:0;
+        outer: for(let dg=-r;dg<=r;dg++){ const gg=win.g+dg; if(gg<0||gg>=G) continue;
+          for(let dx=-r;dx<=r;dx++){ const xx=(win.x+dx+C)%C, sc=xx+(S+gg)*C;
+            if(this.frontG[sc]!==-1||this.litG[sc]>gg){ ok=false; break outer; } } }
+      }
+      if(ok&&cfg.fertilityLaw&&t>cfg.fertilityGateTick&&this.litter[win.g*C+win.x]<cfg.fertilityMin) ok=false;
+      for(const s of list){
+        const rec=this.records.get(s.id);
+        if(s===win&&ok){ this.establish(s,t,z0); }
+        else { if(cfg.seedLitter) this.litter[s.g*C+s.x]+=1; if(rec){ rec.fate='failed'; rec.endTick=t; } }
+      }
+    }
+    // 6. lifecycle: grace / immediate-complete hardening / viability / adult aging
+    for(const p of this.plants){
+      if(cfg.upkeep>0&&p.pool<0){ this.kill(p,'starved',t); continue; } // couldn't cover upkeep
+      if(cfg.fullSun&&p.bornTick<t){ // full-sun law: any shaded cell starts the shade clock
+        if(p.litCount<p.activeCount) p.shade=(p.shade||0)+1; else p.shade=0;
+        if(p.shade>=cfg.shadeGrace){ this.kill(p,'shaded',t); continue; }
+      }
+      if(p.state==='growing'){
+        if(p.bornTick===t||p.grew) p.grace=0; else p.grace++;
+        p.grew=false;
+        if(p.builtSet.size===p.planSize) this.harden(p);
+        else if(p.grace>=cfg.gracePeriod){
+          if(p.builtSet.size/p.planSize>=cfg.minExpression) this.harden(p);
+          else this.kill(p,'immature',t);
+        }
+      } else if(p.state==='hardened'){
+        p.age++;
+        if(p.age>=cfg.lifespan) this.kill(p,'expired',t);
+      }
+    }
+    this.plants=this.plants.filter(p=>p.state!=='dead');
+    // 7. litter spill: decided entirely from the pre-spill field, applied together
+    const L=this.litter, out=new Int32Array(C*G), inn=new Int32Array(C*G);
+    for(let g=0;g<G;g++) for(let x=0;x<C;x++){
+      const i=g*C+x, v=L[i]; if(v<cfg.spillDiff) continue;
+      let bestV=Infinity, tied=null;
+      const nbs=[g>0?i-C:-1, g<G-1?i+C:-1, g*C+((x+1)%C), g*C+((x-1+C)%C)];
+      for(const j of nbs){ if(j<0) continue; const nv=L[j];
+        if(v-nv>=cfg.spillDiff){ if(nv<bestV){ bestV=nv; tied=[j]; } else if(nv===bestV) tied.push(j); } }
+      if(tied){ let j=tied[0];
+        if(tied.length>1){ const rng=this.dice('spill|'+t+'|'+i); j=tied[Math.floor(rng()*tied.length)]; }
+        out[i]=1; inn[j]++; }
+    }
+    for(let i=0;i<L.length;i++) L[i]+=inn[i]-out[i];
+  }
+
+  addCell(p,path,x,z,facing,bornTick){
+    const cell={x,z,path,facing,bornTick};
+    p.cells.push(cell); p.builtSet.add(path); p.cellByPath.set(path,cell);
+    this.occ.set(this.occKey(x,p.rootG,z),p.id);
+  }
+  groundZ(x,g){ // base elevation under terrainLaw, else 0
+    if(!this.cfg.terrainLaw) return 0;
+    let mn=Infinity; for(const v of this.litter) if(v<mn) mn=v;
+    return Math.min(Math.floor((this.litter[g*this.C+x]-mn)/this.cfg.heightUnit),this.S+g);
+  }
+  establish(seed,t,z0){
+    const tree=decodeFull({b:seed.gb,k:seed.gk,y:seed.gy});
+    const p={id:this.nextPlantId++,seedId:seed.id,rootX:seed.x,rootG:seed.g,
+      birthPlan:tree,baseline:null,state:'growing',grace:0,age:0,grew:false,
+      pool:this.cfg.seedlingEnergy,bornTick:t,flowerCounts:{},
+      cells:[],builtSet:new Set(),cellByPath:new Map()};
+    p.layout=layoutTree(p.birthPlan);
+    p.planSize=p.layout.cells.length;
+    this.plants.push(p);
+    this.addCell(p,'',seed.x,z0,0,t); // base at terrain elevation (0 unless terrainLaw), facing up
+    const rec=this.records.get(seed.id);
+    if(rec){ rec.fate='rooted'; rec.plantId=p.id; rec.rootX=seed.x; rec.rootG=seed.g;
+      rec.geno=seed.gb; } // body plans kept only for lineages that actually rooted
+  }
+  harden(p){
+    // strikes: built resets to 0, unbuilt +1 — once per hardened generation
+    for(const rec of p.layout.cells) rec.node.k=p.builtSet.has(rec.path)?0:rec.node.k+1;
+    // offspring baseline: prune genes at 3 strikes with their whole subtree
+    const base=cloneTree(p.birthPlan), cfg=this.cfg;
+    (function prune(node,path){
+      for(let s=0;s<3;s++){ const ch=node.c[s]; if(!ch) continue;
+        if(!(cfg.baseLocked&&path===''&&s===1)&&ch.k>=cfg.strikes){ node.c[s]=null; continue; }
+        prune(ch,path+s); }
+    })(base,'');
+    p.baseline=base; p.state='hardened'; p.age=0;
+  }
+  kill(p,how,t){
+    const G=this.G;
+    for(const cell of p.cells){ // every built cell → 1 litter unit
+      const row=this.cfg.litterProjected?(((p.rootG-cell.z)%G)+G)%G:p.rootG;
+      this.litter[row*this.C+cell.x]+=1;
+      this.occ.delete(this.occKey(cell.x,p.rootG,cell.z));
+    }
+    p.state='dead';
+    const rec=this.records.get(p.seedId);
+    if(rec){ rec.end=how; rec.endTick=t; rec.cellsBuilt=p.cells.length; rec.planSize=p.planSize; }
+  }
+
+  litterTotal(){ let s=0; for(const v of this.litter) s+=v; return s; }
+  toJSON(){ // records live outside snapshots: they are observational, never read by physics
+    return {tick:this.tick,nextPlantId:this.nextPlantId,litter:Array.from(this.litter),
+      seeds:this.seeds,
+      plants:this.plants.map(p=>({id:p.id,seedId:p.seedId,rootX:p.rootX,rootG:p.rootG,
+        birthPlan:p.birthPlan,baseline:p.baseline,state:p.state,grace:p.grace,age:p.age,
+        grew:p.grew,pool:p.pool,bornTick:p.bornTick,flowerCounts:p.flowerCounts,
+        shade:p.shade||0,cells:p.cells}))};
+  }
+  static fromJSON(cfg,dims,rerolls,data,records){
+    const sim=new Sim(cfg,dims,rerolls);
+    sim.tick=data.tick; sim.nextPlantId=data.nextPlantId;
+    sim.litter=Int32Array.from(data.litter);
+    sim.seeds=data.seeds.map(s=>({...s}));
+    if(records) sim.records=records;
+    sim.plants=[]; sim.occ.clear();
+    for(const d of data.plants){
+      const p={...d,cells:d.cells.map(c=>({...c})),builtSet:new Set(),cellByPath:new Map()};
+      p.layout=layoutTree(p.birthPlan); p.planSize=p.layout.cells.length;
+      for(const cell of p.cells){ p.builtSet.add(cell.path); p.cellByPath.set(cell.path,cell);
+        sim.occ.set(sim.occKey(cell.x,p.rootG,cell.z),p.id); }
+      sim.plants.push(p);
+    }
+    return sim;
+  }
+}
+
+function dimsFromViewport(w,h,cellPx,skyFrac){
+  const C=Math.floor(w/cellPx), R=Math.floor(h/cellPx);
+  const S=Math.round(R*skyFrac); // sky is always the top skyFrac of the screen
+  return {C,S,G:R-S};
+}
+
+return {defaults,dice,cyrb128,sfc32,newNode,cloneTree,countNodes,isTip,bits,
+  encodeBits,decodeBits,encodeFull,decodeFull,layoutTree,eligibleSites,siteWeight,growAt,mutateGenome,
+  Sim,dimsFromViewport,DX,DZ,SLOT_FACING};
+})();
+if(typeof module!=='undefined') module.exports=GR;
+// ==== GODSROLL CORE END ====
+</script>
+<script>
+'use strict';
+(function(){
+const SNAP_EVERY=512, SPEEDS=[2,10,30,120,600,3000];
+let cfg, dims, histories, hist, sim, parentSim=null, viewingParent=false;
+let playing=true, speedIdx=2, acc=0, lastTs=0;
+let selected=null; // {plantId, seedId}
+let buf,img,off,offCtx,ctx,canvas,dpr=1;
+const litSm={lo:0,hi:1,tick:-1,sim:null}; // smoothed litter-normalization bounds (visual only)
+
+function boot(newCfg){
+  cfg=newCfg||GR.defaults();
+  if(!newCfg){ try{ const q=new URLSearchParams(location.search).get('cfg');
+    if(q) Object.assign(cfg,JSON.parse(q)); }catch(e){} }
+  const w=window.innerWidth, h=window.innerHeight;
+  dims=GR.dimsFromViewport(w,h,cfg.cellPx,cfg.skyFrac);
+  histories=[{id:0,parentId:null,branchTick:null,what:null,rerolls:{},snaps:[],maxTick:0}];
+  hist=histories[0];
+  sim=new GR.Sim(cfg,dims,hist.rerolls);
+  hist.records=sim.records;
+  parentSim=null; viewingParent=false; selected=null;
+  canvas=document.getElementById('view');
+  const R=dims.S+dims.G;
+  canvas.width=dims.C; canvas.height=R;
+  canvas.style.width=dims.C*cfg.cellPx+'px'; canvas.style.height=R*cfg.cellPx+'px';
+  ctx=canvas.getContext('2d'); ctx.imageSmoothingEnabled=false;
+  off=document.createElement('canvas'); off.width=dims.C; off.height=R;
+  offCtx=off.getContext('2d');
+  img=offCtx.createImageData(dims.C,R); buf=new Uint32Array(img.data.buffer);
+  renderPanel();
+}
+
+function stepRecord(){
+  sim.step();
+  if(sim.tick%SNAP_EVERY===0&&(hist.snaps.length===0||hist.snaps[hist.snaps.length-1].tick<sim.tick)){
+    hist.snaps.push({tick:sim.tick,json:JSON.stringify(sim)});
+    if(hist.snaps.length>24) hist.snaps=hist.snaps.filter((s,i)=>i%2===1||i===hist.snaps.length-1);
+  }
+  if(sim.tick>hist.maxTick) hist.maxTick=sim.tick;
+}
+function freshSim(h){
+  const s=new GR.Sim(cfg,dims,h.rerolls);
+  if(!h.records) h.records=s.records; else s.records=h.records; // records belong to the history
+  return s;
+}
+function seek(t){
+  if(t<sim.tick){
+    let snap=null;
+    for(const s of hist.snaps) if(s.tick<=t) snap=s; else break;
+    sim=snap?GR.Sim.fromJSON(cfg,dims,hist.rerolls,JSON.parse(snap.json),hist.records):freshSim(hist);
+  }
+  while(sim.tick<t) stepRecord();
+}
+function buildSimFor(h,t){
+  let snap=null;
+  for(const s of h.snaps) if(s.tick<=t) snap=s; else break;
+  let s2=snap?GR.Sim.fromJSON(cfg,dims,h.rerolls,JSON.parse(snap.json),h.records):freshSim(h);
+  while(s2.tick<t) s2.step();
+  return s2;
+}
+
+// ---- rerolls & histories ----
+function reroll(record,kind){
+  const rel=record.releaseTick;
+  const rr={};
+  for(const [sid,e] of Object.entries(hist.rerolls)) if(e.tick<=rel) rr[sid]={...e};
+  const cur=rr[record.id]||{g:0,j:0,tick:rel};
+  cur[kind]=(cur[kind]||0)+1; cur.tick=rel; rr[record.id]=cur;
+  const recs=new Map();
+  for(const [id,r] of hist.records) if(r.releaseTick<rel) recs.set(id,{...r});
+  const nh={id:histories.length,parentId:hist.id,branchTick:rel,
+    what:(kind==='g'?'genes':'journey')+' of '+record.id+' @'+rel,
+    rerolls:rr,records:recs,
+    snaps:hist.snaps.filter(s=>s.tick<rel).map(s=>({tick:s.tick,json:s.json})),
+    maxTick:rel};
+  histories.push(nh);
+  const back=sim.tick;
+  hist=nh; sim=freshSim(nh); seek(back);
+  viewingParent=false; parentSim=null;
+  renderPanel();
+}
+function switchHistory(h){
+  const back=Math.min(sim.tick,Math.max(h.maxTick,sim.tick));
+  hist=h; sim=freshSim(h); seek(back);
+  viewingParent=false; parentSim=null; renderPanel();
+}
+function toggleCompare(){
+  if(hist.parentId===null) return;
+  viewingParent=!viewingParent;
+  if(viewingParent) parentSim=buildSimFor(histories[hist.parentId],sim.tick);
+  syncBar();
+}
+
+// ---- rendering ----
+function col32(r,g,b){ return 0xFF000000|(b<<16)|(g<<8)|r; }
+function render(){
+  const s=viewingParent?parentSim:sim;
+  const C=dims.C,S=dims.S,G=dims.G,R=S+G;
+  const skyCol=col32(0,0,Math.round(255*cfg.skyAlpha));
+  let lo=Infinity,hi=0;
+  if(cfg.litterNorm){ for(const v of s.litter){ if(v<lo)lo=v; if(v>hi)hi=v; }
+    // smear the bounds over ~litterNormTicks sim ticks so contrast shifts slowly, not per frame
+    if(litSm.sim!==s||s.tick<litSm.tick){ litSm.lo=lo; litSm.hi=hi; }
+    else if(s.tick>litSm.tick){
+      const a=1-Math.pow(1-1/Math.max(1,cfg.litterNormTicks),s.tick-litSm.tick);
+      litSm.lo+=(lo-litSm.lo)*a; litSm.hi+=(hi-litSm.hi)*a;
+    }
+    litSm.sim=s; litSm.tick=s.tick;
+    lo=litSm.lo; hi=litSm.hi;
+  }
+  const range=hi>lo?hi-lo:1;
+  for(let row=0;row<R;row++){
+    for(let x=0;x<C;x++){
+      const i=row*C+x;
+      const fp=s.frontP[i], fc=s.frontC[i];
+      if(fp){
+        const t=(G-1-fp.rootG)/Math.max(1,G-1);
+        const L=(a,b)=>Math.round(a+(b-a)*t);
+        const nd=fp.layout.byPath.get(fc.path).node;
+        const tip=GR.isTip(nd);
+        buf[i]=tip?(nd.y?col32(L(140,70),L(255,150),L(40,40)):col32(L(235,125),L(140,95),L(185,125)))
+                  :col32(L(cfg.stemFrontR,cfg.stemBackR),L(cfg.stemFrontG,cfg.stemBackG),L(cfg.stemFrontB,cfg.stemBackB));
+      } else if(row>=S){
+        const v=s.litter[(row-S)*C+x];
+        const a=cfg.litterNorm?Math.max(0,Math.min(1,(v-lo)/range)):Math.min(1,v*cfg.litterAlpha);
+        buf[i]=col32(Math.round(cfg.litterR*a),Math.round(cfg.litterG*a),Math.round(cfg.litterB*a));
+      } else buf[i]=skyCol;
+    }
+  }
+  for(const seed of s.seeds){ // amber motes, non-occluding overlay
+    const i=(S+seed.g)*C+seed.x, d=buf[i], a=cfg.seedAlpha;
+    const mix=(ch,sv)=>Math.round(ch*(1-a)+sv*a);
+    buf[i]=col32(mix(d&255,255),mix((d>>8)&255,176),mix((d>>16)&255,64));
+  }
+  offCtx.putImageData(img,0,0);
+  ctx.clearRect(0,0,C,R);
+  ctx.drawImage(off,0,0);
+  if(selected){ // outline every cell of the selected plant, even shaded ones
+    const p=s.plants.find(q=>q.id===selected.plantId&&q.seedId===selected.seedId);
+    if(p){ ctx.strokeStyle='#fff'; ctx.lineWidth=0.3;
+      for(const cell of p.cells) ctx.strokeRect(cell.x+0.1,S+p.rootG-cell.z+0.1,0.8,0.8); }
+  }
+  const hud=document.getElementById('hud');
+  let line='t'+s.tick+' · '+s.plants.length+' plants · '+s.seeds.length+' seeds · H'+
+    (viewingParent?histories[hist.parentId].id+' (parent view)':hist.id);
+  if(s.plants.length===0&&s.seeds.length===0&&s.tick>2)
+    line+='\nAll life has ended. Rewind the slider and reroll a seed to find another history.';
+  hud.textContent=line;
+  const sc=document.getElementById('scrub');
+  sc.max=Math.max(hist.maxTick,sim.tick); if(document.activeElement!==sc) sc.value=sim.tick;
+}
+function frame(ts){
+  if(playing&&!viewingParent){
+    if(lastTs) acc+=(ts-lastTs)/1000*SPEEDS[speedIdx];
+    let n=Math.floor(acc); acc-=n;
+    const t0=performance.now();
+    while(n-->0){ stepRecord(); if(performance.now()-t0>30){ acc=0; break; } }
+  }
+  lastTs=ts;
+  render();
+  requestAnimationFrame(frame);
+}
+
+// ---- selection & panel ----
+function pick(ev){
+  const r=canvas.getBoundingClientRect();
+  const col=Math.floor((ev.clientX-r.left)/cfg.cellPx), row=Math.floor((ev.clientY-r.top)/cfg.cellPx);
+  const s=viewingParent?parentSim:sim;
+  const hits=[];
+  for(const p of s.plants) for(const cell of p.cells)
+    if(cell.x===col&&dims.S+p.rootG-cell.z===row){ hits.push(p); break; }
+  hits.sort((a,b)=>b.rootG-a.rootG); // front to back; repeated taps cycle to shaded plants
+  if(!hits.length){ selected=null; renderPanel(); return; }
+  let idx=0;
+  if(selected){ const cur=hits.findIndex(p=>p.id===selected.plantId); if(cur>=0) idx=(cur+1)%hits.length; }
+  selected={plantId:hits[idx].id,seedId:hits[idx].seedId};
+  renderPanel(); document.getElementById('panel').style.display='block';
+}
+function thumb(genome,builtSet){
+  const {cells}=GR.layoutTree(genome);
+  let x0=0,x1=0,z0=0,z1=0;
+  for(const c of cells){ x0=Math.min(x0,c.px);x1=Math.max(x1,c.px);z0=Math.min(z0,c.pz);z1=Math.max(z1,c.pz); }
+  const w=x1-x0+1,h=z1-z0+1,px=Math.max(2,Math.min(6,Math.floor(48/Math.max(w,h))));
+  const cv=document.createElement('canvas'); cv.width=w*px+2; cv.height=h*px+2;
+  const c2=cv.getContext('2d');
+  for(const c of cells){
+    const built=!builtSet||builtSet.has(c.path);
+    c2.fillStyle=GR.isTip(c.node)?(built?'#eb8cb9':'#735'):(built?'#0f0':'#363');
+    c2.fillRect(1+(c.px-x0)*px,1+(z1-c.pz)*px,px-1,px-1);
+  }
+  return cv;
+}
+function renderPanel(){
+  const el=document.getElementById('panel');
+  el.innerHTML='';
+  const s=viewingParent?parentSim:sim;
+  // selection + lineage
+  const h3=document.createElement('h3');
+  if(selected){
+    const p=s.plants.find(q=>q.id===selected.plantId&&q.seedId===selected.seedId);
+    h3.textContent=p?('plant #'+p.id+' · '+p.state+' · '+p.builtSet.size+'/'+p.planSize+
+      ' cells · pool '+Math.round(p.pool)+(p.state==='hardened'?' · age '+p.age:' · grace '+p.grace)):'(plant no longer alive)';
+    el.appendChild(h3);
+    const chain=[]; let sid=selected.seedId;
+    while(sid&&chain.length<30){ const r=s.records.get(sid); if(!r) break; chain.push(r); sid=r.parentSeedId; }
+    const lh=document.createElement('h3'); lh.textContent='lineage (newest first)'; el.appendChild(lh);
+    for(const r of chain){
+      const row=document.createElement('div'); row.className='seedrow';
+      if(r.geno) row.appendChild(thumb(GR.decodeBits(r.geno),r.id===selected.seedId&&p?p.builtSet:null));
+      const info=document.createElement('span');
+      const mut=r.mut.t==='copy'?'exact copy':r.mut.t==='founder'?'the founder':
+        r.mut.t==='none'?'no eligible site':r.mut.t+' '+r.mut.n+' @ depth '+r.mut.d;
+      info.textContent=r.id+'  released t'+r.releaseTick+' · genes: '+mut+' · walk '+r.budget+
+        ' · '+r.fate+(r.end?' → '+r.end+' t'+r.endTick:'');
+      row.appendChild(info); row.appendChild(document.createElement('br'));
+      if(r.id!=='R'){
+        const bg=document.createElement('button'); bg.textContent='reroll genes';
+        bg.onclick=()=>reroll(r,'g'); row.appendChild(bg);
+        const bj=document.createElement('button'); bj.textContent='reroll journey';
+        bj.onclick=()=>reroll(r,'j'); row.appendChild(bj);
+      }
+      const bt=document.createElement('button'); bt.textContent='go to t'+r.releaseTick;
+      bt.onclick=()=>{ if(!viewingParent) seek(r.releaseTick); }; row.appendChild(bt);
+      el.appendChild(row);
+    }
+  } else { h3.textContent='tap a plant to inspect (tap again to cycle to shaded plants behind it)'; el.appendChild(h3); }
+  // histories
+  const hh=document.createElement('h3'); hh.textContent='histories'; el.appendChild(hh);
+  for(const h of histories){
+    const b=document.createElement('button');
+    b.textContent='H'+h.id+(h.parentId!==null?' ← H'+h.parentId+' ('+h.what+')':' (origin)');
+    if(h===hist) b.className='sel';
+    b.onclick=()=>switchHistory(h);
+    el.appendChild(b); el.appendChild(document.createElement('br'));
+  }
+  // dials
+  const dh=document.createElement('h3'); dh.textContent='dials (applied on New World)'; el.appendChild(dh);
+  const inputs={};
+  for(const [k,v] of Object.entries(cfg)){
+    const row=document.createElement('div'); row.className='dial';
+    const lab=document.createElement('span'); lab.textContent=k; row.appendChild(lab);
+    let inp;
+    if(k==='urnMode'){ inp=document.createElement('select');
+      for(const o of ['linear','mult','flat']){ const op=document.createElement('option'); op.value=o; op.textContent=o; inp.appendChild(op); }
+      inp.value=v;
+    } else { inp=document.createElement('input'); inp.value=v; }
+    inputs[k]=inp; row.appendChild(inp); el.appendChild(row);
+  }
+  const nw=document.createElement('button'); nw.textContent='New World';
+  nw.onclick=()=>{ const c={};
+    for(const [k,v] of Object.entries(cfg)) c[k]=(k==='urnMode')?inputs[k].value:(isNaN(+inputs[k].value)?inputs[k].value:+inputs[k].value);
+    boot(c); };
+  el.appendChild(nw);
+  // save / load (histories reconstruct deterministically from this)
+  const sh=document.createElement('h3'); sh.textContent='save / load'; el.appendChild(sh);
+  const ta=document.createElement('textarea'); el.appendChild(ta);
+  const bs=document.createElement('button'); bs.textContent='Save→';
+  bs.onclick=()=>{ ta.value=JSON.stringify({cfg,dims,currentId:hist.id,viewTick:sim.tick,
+    histories:histories.map(h=>({id:h.id,parentId:h.parentId,branchTick:h.branchTick,what:h.what,rerolls:h.rerolls,maxTick:h.maxTick}))}); };
+  el.appendChild(bs);
+  const bl=document.createElement('button'); bl.textContent='Load';
+  bl.onclick=()=>{ try{
+    const d=JSON.parse(ta.value);
+    cfg=d.cfg; dims=d.dims; boot(cfg); dims=d.dims;
+    histories=d.histories.map(h=>({...h,snaps:[]}));
+    hist=histories.find(h=>h.id===d.currentId)||histories[0];
+    sim=freshSim(hist); seek(d.viewTick);
+    renderPanel();
+  }catch(e){ ta.value='load failed: '+e.message; } };
+  el.appendChild(bl);
+}
+
+// ---- controls ----
+function syncBar(){
+  document.getElementById('bPlay').textContent=playing?'⏸':'▶';
+  document.getElementById('bSpeed').textContent=SPEEDS[speedIdx]+'/s';
+  const bc=document.getElementById('bCompare');
+  bc.style.display=hist&&hist.parentId!==null?'':'none';
+  bc.textContent=viewingParent?'↩H'+hist.id:'↔H'+(hist?hist.parentId:'');
+}
+document.getElementById('bPlay').onclick=()=>{ playing=!playing; syncBar(); };
+document.getElementById('bStep').onclick=()=>{ playing=false; stepRecord(); syncBar(); };
+document.getElementById('bSpeed').onclick=()=>{ speedIdx=(speedIdx+1)%SPEEDS.length; syncBar(); };
+document.getElementById('bCompare').onclick=toggleCompare;
+document.getElementById('bPanel').onclick=()=>{ const p=document.getElementById('panel');
+  p.style.display=p.style.display==='block'?'none':'block'; };
+document.getElementById('scrub').addEventListener('input',e=>{ playing=false; syncBar();
+  if(!viewingParent) seek(+e.target.value); });
+document.getElementById('view').addEventListener('pointerdown',pick);
+window.addEventListener('keydown',e=>{
+  if(e.key===' '){ playing=!playing; syncBar(); e.preventDefault(); }
+  if(e.key==='.'){ playing=false; stepRecord(); }
+});
+
+boot();
+syncBar();
+requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>

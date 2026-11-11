@@ -1,0 +1,1381 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1, user-scalable=no">
+<title>Simplant 3D v11</title>
+<style>
+  :root{
+    --ink:#e6eae6; --ink-dim:#8f9a94;
+    --panel:rgba(10,18,17,.84); --line:rgba(230,234,230,.15);
+    --line-strong:rgba(230,234,230,.32); --hit:rgba(230,234,230,.09);
+  }
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  html,body{height:100%;margin:0;overflow:hidden;background:#050a09}
+  body{color:var(--ink);font-family:ui-sans-serif,system-ui,"Helvetica Neue",Arial,sans-serif;
+    font-size:14px;line-height:1.4;-webkit-font-smoothing:antialiased}
+  canvas{display:block;touch-action:none;position:fixed;inset:0;width:100%;height:100%}
+  #fallback{display:none;position:fixed;inset:0;place-items:center;text-align:center;padding:24px}
+
+  .readout{position:fixed;top:calc(env(safe-area-inset-top) + 12px);left:12px;z-index:5;
+    pointer-events:none;display:grid;grid-template-columns:auto auto;gap:1px 12px;
+    font-variant-numeric:tabular-nums;font-size:12.5px;color:var(--ink-dim)}
+  .readout b{font-weight:600;color:var(--ink);text-align:right}
+
+  .dock{position:fixed;left:8px;right:8px;bottom:calc(env(safe-area-inset-bottom) + 8px);
+    z-index:6;background:var(--panel);backdrop-filter:blur(18px);-webkit-backdrop-filter:blur(18px);
+    border:1px solid var(--line);border-radius:14px;padding:10px;
+    display:flex;flex-direction:column;gap:9px;max-width:560px;margin:0 auto}
+  .dock[data-open="false"] .dock-body{display:none}
+  .row{display:flex;gap:6px;align-items:center}
+  .row.wrap{flex-wrap:wrap}
+  button{font:inherit;font-weight:500;color:var(--ink);background:transparent;
+    border:1px solid var(--line);border-radius:9px;padding:9px 12px;min-height:40px;
+    cursor:pointer;flex:1 1 auto;white-space:nowrap}
+  button:active{background:var(--hit)}
+  button:focus-visible{outline:2px solid var(--line-strong);outline-offset:2px}
+  button[aria-pressed="true"]{border-color:currentColor;background:var(--hit)}
+  button.icon{flex:0 0 auto;min-width:42px;padding:9px 10px}
+  .slider{display:flex;align-items:center;gap:9px;flex:1 1 200px}
+  .slider span{color:var(--ink-dim);font-size:12.5px;white-space:nowrap}
+  .slider b{font-weight:600;color:var(--ink);font-variant-numeric:tabular-nums;
+    min-width:2.6em;text-align:right;font-size:12.5px}
+  input[type=range]{flex:1;-webkit-appearance:none;appearance:none;background:transparent;height:24px;margin:0}
+  input[type=range]::-webkit-slider-runnable-track{height:2px;background:var(--line-strong)}
+  input[type=range]::-moz-range-track{height:2px;background:var(--line-strong)}
+  input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;appearance:none;
+    width:18px;height:18px;border-radius:50%;background:var(--ink);margin-top:-8px}
+  input[type=range]::-moz-range-thumb{width:18px;height:18px;border:0;border-radius:50%;background:var(--ink)}
+  .hint{color:var(--ink-dim);font-size:12px;text-align:center;margin:0}
+</style>
+</head>
+<body>
+
+<canvas id="world"></canvas>
+<div id="fallback"><p>This build needs WebGL2, which this browser isn't providing.</p></div>
+
+<div class="readout">
+  <span>plants</span><b id="r-plants">0</b>
+  <span>cells</span><b id="r-cells">0</b>
+  <span>lit cells</span><b id="r-lit">0</b>
+  <span>leaves</span><b id="r-leaf">0</b>
+  <span>seeds aloft</span><b id="r-seeds">0</b>
+  <span>tallest</span><b id="r-tall">0</b>
+  <span>genes</span><b id="r-genes">0</b>
+  <span>generations</span><b id="r-gen">0</b>
+  <span>mutant births</span><b id="r-mut">0</b>
+  <span>seed store (median)</span><b id="r-store">0</b>
+  <span>ticks</span><b id="r-tick">0</b>
+  <span>ticks/sec</span><b id="r-tps">0</b>
+  <span>fps</span><b id="r-fps">0</b>
+</div>
+
+<div class="dock" id="dock" data-open="true">
+  <div class="row">
+    <button id="btn-play">Pause</button>
+    <button id="btn-step" class="icon">Step</button>
+    <button id="btn-reset">Reset</button>
+    <button id="btn-fold" class="icon" aria-label="Hide controls">▾</button>
+  </div>
+  <div class="dock-body">
+    <div class="row wrap">
+      <label class="slider"><span>Speed</span>
+        <input id="s-speed" type="range" min="0" max="9" step="1" value="9"><b id="v-speed">max</b></label>
+      <label class="slider"><span>Leaf recharge</span>
+        <input id="s-open" type="range" min="1" max="60" step="1" value="4"><b id="v-open">4</b></label>
+    </div>
+    <div class="row wrap">
+      <label class="slider"><span>Seed fall bias</span>
+        <input id="s-drift" type="range" min="0" max="100" step="5" value="35"><b id="v-drift">.35</b></label>
+      <label class="slider"><span>Mutation</span>
+        <input id="s-mut" type="range" min="0" max="100" step="5" value="35"><b id="v-mut">.35</b></label>
+    </div>
+    <div class="row wrap">
+      <label class="slider"><span>Upkeep (% of 1× income)</span>
+        <input id="s-upk" type="range" min="0" max="40" step="1" value="10"><b id="v-upk">10%</b></label>
+    </div>
+    <div class="row wrap">
+      <label class="slider"><span>Leaf rate ×</span>
+        <input id="s-leaf" type="range" min="1" max="10" step="0.5" value="3"><b id="v-leaf">3</b></label>
+      <label class="slider"><span>Stem rate ×</span>
+        <input id="s-stem" type="range" min="0" max="1" step="0.25" value="0"><b id="v-stem">0</b></label>
+      <label class="slider"><span>Leaf cost ×</span>
+        <input id="s-lcost" type="range" min="0.5" max="4" step="0.5" value="2"><b id="v-lcost">2</b></label>
+      <label class="slider"><span>Lifespan</span>
+        <input id="s-age" type="range" min="0" max="9" step="1" value="6"><b id="v-age">1,000</b></label>
+      <label class="slider"><span>Germination gap</span>
+        <input id="s-germ" type="range" min="0" max="6" step="1" value="1"><b id="v-germ">1</b></label>
+    </div>
+    <div class="row wrap">
+      <label class="slider"><span>Starting seed store ×</span>
+        <input id="s-res" type="range" min="1" max="4" step="0.25" value="2"><b id="v-res">2</b></label>
+      <label class="slider"><span>Store mutation step</span>
+        <input id="s-sstep" type="range" min="0" max="0.3" step="0.02" value="0.1"><b id="v-sstep">10%</b></label>
+      <button id="btn-evst" aria-pressed="false">Evolve seed store</button>
+      <label class="slider"><span>Fixed seed energy (0 = off)</span>
+        <input id="s-seed" type="range" min="0" max="60" step="1" value="0"><b id="v-seed">off</b></label>
+      <label class="slider"><span>Stretch share</span>
+        <input id="s-stretch" type="range" min="0" max="1" step="0.05" value="0.3"><b id="v-stretch">0.3</b></label>
+      <button id="btn-sky" aria-pressed="false">Sky light</button>
+      <button id="btn-crowd" aria-pressed="false">Crowding rule</button>
+    </div>
+    <div class="row wrap">
+      <label class="slider"><span>Cut top</span>
+        <input id="s-slice" type="range" min="4" max="48" step="1" value="48"><b id="v-slice">48</b></label>
+      <button id="btn-tint" aria-pressed="true">Lineage tint</button>
+      <button id="btn-seeds" aria-pressed="true">Seeds</button>
+    </div>
+    <p class="hint">Drag to orbit · pinch or scroll to zoom · two fingers to pan</p>
+  </div>
+</div>
+
+<script>
+(() => {
+'use strict';
+
+/* ==== SIM CORE START ==== */
+
+const C = {
+  GX: 96, GY: 48, GZ: 96,
+  RNG_SEED: 14,
+  LIGHT_PROB: 0.6,
+  LIGHT_COOLDOWN: 4,
+  UPKEEP_SHARE: 0.1,
+  LEAF_RATE: 3,
+  STEM_RATE: 0,
+  LEAF_COST: 2,
+  LEAF_FLIP_PROB: 1/3,
+  SEED_RESERVE: 2,
+  EVOLVE_STORE: false,
+  STORE_MUT_RATE: 0.35,
+  STORE_STEP: 0.1,
+  STORE_MIN: 0.25,
+  STORE_MAX: 10,
+  SEED_FIXED: 0,
+  SKY_RAYS: false,
+  STRETCH_PROB: 0.3,
+  LIGHT_PAUSE: 1,
+  MUTATION_RATE: 0.35,
+  UPKEEP: 0.002,
+  MAX_PLANT_AGE: 1000,
+  SEED_FALL_BIAS: 0.35,
+  SEED_MAX_AGE: 400,
+  GERMINATION_RADIUS: 1,
+  SELF_AVOID: false
+};
+
+/* Energy units. A lit cell at rate 1 earns 1 energy per
+   (cooldown + 1/LIGHT_PROB - 1) ticks on average; call that "one unit of
+   income". A lit leaf earns LEAF_RATE units, a lit stem STEM_RATE units.
+   Upkeep per stem or seed cell is UPKEEP_SHARE of one unit; a leaf costs
+   LEAF_COST times that, and LEAF_COST times as much to build.
+   Call after changing LIGHT_COOLDOWN or UPKEEP_SHARE. */
+function updateUpkeep(){
+  C.UPKEEP = C.UPKEEP_SHARE / (C.LIGHT_COOLDOWN + 1 / C.LIGHT_PROB - 1);
+}
+updateUpkeep();
+
+const GX = C.GX, GY = C.GY, GZ = C.GZ;
+const LAYER = GX * GZ;
+const CAPACITY = LAYER * GY;
+const SLOTS = 5;
+
+const grid = new Array(CAPACITY).fill(null);
+const at = (x, y, z) => x + z * GX + y * LAYER;
+const wrapX = x => (x + GX) % GX;
+const wrapZ = z => (z + GZ) % GZ;
+
+/* Light falls straight down and is blocked completely by any plant cell
+   above, whoever owns it. A cell is lit exactly when it is the topmost
+   plant cell in its column. Airborne seeds cast no shadow. */
+const topY = new Int16Array(LAYER).fill(-1);
+const columnOf = (x, z) => x + z * GX;
+
+/* Optional sky light (SKY_RAYS). Besides straight down, light also arrives
+   along four 45-degree diagonals. Each ray is still blocked completely by
+   any plant cell in its path. Cells sharing (x - vx*y, z - vz*y) lie on one
+   diagonal ray line; a cell sees that part of the sky exactly when it is
+   the highest plant cell on its line, so each direction keeps its own
+   "top" map, just like topY does for straight down. The maps are always
+   maintained so the option can be switched on mid-run. */
+const RAYS = [[1,0],[-1,0],[0,1],[0,-1]];
+const rayTop = RAYS.map(() => new Int16Array(LAYER).fill(-1));
+function lineOf(r, x, y, z){
+  const vx = RAYS[r][0], vz = RAYS[r][1];
+  let lx = (x - vx * y) % GX; if (lx < 0) lx += GX;
+  let lz = (z - vz * y) % GZ; if (lz < 0) lz += GZ;
+  return lx + lz * GX;
+}
+
+function raiseColumn(x, y, z){
+  const col = columnOf(x, z);
+  if (y > topY[col]) topY[col] = y;
+  for (let r = 0; r < RAYS.length; r++){
+    const li = lineOf(r, x, y, z);
+    if (y > rayTop[r][li]) rayTop[r][li] = y;
+  }
+}
+
+function refreshLine(r, li){
+  const vx = RAYS[r][0], vz = RAYS[r][1];
+  const x0 = li % GX, z0 = (li / GX) | 0;
+  for (let y = rayTop[r][li]; y >= 0; y--){
+    let x = (x0 + vx * y) % GX; if (x < 0) x += GX;
+    let z = (z0 + vz * y) % GZ; if (z < 0) z += GZ;
+    const o = grid[at(x, y, z)];
+    if (o && !o.isAirSeed){
+      rayTop[r][li] = y;
+      if (!o.isSeed && !o.plant.dead && o.sched < 0) schedule(o, tick + 1);
+      return;
+    }
+  }
+  rayTop[r][li] = -1;
+}
+
+/* Called when cells are removed: re-derive the column top and wake the
+   newly exposed cell. That is the only way a shaded cell becomes lit,
+   so shaded cells sleep until then. */
+function refreshColumn(col){
+  const x = col % GX, z = (col / GX) | 0;
+  for (let y = topY[col]; y >= 0; y--){
+    const o = grid[at(x, y, z)];
+    if (o && !o.isAirSeed){
+      topY[col] = y;
+      if (!o.isSeed && !o.plant.dead && o.sched < 0) schedule(o, tick + 1);
+      return;
+    }
+  }
+  topY[col] = -1;
+}
+
+const RING = 64, RING_MASK = RING - 1;
+const buckets = [];
+for (let i = 0; i < RING; i++) buckets.push([]);
+function schedule(cell, when){ cell.sched = when; buckets[when & RING_MASK].push(cell); }
+
+let plants = [], travelingSeeds = [], lightPulses = [];
+let rngState = C.RNG_SEED >>> 0;
+let tick = 0, nextPlantId = 1;
+
+const stats = {
+  births: 0, deathsEnergy: 0, deathsAge: 0,
+  seedsReleased: 0, seedsLanded: 0, seedsLost: 0,
+  mutations: 0, mutationAdds: 0, mutationDeletes: 0, mutationNone: 0,
+  budsGrown: 0, budsBlockedSelf: 0, budsBlockedOther: 0, budsBlockedSeed: 0, budsBlockedEdge: 0,
+  budsBlockedCrowd: 0, seedsCrowded: 0, mutantBirths: 0, mutationFlips: 0, mutationStretches: 0, mutationShrinks: 0, storeMutations: 0
+};
+function resetStats(){ for (const k in stats) stats[k] = 0; }
+
+function rand(){
+  let x = rngState | 0;
+  x ^= x << 13; x ^= x >>> 17; x ^= x << 5;
+  rngState = x >>> 0;
+  return rngState / 4294967296;
+}
+const randInt = n => (rand() * n) | 0;
+
+/* ---- orientation frames ----
+   5 slots relative to the cell's own heading:
+   0 left, 1 forward, 2 right, 3 up, 4 down.                      */
+const SDX = new Int8Array(24 * SLOTS);
+const SDY = new Int8Array(24 * SLOTS);
+const SDZ = new Int8Array(24 * SLOTS);
+const SNEXT = new Uint8Array(24 * SLOTS);
+let SEED_FRAME = 0;
+
+(function buildFrames(){
+  const AX = [[1,0,0],[-1,0,0],[0,1,0],[0,-1,0],[0,0,1],[0,0,-1]];
+  const dot = (a,b) => a[0]*b[0] + a[1]*b[1] + a[2]*b[2];
+  const cross = (a,b) => [a[1]*b[2]-a[2]*b[1], a[2]*b[0]-a[0]*b[2], a[0]*b[1]-a[1]*b[0]];
+  const neg = a => [-a[0],-a[1],-a[2]];
+  const key = (h,u) => h.join() + "|" + u.join();
+  const frames = [];
+  for (const h of AX) for (const u of AX) if (dot(h,u) === 0) frames.push({h,u});
+  const lookup = new Map();
+  frames.forEach((f,i) => lookup.set(key(f.h,f.u), i));
+  frames.forEach((f,i) => {
+    const r = cross(f.h, f.u);
+    const spec = [
+      { d: neg(r),   h: neg(r),   u: f.u },
+      { d: f.h,      h: f.h,      u: f.u },
+      { d: r,        h: r,        u: f.u },
+      { d: f.u,      h: f.u,      u: neg(f.h) },
+      { d: neg(f.u), h: neg(f.u), u: f.h }
+    ];
+    for (let s = 0; s < SLOTS; s++){
+      const k = i * SLOTS + s;
+      SDX[k] = spec[s].d[0]; SDY[k] = spec[s].d[1]; SDZ[k] = spec[s].d[2];
+      SNEXT[k] = lookup.get(key(spec[s].h, spec[s].u));
+    }
+  });
+  SEED_FRAME = lookup.get(key([0,1,0],[0,0,1]));
+})();
+
+/* ---- crowding rule (3D version of triplebittrees-7) ----
+   A new cell at (x,y,z) with frame f needs its surroundings clear: the
+   3x3 cross-section at its own position and the 3x3 cross-section one
+   step ahead of it, 17 voxels besides the target. The parent is directly
+   behind, so it is never inside this region. Any plant cell counts, the
+   plant's own or a neighbour's; airborne seeds do not. Out-of-bounds
+   voxels count as empty. The same rule is used when a genome is grown
+   alone for pruning, so inherited genomes stay fully buildable.          */
+function crowded(x, y, z, f, occupiedAt){
+  const kh = f * SLOTS + 1, kr = f * SLOTS + 2, ku = f * SLOTS + 3;
+  const hx = SDX[kh], hy = SDY[kh], hz = SDZ[kh];
+  const rx = SDX[kr], ry = SDY[kr], rz = SDZ[kr];
+  const ux = SDX[ku], uy = SDY[ku], uz = SDZ[ku];
+  for (let l = 0; l <= 1; l++){
+    for (let a = -1; a <= 1; a++){
+      for (let b = -1; b <= 1; b++){
+        if (l === 0 && a === 0 && b === 0) continue;
+        const yy = y + l*hy + a*ry + b*uy;
+        if (yy < 0 || yy >= GY) continue;
+        let xx = x + l*hx + a*rx + b*ux; if (xx < 0) xx += GX; else if (xx >= GX) xx -= GX;
+        let zz = z + l*hz + a*rz + b*uz; if (zz < 0) zz += GZ; else if (zz >= GZ) zz -= GZ;
+        if (occupiedAt(xx + zz * GX + yy * LAYER)) return true;
+      }
+    }
+  }
+  return false;
+}
+const worldOccupied = k => { const o = grid[k]; return o !== null && !o.isAirSeed; };
+
+/* ---- genome ----
+   A gene is either a stem, whose 5 bits say which child slots grow, or
+   LEAF: a tip cell with no children. The seed (the first gene) is always
+   a stem.                                                              */
+const LEAF = 32;
+class GeneNode {
+  constructor(bits){
+    this.isLeaf = bits === LEAF;
+    this.geneBits = bits;
+    this.parent = null;
+    this.children = [null,null,null,null,null];
+    this.slotFromParent = -1;
+    this.cell = null;
+    this.grownMask = 0;
+  }
+}
+
+function decodeGenome(genome){
+  let p = 0;
+  function build(){
+    if (p >= genome.length) return null;
+    const raw = genome[p++];
+    const isRoot = p === 1;
+    const node = new GeneNode(raw & LEAF ? (isRoot ? 0 : LEAF) : raw);
+    if (node.isLeaf) return node;
+    for (let s = 0; s < SLOTS; s++){
+      if ((node.geneBits >> s) & 1){
+        const child = build();
+        if (child){ node.children[s] = child; child.parent = node; child.slotFromParent = s; }
+      }
+    }
+    return node;
+  }
+  return build();
+}
+
+/* Grow a genome alone on an empty floor, using the same slot order and
+   the same growth order as the real engine (buds are served first in,
+   first out), and record which slots could actually be built. A slot
+   fails if it runs into the plant's own body, goes below the floor or
+   above the ceiling, or has no gene behind it. Returns the cell count
+   and leaves each built node with its position, frame and _kept bits. */
+function develop(root){
+  const occ = new Set();
+  const x0 = GX >> 1, z0 = GZ >> 1;
+  root._x = x0; root._y = 0; root._z = z0; root._f = SEED_FRAME; root._kept = 0;
+  occ.add(at(x0, 0, z0));
+  const q = [];
+  let h = 0;
+  const pushSlots = n => { for (let s = 0; s < SLOTS; s++) if ((n.geneBits >> s) & 1) q.push(n, s); };
+  pushSlots(root);
+  let count = 1;
+  while (h < q.length){
+    const n = q[h], s = q[h+1]; h += 2;
+    const child = n.children[s];
+    if (!child) continue;
+    const k = n._f * SLOTS + s;
+    const ny = n._y + SDY[k];
+    if (ny < 0 || ny >= GY) continue;
+    const nx = wrapX(n._x + SDX[k]), nz = wrapZ(n._z + SDZ[k]);
+    const key = at(nx, ny, nz);
+    if (occ.has(key)) continue;
+    if (C.SELF_AVOID && crowded(nx, ny, nz, SNEXT[k], kk => occ.has(kk))) continue;
+    occ.add(key);
+    child._x = nx; child._y = ny; child._z = nz; child._f = SNEXT[k]; child._kept = 0;
+    n._kept |= 1 << s;
+    count++;
+    pushSlots(child);
+  }
+  return { count, occ };
+}
+
+function encodeKept(root){
+  const out = [];
+  (function walk(n){
+    out.push(n.isLeaf ? LEAF : n._kept);
+    for (let s = 0; s < SLOTS; s++) if ((n._kept >> s) & 1) walk(n.children[s]);
+  })(root);
+  return new Uint8Array(out);
+}
+
+/* The inherited genome is exactly the body the genome can build on its
+   own. Branches blocked by a neighbouring plant are NOT pruned — this
+   only removes what could never be built anywhere. */
+function normalizeGenome(genome){
+  const root = decodeGenome(genome);
+  if (!root) return new Uint8Array([0]);
+  develop(root);
+  return encodeKept(root);
+}
+
+/* What it costs to build this body, counting the seed cell as 1. A seed
+   carries exactly this much, and a plant keeps this much in reserve before
+   it starts making seeds. */
+function buildCost(genome){
+  let b = 1;
+  for (let i = 1; i < genome.length; i++) b += genome[i] === LEAF ? C.LEAF_COST : 1;
+  return b;
+}
+
+function sameGenome(a, b){
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
+  return true;
+}
+
+/* One-cell mutation: add one tip (stem or leaf), remove one tip, or flip
+   one tip between stem and leaf. Originally: a coin picks "add one tip" or "remove one tip".
+   Only legal edits are considered: an addition must be buildable without
+   displacing any existing cell, a removal must take a tip (never the
+   seed). Candidates are tried in random order and the first legal one is
+   taken, which is a uniform pick among the legal edits. If the chosen
+   kind has no legal edit, the other kind is tried; if neither has one,
+   the child is an unchanged copy. Input must already be normalized. */
+function mutateGenome(genome){
+  const root = decodeGenome(genome);
+  const dev = develop(root);
+  const len = dev.count;
+  const nodes = [];
+  (function walk(n){
+    nodes.push(n);
+    for (let s = 0; s < SLOTS; s++) if ((n._kept >> s) & 1) walk(n.children[s]);
+  })(root);
+
+  function tryAdd(){
+    const cand = [];
+    for (const n of nodes) if (!n.isLeaf) for (let s = 0; s < SLOTS; s++) if (!((n._kept >> s) & 1)) cand.push(n, s);
+    const asLeaf = rand() < 0.5;
+    let m = cand.length >> 1;
+    while (m > 0){
+      const r = randInt(m);
+      const n = cand[2*r], s = cand[2*r+1];
+      cand[2*r] = cand[2*(m-1)]; cand[2*r+1] = cand[2*(m-1)+1];
+      m--;
+      const k = n._f * SLOTS + s;
+      const ny = n._y + SDY[k];
+      if (ny < 0 || ny >= GY) continue;
+      if (dev.occ.has(at(wrapX(n._x + SDX[k]), ny, wrapZ(n._z + SDZ[k])))) continue;
+      const saved = n.children[s];
+      const tip = new GeneNode(asLeaf ? LEAF : 0); tip._kept = 0;
+      n.children[s] = tip; n._kept |= 1 << s;
+      const trial = encodeKept(root);
+      n.children[s] = saved; n._kept &= ~(1 << s);
+      const norm = normalizeGenome(trial);
+      if (norm.length === len + 1) return norm;
+    }
+    return null;
+  }
+
+  function tryDelete(){
+    const tips = [];
+    for (const n of nodes) if (n !== root && n._kept === 0) tips.push(n);
+    if (!tips.length) return null;
+    const t = tips[randInt(tips.length)];
+    const par = t.parent;
+    par._kept &= ~(1 << t.slotFromParent);
+    const trial = encodeKept(root);
+    par._kept |= 1 << t.slotFromParent;
+    const norm = normalizeGenome(trial);
+    return norm.length === len - 1 ? norm : null;
+  }
+
+  /* Turn a tip from bare stem into leaf, or back. Size is unchanged. */
+  function tryFlip(){
+    const tips = [];
+    for (const n of nodes) if (n !== root && n._kept === 0) tips.push(n);
+    if (!tips.length) return null;
+    const t = tips[randInt(tips.length)];
+    t.isLeaf = !t.isLeaf;
+    const trial = encodeKept(root);
+    t.isLeaf = !t.isLeaf;
+    const norm = normalizeGenome(trial);
+    return norm.length === len && !sameGenome(norm, genome) ? norm : null;
+  }
+
+  /* Stretch: insert one straight stem cell under an existing branch, so the
+     whole branch, leaves and all, moves one voxel further out along that
+     direction with its shape unchanged. Shrink is the reverse: remove a
+     stem cell whose only child grows straight ahead, pulling that branch
+     back one voxel. Both change the size by exactly one cell. */
+  function tryStretch(){
+    const cand = [];
+    for (const n of nodes) if (!n.isLeaf) for (let s = 0; s < SLOTS; s++) if ((n._kept >> s) & 1) cand.push(n, s);
+    let m = cand.length >> 1;
+    while (m > 0){
+      const r = randInt(m);
+      const n = cand[2*r], s = cand[2*r+1];
+      cand[2*r] = cand[2*(m-1)]; cand[2*r+1] = cand[2*(m-1)+1];
+      m--;
+      const c = n.children[s];
+      const seg = new GeneNode(FORWARD); seg._kept = FORWARD; seg.children[1] = c;
+      n.children[s] = seg;
+      const trial = encodeKept(root);
+      n.children[s] = c;
+      const norm = normalizeGenome(trial);
+      if (norm.length === len + 1) return norm;
+    }
+    return null;
+  }
+  function tryShrink(){
+    const cand = [];
+    for (const n of nodes) if (n !== root && !n.isLeaf && n._kept === FORWARD) cand.push(n);
+    let m = cand.length;
+    while (m > 0){
+      const r = randInt(m);
+      const seg = cand[r]; cand[r] = cand[m-1]; m--;
+      const par = seg.parent, sl = seg.slotFromParent;
+      par.children[sl] = seg.children[1];
+      const trial = encodeKept(root);
+      par.children[sl] = seg;
+      const norm = normalizeGenome(trial);
+      if (norm.length === len - 1) return norm;
+    }
+    return null;
+  }
+
+  /* A third of mutations flip a tip; the rest are an add/remove coin,
+     which keeps additions and removals balanced. If the chosen kind has
+     no legal edit, the others are tried in turn. */
+  let order;
+  if (rand() < C.STRETCH_PROB) order = rand() < 0.5 ? ['stretch','add','shrink','del','flip'] : ['shrink','del','stretch','add','flip'];
+  else if (rand() < C.LEAF_FLIP_PROB) order = rand() < 0.5 ? ['flip','add','del'] : ['flip','del','add'];
+  else order = rand() < 0.5 ? ['add','del','flip'] : ['del','add','flip'];
+  for (const kind of order){
+    const out = kind === 'add' ? tryAdd() : kind === 'del' ? tryDelete() : kind === 'flip' ? tryFlip()
+              : kind === 'stretch' ? tryStretch() : tryShrink();
+    if (out){
+      if (kind === 'add') stats.mutationAdds++;
+      else if (kind === 'del') stats.mutationDeletes++;
+      else if (kind === 'flip') stats.mutationFlips++;
+      else if (kind === 'stretch') stats.mutationStretches++;
+      else stats.mutationShrinks++;
+      stats.mutations++;
+      return out;
+    }
+  }
+  stats.mutationNone++;
+  return new Uint8Array(genome);
+}
+
+function genomeColor(genome){
+  let h = 2166136261;
+  for (let i = 0; i < genome.length; i++){ h ^= genome[i] + i*17; h = Math.imul(h, 16777619); }
+  const hue = (h >>> 0) % 360, c = 0.65, x = c * (1 - Math.abs((hue/60) % 2 - 1)), m = 0.3;
+  let r = 0, g = 0, b = 0;
+  if (hue < 60){ r = c; g = x; }
+  else if (hue < 120){ r = x; g = c; }
+  else if (hue < 180){ g = c; b = x; }
+  else if (hue < 240){ g = x; b = c; }
+  else if (hue < 300){ r = x; b = c; }
+  else { r = c; b = x; }
+  return [r+m, g+m, b+m];
+}
+
+const FORWARD = 0b00010;
+const LEFT = 0b00001;
+const DEFAULT_GENOME = new Uint8Array([FORWARD, FORWARD, LEFT, LEAF]);
+
+/* ---- organisms ---- */
+class PlantCell {
+  constructor(x, y, z, plant, node, parent, frame, isSeed){
+    this.x = x; this.y = y; this.z = z;
+    this.plant = plant; this.node = node; this.parent = parent;
+    this.frame = frame; this.isSeed = !!isSeed;
+    this.isLeaf = !this.isSeed && node.isLeaf;
+    this.sched = -1; this.children = [];
+    grid[at(x,y,z)] = this;
+    node.cell = this;
+    plant.registerCell(this);
+    if (parent) parent.children.push(this);
+    raiseColumn(x, y, z);
+    if (!this.isSeed) schedule(this, tick + 1);
+  }
+}
+
+class Plant {
+  constructor(genome, energy, gen, nmut, store){
+    this.id = nextPlantId++;
+    this.genome = genome;
+    this.color = genomeColor(genome);
+    this.rootNode = decodeGenome(genome);
+    this.seed = null;
+    this.energy = energy;
+    this.freeSproutUsed = false;
+    this.cells = [];
+    this.queue = [];
+    this.qHead = 0;
+    this.reproPhase = 0;
+    this.childGenome = null;
+    this.childGeneCount = 0;
+    this.childMutated = false;
+    this.age = 0;
+    this.gen = gen || 0;
+    this.nmut = nmut || 0;
+    this.seedStore = store || C.SEED_RESERVE;
+    this.dead = false;
+    this.leafCount = 0;
+    this.buildCost = buildCost(genome);
+  }
+
+  registerCell(cell){
+    this.cells.push(cell);
+    if (cell.isLeaf) this.leafCount++;
+    const bits = cell.node.geneBits;
+    for (let s = 0; s < SLOTS; s++) if ((bits >> s) & 1) this.queue.push(cell.node, s);
+  }
+
+  /* Every bud that was waiting at the start of the tick gets a turn, in
+     first-in first-out order; buds created this tick wait for the next.
+     If energy runs out, the remaining buds keep their place in line, so
+     the order of attempts never depends on energy. That keeps real growth
+     identical to develop(), which prunes the genome. The only things that
+     block a bud are its exact voxel being occupied, the floor and
+     ceiling, and the crowding rule. A blocked bud is given up for this
+     plant's lifetime but stays in the genome for its offspring. */
+  tryGrow(){
+    const q = this.queue;
+    const end = q.length;
+    while (this.qHead < end){
+      const node = q[this.qHead], slot = q[this.qHead + 1];
+      const next = node.children[slot];
+      const cost = next && next.isLeaf ? C.LEAF_COST : 1;
+      if (this.freeSproutUsed && this.energy < cost) break;
+      this.qHead += 2;
+      const cell = node.cell;
+      if (!cell || !node.children[slot]){ node.grownMask |= 1 << slot; continue; }
+      const k = cell.frame * SLOTS + slot;
+      const ny = cell.y + SDY[k];
+      if (ny < 0 || ny >= GY){ node.grownMask |= 1 << slot; stats.budsBlockedEdge++; continue; }
+      const nx = wrapX(cell.x + SDX[k]);
+      const nz = wrapZ(cell.z + SDZ[k]);
+      const occ = grid[at(nx,ny,nz)];
+      if (occ){
+        node.grownMask |= 1 << slot;
+        if (occ.isAirSeed) stats.budsBlockedSeed++;
+        else if (occ.plant === this) stats.budsBlockedSelf++;
+        else stats.budsBlockedOther++;
+        continue;
+      }
+      if (C.SELF_AVOID && crowded(nx, ny, nz, SNEXT[k], worldOccupied)){
+        node.grownMask |= 1 << slot; stats.budsBlockedCrowd++; continue;
+      }
+      stats.budsGrown++;
+      new PlantCell(nx, ny, nz, this, node.children[slot], cell, SNEXT[k], false);
+      if (this.freeSproutUsed) this.energy -= cost;
+      else this.freeSproutUsed = true;
+    }
+    if (this.qHead >= q.length){ q.length = 0; this.qHead = 0; }
+  }
+
+  die(){
+    this.dead = true;
+    const touched = new Set();
+    const rayLines = RAYS.map(() => new Set());
+    for (const cell of this.cells){
+      const a = at(cell.x, cell.y, cell.z);
+      if (grid[a] === cell) grid[a] = null;
+      cell.node.cell = null;
+      cell.sched = -1;
+      touched.add(columnOf(cell.x, cell.z));
+      for (let r = 0; r < RAYS.length; r++) rayLines[r].add(lineOf(r, cell.x, cell.y, cell.z));
+    }
+    this.cells.length = 0;
+    this.leafCount = 0;
+    this.queue.length = 0; this.qHead = 0;
+    for (const col of touched) refreshColumn(col);
+    for (let r = 0; r < RAYS.length; r++) for (const li of rayLines[r]) refreshLine(r, li);
+    for (const p of lightPulses) if (p.plant === this) p.dead = true;
+  }
+}
+
+function createPlant(genome, x, z, energy, gen, nmut, store){
+  const plant = new Plant(genome, energy, gen, nmut, store);
+  plant.seed = new PlantCell(x, 0, z, plant, plant.rootNode, null, SEED_FRAME, true);
+  plants.push(plant);
+  stats.births++;
+  return plant;
+}
+
+function createTravelingSeed(plant, genome, energy){
+  return {
+    isAirSeed: true, state: 0, parentPlant: plant, genome, energy,
+    gen: plant.gen + 1, nmut: plant.nmut, store: plant.seedStore,
+    currentNode: plant.rootNode,
+    x: 0, y: 0, z: 0, age: 0, occupying: false, dead: false
+  };
+}
+
+function isLit(cell){
+  return cell.y === topY[columnOf(cell.x, cell.z)];
+}
+
+/* Share of the sky a cell can see: 1 or 0 with straight-down light only;
+   with SKY_RAYS, the fraction of the 5 directions that reach it. */
+function skyShare(cell){
+  let n = cell.y === topY[columnOf(cell.x, cell.z)] ? 1 : 0;
+  if (!C.SKY_RAYS) return n;
+  for (let r = 0; r < RAYS.length; r++) if (cell.y === rayTop[r][lineOf(r, cell.x, cell.y, cell.z)]) n++;
+  return n / (RAYS.length + 1);
+}
+
+function advanceLight(){
+  for (let i = lightPulses.length - 1; i >= 0; i--){
+    const p = lightPulses[i];
+    if (p.dead || p.plant.dead){
+      lightPulses[i] = lightPulses[lightPulses.length-1];
+      lightPulses.pop();
+      continue;
+    }
+    if (p.pause > 0){ p.pause--; continue; }
+    if (p.cell.parent){ p.cell = p.cell.parent; }
+    else {
+      p.plant.energy += p.energy;
+      lightPulses[i] = lightPulses[lightPulses.length-1];
+      lightPulses.pop();
+    }
+  }
+}
+
+/* ---- seeds: they occupy a voxel, so canopies catch them ---- */
+const CARDINAL = [[1,0,0],[-1,0,0],[0,1,0],[0,-1,0],[0,0,1],[0,0,-1]];
+
+function clearOccupancy(seed){
+  if (seed.occupying && grid[at(seed.x, seed.y, seed.z)] === seed) grid[at(seed.x, seed.y, seed.z)] = null;
+  seed.occupying = false;
+}
+
+function seedStep(seed, dx, dy, dz){
+  const ny = seed.y + dy;
+  if (ny < 0 || ny >= GY) return false;
+  let nx = seed.x + dx; if (nx < 0) nx += GX; else if (nx >= GX) nx -= GX;
+  let nz = seed.z + dz; if (nz < 0) nz += GZ; else if (nz >= GZ) nz -= GZ;
+  const target = nx + nz * GX + ny * LAYER;
+  if (grid[target] !== null) return false;
+  if (seed.occupying){
+    const here = seed.x + seed.z * GX + seed.y * LAYER;
+    if (grid[here] === seed) grid[here] = null;
+  }
+  seed.x = nx; seed.y = ny; seed.z = nz;
+  grid[target] = seed;
+  seed.occupying = true;
+  return true;
+}
+
+/* A seed only germinates if no plant cell lies within GERMINATION_RADIUS
+   of its floor voxel, horizontally and up to that height. Otherwise it
+   dies where it landed. */
+function germinationClear(x, z){
+  const r = C.GERMINATION_RADIUS;
+  const ymax = Math.min(GY - 1, r);
+  for (let dz = -r; dz <= r; dz++){
+    let zz = z + dz; if (zz < 0) zz += GZ; else if (zz >= GZ) zz -= GZ;
+    for (let dx = -r; dx <= r; dx++){
+      let xx = x + dx; if (xx < 0) xx += GX; else if (xx >= GX) xx -= GX;
+      for (let y = 0; y <= ymax; y++){
+        const o = grid[xx + zz * GX + y * LAYER];
+        if (o !== null && !o.isAirSeed) return false;
+      }
+    }
+  }
+  return true;
+}
+
+function updateTravelingSeed(seed){
+  if (seed.state === 0){
+    if (!seed.currentNode.cell){ seed.dead = true; stats.seedsLost++; return; }
+    const kids = seed.currentNode.children;
+    let count = 0;
+    for (let s = 0; s < SLOTS; s++) if (kids[s] && kids[s].cell) count++;
+    if (count){
+      const pick = randInt(count);
+      let seen = 0;
+      for (let s = 0; s < SLOTS; s++){
+        if (kids[s] && kids[s].cell){
+          if (seen === pick){ seed.currentNode = kids[s]; break; }
+          seen++;
+        }
+      }
+      return;
+    }
+    const leaf = seed.currentNode.cell;
+    seed.state = 1;
+    seed.x = leaf.x; seed.y = leaf.y; seed.z = leaf.z;
+    return;
+  }
+
+  seed.age++;
+  /* Germinates once it has come to rest in a floor voxel of its own.
+     The voxel is its own, so it is always free once the seed leaves it. */
+  if (seed.occupying && seed.y === 0){
+    clearOccupancy(seed);
+    if (germinationClear(seed.x, seed.z)){
+      /* Mutation is decided here, only for seeds that actually germinate:
+         statistically the same as deciding at release, without spending
+         work on the 99% of seeds that never land. */
+      let g = seed.genome, mutated = false;
+      if (rand() < C.MUTATION_RATE){
+        const m = mutateGenome(g);
+        if (!sameGenome(m, g)){ g = m; mutated = true; }
+      }
+      /* The seed-store multiplier is inherited and, with EVOLVE_STORE on,
+         drifts by a proportional step at germination: up and down by the
+         same factor are equally likely. */
+      let store = seed.store;
+      if (C.EVOLVE_STORE && rand() < C.STORE_MUT_RATE){
+        store *= Math.exp((rand() < 0.5 ? -1 : 1) * C.STORE_STEP);
+        store = Math.min(C.STORE_MAX, Math.max(C.STORE_MIN, store));
+        stats.storeMutations++;
+      }
+      createPlant(g, seed.x, seed.z, seed.energy, seed.gen, seed.nmut + (mutated ? 1 : 0), store);
+      if (mutated) stats.mutantBirths++;
+      stats.seedsLanded++;
+    } else stats.seedsCrowded++;
+    seed.dead = true;
+    return;
+  }
+
+  let moved = false;
+  if (rand() < C.SEED_FALL_BIAS) moved = seedStep(seed, 0, -1, 0);
+  if (!moved){
+    const start = randInt(6);
+    for (let i = 0; i < 6; i++){
+      const d = CARDINAL[(start + i) % 6];
+      if (seedStep(seed, d[0], d[1], d[2])) break;
+    }
+  }
+  if (seed.age > C.SEED_MAX_AGE){
+    clearOccupancy(seed);
+    seed.dead = true;
+    stats.seedsLost++;
+  }
+}
+
+/* ---- tick ---- */
+function advanceTick(){
+  tick++;
+
+  /* upkeep, death, growth */
+  for (let i = plants.length - 1; i >= 0; i--){
+    const p = plants[i];
+    p.age++;
+    p.energy -= C.UPKEEP * (p.cells.length + (C.LEAF_COST - 1) * p.leafCount);
+    let dies = false;
+    if (p.energy < 0){ dies = true; stats.deathsEnergy++; }
+    else if (p.age >= C.MAX_PLANT_AGE){ dies = true; stats.deathsAge++; }
+    if (dies){
+      p.die();
+      plants[i] = plants[plants.length-1];
+      plants.pop();
+      continue;
+    }
+    p.tryGrow();
+  }
+
+  /* light: only cells whose turn has come, and only if lit */
+  const due = buckets[tick & RING_MASK];
+  for (let i = 0; i < due.length; i++){
+    const cell = due[i];
+    if (cell.sched !== tick) continue;
+    const p = cell.plant;
+    if (p.dead) continue;
+    const share = skyShare(cell);
+    if (share <= 0){ cell.sched = -1; continue; }
+    const rate = (cell.isLeaf ? C.LEAF_RATE : C.STEM_RATE) * share;
+    if (rate <= 0){ cell.sched = -1; continue; }
+    if (rand() < C.LIGHT_PROB){
+      lightPulses.push({ plant: p, cell, energy: rate, pause: C.LIGHT_PAUSE, dead: false });
+      schedule(cell, tick + C.LIGHT_COOLDOWN);
+    } else {
+      schedule(cell, tick + 1);
+    }
+  }
+  due.length = 0;
+
+  advanceLight();
+
+  /* reproduction: the energy spent on a seed travels with it */
+  for (const p of plants){
+    /* A plant keeps its own build cost in reserve, then makes seeds that
+       each carry SEED_RESERVE times the cost of building the body: enough
+       to unfold, plus a food store to live on until the first light
+       arrives. The parent pays exactly what the seed carries. */
+    /* SEED_FIXED > 0 switches to fixed-size seeds: every seed carries the
+       same energy whatever the parent's size, the plant keeps that same
+       amount in reserve, and a seedling builds the rest of its body from
+       its own leaves. Growth runs before reproduction each tick, so a
+       plant finishes its body before it spends on seeds. */
+    const G = C.SEED_FIXED > 0 ? C.SEED_FIXED : p.buildCost;
+    if (p.reproPhase === 0 && p.energy >= G){
+      p.childGenome = p.genome;
+      p.childGeneCount = C.SEED_FIXED > 0 ? C.SEED_FIXED : G * (C.EVOLVE_STORE ? p.seedStore : C.SEED_RESERVE);
+      p.reproPhase = 1;
+    } else if (p.reproPhase === 1 && p.energy >= G + p.childGeneCount){
+      travelingSeeds.push(createTravelingSeed(p, p.childGenome, p.childGeneCount));
+      stats.seedsReleased++;
+      p.energy -= p.childGeneCount;
+      p.reproPhase = 0;
+      p.childGenome = null;
+      p.childGeneCount = 0;
+      p.childMutated = false;
+    }
+  }
+
+  for (let i = travelingSeeds.length - 1; i >= 0; i--){
+    const seed = travelingSeeds[i];
+    updateTravelingSeed(seed);
+    if (seed.dead){
+      clearOccupancy(seed);
+      travelingSeeds[i] = travelingSeeds[travelingSeeds.length-1];
+      travelingSeeds.pop();
+    }
+  }
+
+  if (plants.length === 0 && travelingSeeds.length === 0){
+    rngState = (rngState + 1337) >>> 0;
+    seedFounder();
+  }
+}
+
+function seedFounder(){
+  const g = normalizeGenome(DEFAULT_GENOME);
+  createPlant(g, GX >> 1, GZ >> 1, C.SEED_FIXED > 0 ? C.SEED_FIXED : buildCost(g) * C.SEED_RESERVE, 0, 0, C.SEED_RESERVE);
+}
+
+function wakeStems(){
+  for (const p of plants) for (const c of p.cells)
+    if (!c.isSeed && !c.isLeaf && c.sched < 0) schedule(c, tick + 1);
+}
+
+function resetSimulation(){
+  grid.fill(null);
+  topY.fill(-1);
+  for (const m of rayTop) m.fill(-1);
+  for (let i = 0; i < RING; i++) buckets[i].length = 0;
+  plants.length = 0; travelingSeeds.length = 0; lightPulses.length = 0;
+  rngState = C.RNG_SEED >>> 0;
+  nextPlantId = 1; tick = 0;
+  resetStats();
+  seedFounder();
+}
+
+/* ==== SIM CORE END ==== */
+
+resetSimulation();
+
+/* ============================================================
+   RENDER — WebGL2, no external libraries
+   ============================================================ */
+const canvas = document.getElementById('world');
+const gl = canvas.getContext('webgl2', { antialias: true, alpha: false, powerPreference: 'high-performance' });
+if (!gl){
+  canvas.style.display = 'none';
+  document.getElementById('fallback').style.display = 'grid';
+  return;
+}
+
+function compile(type, source){
+  const s = gl.createShader(type);
+  gl.shaderSource(s, source);
+  gl.compileShader(s);
+  if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) throw Error(gl.getShaderInfoLog(s));
+  return s;
+}
+function makeProgram(v, f){
+  const p = gl.createProgram();
+  gl.attachShader(p, compile(gl.VERTEX_SHADER, v));
+  gl.attachShader(p, compile(gl.FRAGMENT_SHADER, f));
+  gl.linkProgram(p);
+  if (!gl.getProgramParameter(p, gl.LINK_STATUS)) throw Error(gl.getProgramInfoLog(p));
+  return p;
+}
+
+const voxelProgram = makeProgram(`#version 300 es
+precision highp float;
+layout(location=0) in vec3 aPosition;
+layout(location=1) in vec3 aNormal;
+layout(location=2) in vec4 aPlace;
+layout(location=3) in vec4 aColor;
+uniform mat4 uProjection; uniform mat4 uView;
+out vec3 vNormal; out vec4 vColor; out float vDepth;
+void main(){
+  vec3 world = (aPosition - .5) * aPlace.w + aPlace.xyz + .5;
+  vec4 eye = uView * vec4(world, 1.);
+  gl_Position = uProjection * eye;
+  vNormal = aNormal; vColor = aColor; vDepth = -eye.z;
+}`,
+`#version 300 es
+precision highp float;
+in vec3 vNormal; in vec4 vColor; in float vDepth;
+out vec4 outColor;
+void main(){
+  vec3 key = normalize(vec3(-.35, .9, .45));
+  vec3 n = normalize(vNormal);
+  float lam = .42 + .58 * max(dot(n, key), 0.);
+  float sky = .12 * (n.y * .5 + .5);
+  vec3 c = vColor.rgb * mix(lam + sky, 1., vColor.a);
+  float fog = clamp((vDepth - 120.) / 260., 0., .82);
+  outColor = vec4(mix(c, vec3(.02,.04,.038), fog), 1.);
+}`);
+
+const floorProgram = makeProgram(`#version 300 es
+precision highp float;
+layout(location=0) in vec3 aPosition;
+uniform mat4 uProjection; uniform mat4 uView;
+out vec2 vWorld; out float vDepth;
+void main(){
+  vec4 eye = uView * vec4(aPosition, 1.);
+  gl_Position = uProjection * eye;
+  vWorld = aPosition.xz; vDepth = -eye.z;
+}`,
+`#version 300 es
+precision highp float;
+in vec2 vWorld; in float vDepth;
+out vec4 outColor;
+void main(){
+  vec2 g = abs(fract(vWorld / 8. - .5) - .5) / fwidth(vWorld / 8.);
+  float line = 1. - min(min(g.x, g.y), 1.);
+  vec3 c = mix(vec3(.022,.042,.038), vec3(.07,.13,.10), line * .7);
+  float fog = clamp((vDepth - 120.) / 260., 0., .82);
+  outColor = vec4(mix(c, vec3(.02,.04,.038), fog), 1.);
+}`);
+
+const cube = new Float32Array([
+  0,0,1,0,0,1, 1,0,1,0,0,1, 1,1,1,0,0,1, 0,0,1,0,0,1, 1,1,1,0,0,1, 0,1,1,0,0,1,
+  1,0,0,0,0,-1, 0,0,0,0,0,-1, 0,1,0,0,0,-1, 1,0,0,0,0,-1, 0,1,0,0,0,-1, 1,1,0,0,0,-1,
+  0,0,0,-1,0,0, 0,0,1,-1,0,0, 0,1,1,-1,0,0, 0,0,0,-1,0,0, 0,1,1,-1,0,0, 0,1,0,-1,0,0,
+  1,0,1,1,0,0, 1,0,0,1,0,0, 1,1,0,1,0,0, 1,0,1,1,0,0, 1,1,0,1,0,0, 1,1,1,1,0,0,
+  0,1,1,0,1,0, 1,1,1,0,1,0, 1,1,0,0,1,0, 0,1,1,0,1,0, 1,1,0,0,1,0, 0,1,0,0,1,0,
+  0,0,0,0,-1,0, 1,0,0,0,-1,0, 1,0,1,0,-1,0, 0,0,0,0,-1,0, 1,0,1,0,-1,0, 0,0,1,0,-1,0]);
+
+const floorVerts = new Float32Array([
+  0,-0.03,0,  GX,-0.03,0,  GX,-0.03,GZ,
+  0,-0.03,0,  GX,-0.03,GZ, 0,-0.03,GZ]);
+
+const MAX_INSTANCES = 200000;
+let instanceData = new Float32Array(MAX_INSTANCES * 8);
+let instanceCount = 0;
+
+const vao = gl.createVertexArray();
+gl.bindVertexArray(vao);
+const cubeBuffer = gl.createBuffer();
+gl.bindBuffer(gl.ARRAY_BUFFER, cubeBuffer);
+gl.bufferData(gl.ARRAY_BUFFER, cube, gl.STATIC_DRAW);
+gl.enableVertexAttribArray(0); gl.vertexAttribPointer(0, 3, gl.FLOAT, false, 24, 0);
+gl.enableVertexAttribArray(1); gl.vertexAttribPointer(1, 3, gl.FLOAT, false, 24, 12);
+const instanceBuffer = gl.createBuffer();
+gl.bindBuffer(gl.ARRAY_BUFFER, instanceBuffer);
+gl.bufferData(gl.ARRAY_BUFFER, MAX_INSTANCES * 8 * 4, gl.DYNAMIC_DRAW);
+gl.enableVertexAttribArray(2); gl.vertexAttribPointer(2, 4, gl.FLOAT, false, 32, 0);  gl.vertexAttribDivisor(2, 1);
+gl.enableVertexAttribArray(3); gl.vertexAttribPointer(3, 4, gl.FLOAT, false, 32, 16); gl.vertexAttribDivisor(3, 1);
+
+const floorVao = gl.createVertexArray();
+gl.bindVertexArray(floorVao);
+const fb = gl.createBuffer();
+gl.bindBuffer(gl.ARRAY_BUFFER, fb);
+gl.bufferData(gl.ARRAY_BUFFER, floorVerts, gl.STATIC_DRAW);
+gl.enableVertexAttribArray(0); gl.vertexAttribPointer(0, 3, gl.FLOAT, false, 12, 0);
+gl.bindVertexArray(null);
+
+const uLoc = new Map();
+function uniforms(program){
+  let u = uLoc.get(program);
+  if (!u){
+    u = { p: gl.getUniformLocation(program,'uProjection'), v: gl.getUniformLocation(program,'uView') };
+    uLoc.set(program, u);
+  }
+  gl.uniformMatrix4fv(u.p, false, projection);
+  gl.uniformMatrix4fv(u.v, false, viewMat);
+}
+
+const lerp = (a,b,t) => a + (b-a) * t;
+let sliceTop = GY, showSeeds = true, genomeTint = true;
+
+function pushInstance(x, y, z, size, r, g, b, emissive){
+  if (instanceCount >= MAX_INSTANCES) return;
+  const p = instanceCount++ * 8;
+  instanceData[p] = x; instanceData[p+1] = y; instanceData[p+2] = z; instanceData[p+3] = size;
+  instanceData[p+4] = r; instanceData[p+5] = g; instanceData[p+6] = b; instanceData[p+7] = emissive;
+}
+
+function seedColor(p){
+  const G = p.genome.length;
+  if (p.reproPhase === 0){
+    const t = Math.min(1, p.energy / G);
+    return [lerp(.42,1,t), lerp(.20,.08,t), lerp(.055,.05,t)];
+  }
+  const t = Math.min(1, (p.energy - G) / Math.max(1, p.childGeneCount));
+  return [1, lerp(.08,1,t), lerp(.05,1,t)];
+}
+
+let statCells = 0, statTall = 0, statGenes = 0, statLit = 0, statLeaves = 0;
+
+function rebuildInstances(){
+  instanceCount = 0;
+  statCells = 0; statTall = 0; statGenes = 0; statLit = 0;
+  const base = [.36,.28,.19];
+  const leafBase = [.34,.80,.28];
+  let leaves = 0;
+
+  for (const p of plants){
+    statCells += p.cells.length;
+    statGenes += p.genome.length;
+    const stem = genomeTint
+      ? [lerp(base[0],p.color[0],.5), lerp(base[1],p.color[1],.5), lerp(base[2],p.color[2],.5)]
+      : base;
+    const leafCol = genomeTint
+      ? [lerp(leafBase[0],p.color[0],.22), lerp(leafBase[1],p.color[1],.22), lerp(leafBase[2],p.color[2],.22)]
+      : leafBase;
+    const sc = seedColor(p);
+    for (const cell of p.cells){
+      if (cell.y > statTall) statTall = cell.y;
+      const sky = cell.isSeed ? 0 : skyShare(cell);
+      const lit = sky > 0;
+      if (lit) statLit++;
+      if (cell.y >= sliceTop) continue;
+      if (cell.isSeed){ pushInstance(cell.x, cell.y, cell.z, .78, sc[0], sc[1], sc[2], 0); continue; }
+      const k = .42 + .58 * sky;
+      if (cell.isLeaf){ leaves++; pushInstance(cell.x, cell.y, cell.z, .96, leafCol[0]*k, leafCol[1]*k, leafCol[2]*k, 0); }
+      else pushInstance(cell.x, cell.y, cell.z, .72, stem[0]*k, stem[1]*k, stem[2]*k, 0);
+    }
+  }
+  statLeaves = leaves;
+  if (showSeeds){
+    for (const s of travelingSeeds)
+      if (s.state === 1 && s.y < sliceTop) pushInstance(s.x, s.y, s.z, .58, .94, .51, .12, .25);
+  }
+  gl.bindBuffer(gl.ARRAY_BUFFER, instanceBuffer);
+  gl.bufferSubData(gl.ARRAY_BUFFER, 0, instanceData.subarray(0, instanceCount * 8));
+}
+
+/* ---- camera ---- */
+const projection = new Float32Array(16), viewMat = new Float32Array(16);
+let yaw = 0.72, pitch = 0.58, distance = 150;
+const target = [GX/2, 9, GZ/2];
+
+function perspective(out, fovy, aspect, near, far){
+  const f = 1 / Math.tan(fovy/2);
+  out.fill(0);
+  out[0] = f/aspect; out[5] = f;
+  out[10] = (far+near)/(near-far); out[11] = -1;
+  out[14] = 2*far*near/(near-far);
+}
+function lookAt(out, eye, center){
+  let zx = eye[0]-center[0], zy = eye[1]-center[1], zz = eye[2]-center[2];
+  let l = Math.hypot(zx,zy,zz); zx/=l; zy/=l; zz/=l;
+  let xx = zz, xz = -zx;
+  l = Math.hypot(xx,xz); xx/=l; xz/=l;
+  const yx = zy*xz, yy = zz*xx - zx*xz, yz = -zy*xx;
+  out[0]=xx; out[1]=yx; out[2]=zx; out[3]=0;
+  out[4]=0;  out[5]=yy; out[6]=zy; out[7]=0;
+  out[8]=xz; out[9]=yz; out[10]=zz; out[11]=0;
+  out[12]=-(xx*eye[0]+xz*eye[2]);
+  out[13]=-(yx*eye[0]+yy*eye[1]+yz*eye[2]);
+  out[14]=-(zx*eye[0]+zy*eye[1]+zz*eye[2]);
+  out[15]=1;
+}
+function resize(){
+  const d = Math.min(window.devicePixelRatio || 1, 2);
+  const w = Math.max(1, Math.floor(innerWidth*d)), h = Math.max(1, Math.floor(innerHeight*d));
+  if (canvas.width !== w || canvas.height !== h){ canvas.width = w; canvas.height = h; }
+  gl.viewport(0, 0, w, h);
+}
+function matrices(){
+  perspective(projection, Math.PI/4.15, canvas.width/canvas.height, .1, 900);
+  const cp = Math.cos(pitch);
+  const eye = [target[0] + distance*cp*Math.cos(yaw),
+               target[1] + distance*Math.sin(pitch),
+               target[2] + distance*cp*Math.sin(yaw)];
+  lookAt(viewMat, eye, target);
+}
+
+const pointers = new Map();
+let lastPinch = 0, lastMidX = 0, lastMidY = 0;
+
+function panBy(dx, dy){
+  const sp = Math.sin(pitch), cp = Math.cos(pitch);
+  const rx = Math.sin(yaw), rz = -Math.cos(yaw);
+  const ux = -Math.cos(yaw)*sp, uy = cp, uz = -Math.sin(yaw)*sp;
+  const k = distance * 0.0016;
+  target[0] += rx*dx*k + ux*dy*k;
+  target[1] += uy*dy*k;
+  target[2] += rz*dx*k + uz*dy*k;
+  target[1] = Math.max(-10, Math.min(GY + 20, target[1]));
+}
+
+canvas.addEventListener('pointerdown', e => {
+  canvas.setPointerCapture(e.pointerId);
+  pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+  lastPinch = 0;
+});
+canvas.addEventListener('pointermove', e => {
+  const p = pointers.get(e.pointerId);
+  if (!p) return;
+  const px = p.x, py = p.y;
+  p.x = e.clientX; p.y = e.clientY;
+  if (pointers.size === 1){
+    const dx = e.clientX - px, dy = e.clientY - py;
+    if (e.shiftKey || e.buttons === 2 || e.buttons === 4) panBy(dx, dy);
+    else {
+      yaw += dx * 0.0062;
+      pitch += dy * 0.0062;
+      pitch = Math.max(0.04, Math.min(1.52, pitch));
+    }
+  } else if (pointers.size === 2){
+    const it = pointers.values();
+    const a = it.next().value, b = it.next().value;
+    const dist = Math.hypot(a.x-b.x, a.y-b.y);
+    const mx = (a.x+b.x)/2, my = (a.y+b.y)/2;
+    if (lastPinch > 0 && dist > 0){
+      distance *= lastPinch / dist;
+      distance = Math.max(12, Math.min(600, distance));
+      panBy(mx - lastMidX, my - lastMidY);
+    }
+    lastPinch = dist; lastMidX = mx; lastMidY = my;
+  }
+});
+function pointerEnd(e){ pointers.delete(e.pointerId); lastPinch = 0; }
+canvas.addEventListener('pointerup', pointerEnd);
+canvas.addEventListener('pointercancel', pointerEnd);
+canvas.addEventListener('contextmenu', e => e.preventDefault());
+canvas.addEventListener('wheel', e => {
+  e.preventDefault();
+  distance *= Math.exp(e.deltaY * 0.0012);
+  distance = Math.max(12, Math.min(600, distance));
+}, { passive: false });
+
+function render(){
+  resize();
+  matrices();
+  rebuildInstances();
+  gl.enable(gl.DEPTH_TEST);
+  gl.enable(gl.CULL_FACE);
+  gl.cullFace(gl.BACK);
+  gl.clearColor(.02, .04, .038, 1);
+  gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+  gl.useProgram(floorProgram); uniforms(floorProgram);
+  gl.bindVertexArray(floorVao);
+  gl.drawArrays(gl.TRIANGLES, 0, 6);
+  gl.useProgram(voxelProgram); uniforms(voxelProgram);
+  gl.bindVertexArray(vao);
+  gl.drawArraysInstanced(gl.TRIANGLES, 0, 36, instanceCount);
+}
+
+/* ---- controls ---- */
+const $ = id => document.getElementById(id);
+const SPEEDS = [1,2,5,10,25,50,100,250,1000,"max"];
+let speed = "max", running = true;
+const TICK_BUDGET_MS = 12;
+
+$('btn-play').addEventListener('click', e => {
+  running = !running;
+  e.currentTarget.textContent = running ? 'Pause' : 'Play';
+});
+$('btn-step').addEventListener('click', () => advanceTick());
+$('btn-reset').addEventListener('click', () => resetSimulation());
+$('btn-seeds').addEventListener('click', e => {
+  showSeeds = !showSeeds;
+  e.currentTarget.setAttribute('aria-pressed', String(showSeeds));
+});
+$('btn-tint').addEventListener('click', e => {
+  genomeTint = !genomeTint;
+  e.currentTarget.setAttribute('aria-pressed', String(genomeTint));
+});
+$('s-speed').addEventListener('input', e => { speed = SPEEDS[+e.target.value]; $('v-speed').textContent = speed; });
+$('s-open').addEventListener('input', e => { C.LIGHT_COOLDOWN = +e.target.value; updateUpkeep(); $('v-open').textContent = C.LIGHT_COOLDOWN; });
+$('s-drift').addEventListener('input', e => {
+  C.SEED_FALL_BIAS = +e.target.value / 100;
+  $('v-drift').textContent = C.SEED_FALL_BIAS.toFixed(2).replace('0.', '.');
+});
+$('s-mut').addEventListener('input', e => {
+  C.MUTATION_RATE = +e.target.value / 100;
+  $('v-mut').textContent = C.MUTATION_RATE.toFixed(2).replace('0.', '.');
+});
+$('s-germ').addEventListener('input', e => { C.GERMINATION_RADIUS = +e.target.value; $('v-germ').textContent = C.GERMINATION_RADIUS; });
+$('s-seed').addEventListener('input', e => { C.SEED_FIXED = +e.target.value; $('v-seed').textContent = C.SEED_FIXED > 0 ? C.SEED_FIXED : 'off'; });
+$('s-res').addEventListener('input', e => { C.SEED_RESERVE = +e.target.value; $('v-res').textContent = C.SEED_RESERVE; });
+$('s-sstep').addEventListener('input', e => { C.STORE_STEP = +e.target.value; $('v-sstep').textContent = Math.round(C.STORE_STEP * 100) + '%'; });
+$('btn-evst').addEventListener('click', e => { C.EVOLVE_STORE = !C.EVOLVE_STORE; e.currentTarget.setAttribute('aria-pressed', String(C.EVOLVE_STORE)); });
+$('s-stretch').addEventListener('input', e => { C.STRETCH_PROB = +e.target.value; $('v-stretch').textContent = C.STRETCH_PROB; });
+$('btn-sky').addEventListener('click', e => { C.SKY_RAYS = !C.SKY_RAYS; e.currentTarget.setAttribute('aria-pressed', String(C.SKY_RAYS)); wakeStems(); for (const p of plants) for (const c of p.cells) if (c.isLeaf && c.sched < 0) schedule(c, tick + 1); });
+$('btn-crowd').addEventListener('click', e => { C.SELF_AVOID = !C.SELF_AVOID; e.currentTarget.setAttribute('aria-pressed', String(C.SELF_AVOID)); });
+$('s-upk').addEventListener('input', e => { C.UPKEEP_SHARE = +e.target.value / 100; updateUpkeep(); $('v-upk').textContent = e.target.value + '%'; });
+$('s-leaf').addEventListener('input', e => { C.LEAF_RATE = +e.target.value; $('v-leaf').textContent = C.LEAF_RATE; });
+$('s-stem').addEventListener('input', e => { const was = C.STEM_RATE; C.STEM_RATE = +e.target.value; $('v-stem').textContent = C.STEM_RATE; if (was <= 0 && C.STEM_RATE > 0) wakeStems(); });
+$('s-lcost').addEventListener('input', e => { C.LEAF_COST = +e.target.value; $('v-lcost').textContent = C.LEAF_COST; });
+const AGES = [50, 100, 150, 200, 300, 500, 1000, 2000, 5000, 20000];
+$('s-age').addEventListener('input', e => { C.MAX_PLANT_AGE = AGES[+e.target.value]; $('v-age').textContent = C.MAX_PLANT_AGE.toLocaleString(); });
+$('s-slice').addEventListener('input', e => { sliceTop = +e.target.value; $('v-slice').textContent = sliceTop; });
+const dock = $('dock');
+$('btn-fold').addEventListener('click', e => {
+  const open = dock.getAttribute('data-open') === 'true';
+  dock.setAttribute('data-open', String(!open));
+  e.currentTarget.textContent = open ? '▴' : '▾';
+});
+
+/* ---- loop ---- */
+let frames = 0, ticksDone = 0, lastReport = performance.now();
+function frame(){
+  requestAnimationFrame(frame);
+  if (running){
+    if (speed === "max"){
+      const deadline = performance.now() + TICK_BUDGET_MS;
+      do {
+        for (let i = 0; i < 4; i++) advanceTick();
+        ticksDone += 4;
+      } while (performance.now() < deadline);
+    } else {
+      for (let i = 0; i < speed; i++) advanceTick();
+      ticksDone += speed;
+    }
+  }
+  render();
+  frames++;
+  const now = performance.now();
+  if (now - lastReport > 400){
+    const dt = (now - lastReport) / 1000;
+    $('r-fps').textContent = Math.round(frames / dt);
+    $('r-tps').textContent = Math.round(ticksDone / dt).toLocaleString();
+    $('r-plants').textContent = plants.length.toLocaleString();
+    $('r-cells').textContent = statCells.toLocaleString();
+    $('r-lit').textContent = statLit.toLocaleString();
+    $('r-leaf').textContent = statLeaves.toLocaleString();
+    $('r-seeds').textContent = travelingSeeds.length.toLocaleString();
+    $('r-tall').textContent = statTall;
+    $('r-genes').textContent = plants.length ? (statGenes / plants.length).toFixed(1) : '0';
+    let genSum = 0; for (const p of plants) genSum += p.gen;
+    $('r-gen').textContent = plants.length ? Math.round(genSum / plants.length).toLocaleString() : '0';
+    $('r-mut').textContent = stats.mutantBirths.toLocaleString();
+    if (plants.length){ const st = plants.map(p => C.EVOLVE_STORE ? p.seedStore : C.SEED_RESERVE).sort((a, b) => a - b); $('r-store').textContent = st[st.length >> 1].toFixed(2) + '×'; }
+    $('r-tick').textContent = tick.toLocaleString();
+    frames = 0; ticksDone = 0; lastReport = now;
+  }
+}
+requestAnimationFrame(frame);
+
+})();
+</script>
+</body>
+</html>

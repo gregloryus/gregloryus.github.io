@@ -1,0 +1,1366 @@
+<!doctype html>
+<html lang="en" data-visualize-standalone>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<title>Millefleur Plants 1</title>
+<style>:root {
+  color-scheme: light dark;
+  background-color: transparent !important;
+
+  /* Agent-facing contract; keep in sync with SKILL.md. */
+  --background: var(
+    --main-surface-primary,
+    light-dark(rgb(255 255 255), rgb(24 24 24))
+  );
+  --foreground: light-dark(rgb(26 28 31), rgb(255 255 255));
+  --card: color-mix(in oklab, var(--foreground) 5%, transparent);
+  --card-foreground: var(--foreground);
+  --popover: light-dark(rgb(255 255 255), rgb(45 45 45));
+  --popover-foreground: var(--foreground);
+  --primary: light-dark(rgb(51 156 255), rgb(131 195 255));
+  --primary-foreground: light-dark(rgb(255 255 255), rgb(13 13 13));
+  --secondary: light-dark(rgb(255 255 255 / 96%), rgb(54 54 54 / 96%));
+  --secondary-foreground: var(--foreground);
+  --muted: color-mix(in srgb, var(--foreground) 10%, transparent);
+  --muted-foreground: light-dark(
+    rgb(26 28 31 / 49.4%),
+    rgb(255 255 255 / 49.8%)
+  );
+  --accent: light-dark(rgb(229 242 255), rgb(13 39 63));
+  --accent-foreground: var(--primary);
+  --destructive: light-dark(rgb(226 85 7), rgb(255 133 73));
+  --border: light-dark(rgb(26 28 31 / 8%), rgb(255 255 255 / 8.2%));
+  --input: light-dark(
+    rgb(26 28 31 / 11.8%),
+    color-mix(in oklab, rgb(0 0 0) 10%, transparent)
+  );
+  --ring: light-dark(rgb(51 156 255), rgb(131 195 255 / 76%));
+  --font-size-base: 14px;
+  --red: light-dark(rgb(186 38 35), rgb(250 66 62));
+  --green: light-dark(rgb(0 162 64), rgb(64 201 119));
+
+  /* Internal implementation variables; not part of the agent contract. */
+  --font-sans: -apple-system, system-ui, "Segoe UI", sans-serif;
+  --font-mono:
+    ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono",
+    monospace;
+  --font-size-normal: max(11px, var(--font-size-base));
+  --font-size-tooltip: calc(var(--font-size-base) - 1px);
+  --font-size-small: max(11px, calc(var(--font-size-base) - 2px));
+  --font-size-h1: calc(var(--font-size-normal) * 1.7142857143);
+  --font-size-h2: calc(var(--font-size-normal) * 1.4285714286);
+  --font-size-h3: calc(var(--font-size-normal) * 1.2857142857);
+  --font-weight-normal: 430;
+  --font-weight-medium: 500;
+  --line-height-normal: calc(var(--font-size-normal) * 1.5);
+  --line-height-tooltip: calc(var(--font-size-tooltip) * 1.4285714286);
+  --line-height-small: calc(var(--font-size-small) + 4px);
+  --radius: 10px;
+  --radius-sm: calc(var(--radius) * 0.6);
+  --radius-md: calc(var(--radius) * 0.8);
+  --radius-lg: var(--radius);
+  --radius-2xl: calc(var(--radius) * 1.6);
+  --radius-full: 9999px;
+  --shadow-sm: 0 1px 2px -1px rgb(0 0 0 / 8%);
+  --checkmark-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 17 17'%3E%3Cpath d='M12.8961 3.64101C13.1297 3.41418 13.4984 3.37523 13.7779 3.56581C14.0571 3.75635 14.1554 4.11331 14.0299 4.41347L13.9615 4.53847L7.71151 13.7045C7.59411 13.8767 7.4063 13.9877 7.19881 14.0072C6.99136 14.0267 6.78564 13.9533 6.63826 13.806L2.88826 10.056L2.79842 9.9457C2.6192 9.67407 2.64927 9.30496 2.88826 9.06581C3.12738 8.82669 3.49647 8.79676 3.76815 8.97597L3.8785 9.06581L7.03084 12.2182L12.8053 3.74941L12.8961 3.64101Z'/%3E%3C/svg%3E");
+
+  /* Legacy aliases; not part of the current agent contract. */
+  --viz-bg: transparent;
+  --viz-panel: var(--card);
+  --viz-border: var(--border);
+  --viz-text: var(--foreground);
+  --viz-muted: var(--muted-foreground);
+  --viz-accent: var(--primary);
+  --viz-accent-text: var(--primary-foreground);
+  --viz-accent-bg: var(--accent);
+  --viz-font-size: var(--font-size-base);
+  --viz-warning: var(--destructive);
+  --color-background-primary: var(--background);
+  --color-text-primary: var(--foreground);
+  --color-border-secondary: var(--border);
+}
+
+:root[data-visualize-standalone] {
+  background-color: var(--background) !important;
+}
+
+/* Generic mobile code-block hosts provide light/dark mode but no series palette.
+   AppBlock hosts set all six variables themselves. */
+:root:not([data-app-block-surface]) {
+  --viz-series-1: var(--primary);
+  --viz-series-2: light-dark(#f3883b, #f59a56);
+  --viz-series-3: light-dark(#5dc977, #74d58b);
+  --viz-series-4: light-dark(#eb77b1, #f08fc0);
+  --viz-series-5: light-dark(#9b79ec, #aa91ef);
+  --viz-series-6: light-dark(#3ab9b1, #5acbc2);
+}
+
+:root[data-theme="light"] {
+  color-scheme: light;
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html > body {
+  margin: 0;
+  padding: 5px;
+  color: var(--foreground);
+  background: transparent !important;
+  font-family: var(--font-sans);
+  font-size: var(--font-size-normal);
+  font-weight: var(--font-weight-normal);
+  line-height: var(--line-height-normal);
+}
+
+:root:not([data-app-block-surface]) > body {
+  padding: 12px;
+}
+
+a {
+  color: color-mix(in srgb, var(--viz-accent) 80%, var(--viz-text) 20%);
+  cursor: pointer;
+  font-weight: var(--font-weight-medium);
+  text-decoration: none;
+  text-underline-offset: 2px;
+}
+
+a:is(:hover, :focus-visible) {
+  text-decoration-line: underline;
+  text-decoration-style: dashed;
+  text-decoration-thickness: 0.5px;
+}
+
+h1,
+h2,
+h3,
+h4,
+h5,
+h6,
+p {
+  margin-block: 0;
+}
+
+h1 {
+  font-size: var(--font-size-h1);
+  font-weight: var(--font-weight-medium);
+  line-height: 1.25;
+}
+
+h2 {
+  font-size: var(--font-size-h2);
+  font-weight: var(--font-weight-medium);
+  line-height: 1.25;
+}
+
+h3,
+h4,
+h5,
+h6 {
+  font-size: var(--font-size-h3);
+  font-weight: var(--font-weight-medium);
+  line-height: 1.3;
+}
+
+b,
+strong,
+th {
+  font-weight: var(--font-weight-medium);
+}
+
+code:not(pre code) {
+  display: inline;
+  padding: 1px 6px;
+  border-radius: var(--radius-sm);
+  background: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 0.92em;
+  overflow-wrap: anywhere;
+  -webkit-box-decoration-break: clone;
+  box-decoration-break: clone;
+  word-break: break-word;
+}
+
+.table-responsive {
+  width: 100%;
+  overflow-x: auto;
+  scrollbar-width: thin;
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  color: var(--foreground);
+  font: inherit;
+  text-align: start;
+}
+
+.table :is(th, td) {
+  padding-block: 10px;
+  padding-inline: 0 24px;
+  overflow-wrap: anywhere;
+  border-bottom: 1px solid var(--border);
+  text-align: start;
+  vertical-align: top;
+}
+
+.table-responsive > .table :is(th, td) {
+  overflow-wrap: break-word;
+}
+
+.table :is(th, td):last-child {
+  padding-inline-end: 0;
+}
+
+.table :is(caption, thead th) {
+  font-weight: 600;
+}
+
+.table thead th {
+  padding-block: 8px;
+  border-bottom-color: color-mix(in srgb, var(--foreground) 16%, transparent);
+}
+
+.table tbody tr:last-child :is(th, td) {
+  border-bottom: 0;
+}
+
+.table.table-sm :is(th, td) {
+  padding-block: 6px;
+}
+
+.table.table-sm :is(th, td):not(:last-child) {
+  padding-inline-end: 16px;
+}
+
+.table :is(.text-end, [align="right"]) {
+  text-align: end;
+  font-variant-numeric: tabular-nums;
+}
+
+.table :is(.text-center, [align="center"]) {
+  text-align: center;
+}
+
+.table .text-nowrap {
+  white-space: nowrap;
+}
+
+#widget {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: 100%;
+  padding: 0;
+  background: transparent !important;
+}
+
+.card {
+  min-width: 0;
+  padding: 12px;
+  overflow: hidden;
+  overflow-wrap: break-word;
+  border-radius: var(--radius-2xl);
+  color: var(--card-foreground);
+  background: var(--card);
+}
+
+#widget > :not(.card) {
+  width: 100% !important;
+  max-width: none !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+.tooltip {
+  position: fixed;
+  z-index: 50;
+  top: 0;
+  left: 0;
+  width: max-content;
+  max-width: min(
+    20rem,
+    var(--tooltip-available-width, calc(100vw - 10px)),
+    calc(100vw - 10px)
+  );
+  max-height: min(
+    var(--tooltip-available-height, calc(100vh - 10px)),
+    calc(100vh - 10px)
+  );
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  color: var(--popover-foreground);
+  background: var(--popover);
+  box-shadow: none;
+  font-size: var(--font-size-tooltip);
+  line-height: var(--line-height-tooltip);
+  overflow-wrap: break-word;
+  white-space: normal;
+  pointer-events: none;
+  user-select: none;
+}
+
+/* The bundled tooltip runtime owns [data-tooltip]. AppBlock's CSS-only
+   pseudo-tooltip can widen dense grids even while hidden. */
+main [data-tooltip]::after {
+  content: none;
+}
+
+.viz-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(max(180px, 24%), 1fr));
+  gap: 10px;
+}
+
+.viz-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.viz-stat-value {
+  font-size: var(--font-size-h2);
+  font-weight: var(--font-weight-medium);
+  line-height: 1.25;
+}
+
+.viz-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
+.viz-badge {
+  padding: 3px 8px;
+  border-radius: var(--radius-full);
+  color: var(--accent-foreground);
+  background: var(--accent);
+  font-weight: var(--font-weight-medium);
+}
+
+small,
+.text-small,
+.viz-badge {
+  font-size: var(--font-size-small);
+  line-height: var(--line-height-small);
+}
+
+.text-muted {
+  color: var(--muted-foreground);
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.viz-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.viz-controls > .form-label {
+  display: grid;
+  min-width: min(100%, 260px);
+  flex: 1 1 280px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: baseline;
+  gap: 2px 12px;
+  margin-bottom: 0;
+}
+
+.viz-controls > .form-label > :is(.form-control, .form-range, .form-select) {
+  grid-column: 1 / -1;
+}
+
+.btn,
+.form-check-input,
+.form-control,
+.form-range,
+.form-select {
+  font: inherit;
+}
+
+.btn {
+  appearance: button;
+  display: inline-flex;
+  inline-size: fit-content;
+  max-inline-size: 100%;
+  min-height: 28px;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  margin: 0;
+  padding: 0 8px;
+  -webkit-app-region: no-drag;
+  border: 1px solid var(--input);
+  border-radius: var(--radius-lg);
+  color: var(--secondary-foreground);
+  background: var(--secondary);
+  cursor: var(--cursor-interaction, pointer);
+  text-align: center;
+  text-decoration: none;
+  white-space: nowrap;
+  user-select: none;
+  -webkit-font-smoothing: antialiased;
+}
+
+.btn:is(.btn-block, .viz-tile) {
+  inline-size: 100%;
+}
+
+.btn.viz-tile {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+
+a.btn {
+  cursor: pointer;
+  text-decoration: none;
+}
+
+.btn:not(:disabled):hover {
+  background: color-mix(in srgb, var(--foreground) 6%, var(--secondary));
+}
+
+.btn-primary {
+  border-color: transparent;
+  color: var(--interactive-label-primary-default, var(--primary-foreground));
+  background: var(--interactive-bg-primary-default, var(--foreground));
+  background-clip: padding-box;
+}
+
+.btn-primary .text-muted {
+  color: color-mix(
+    in srgb,
+    var(--interactive-label-primary-default, var(--primary-foreground)) 50%,
+    transparent
+  );
+}
+
+.btn-primary:not(:disabled):hover {
+  background: color-mix(in srgb, var(--foreground) 80%, transparent);
+  background-clip: padding-box;
+}
+
+.btn-ghost {
+  border-color: transparent;
+  color: var(--muted-foreground);
+  background: transparent;
+}
+
+.btn-ghost:not(:disabled):hover {
+  color: var(--foreground);
+  background: color-mix(in srgb, var(--foreground) 6%, var(--secondary));
+}
+
+.btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.4;
+}
+
+[data-lucide] {
+  stroke-width: 1.6;
+}
+
+.form-label {
+  display: block;
+  margin-bottom: 6px;
+  color: var(--foreground);
+}
+
+.form-control {
+  display: block;
+  width: 100%;
+  min-height: 28px;
+  padding: 0 8px;
+  outline: none;
+  border: 1px solid var(--input);
+  border-radius: var(--radius-lg);
+  color: var(--foreground);
+  background: var(--secondary);
+}
+
+.form-control::placeholder {
+  color: var(--muted-foreground);
+}
+
+.form-control[type="file"] {
+  padding: 0;
+  overflow: hidden;
+  cursor: var(--cursor-interaction, pointer);
+}
+
+.form-control[type="file"]::file-selector-button {
+  min-height: 26px;
+  margin-right: 8px;
+  padding: 0 8px;
+  border: 0;
+  border-right: 1px solid var(--input);
+  color: var(--secondary-foreground);
+  background: var(--secondary);
+  cursor: inherit;
+  font: inherit;
+}
+
+.form-control[type="file"]:not(:disabled):hover::file-selector-button {
+  background: color-mix(in srgb, var(--foreground) 6%, var(--secondary));
+}
+
+.form-control-color[type="color"] {
+  width: 40px;
+  height: 28px;
+  padding: 3px;
+  cursor: var(--cursor-interaction, pointer);
+}
+
+.form-control-color[type="color"]::-webkit-color-swatch-wrapper {
+  padding: 0;
+}
+
+.form-control-color[type="color"]::-webkit-color-swatch {
+  border: 0;
+  border-radius: calc(var(--radius-lg) - 4px);
+}
+
+textarea.form-control {
+  height: auto;
+  min-height: 72px;
+  padding: 8px 10px;
+  resize: vertical;
+}
+
+.form-control:focus-visible {
+  border-color: var(--ring);
+  box-shadow: inset 0 0 0 1px var(--ring);
+}
+
+.form-control:disabled,
+.form-select:disabled {
+  cursor: not-allowed;
+  opacity: 0.4;
+}
+
+.form-select {
+  appearance: none;
+  display: block;
+  width: 100%;
+  min-height: 28px;
+  margin: 0;
+  padding: 0 32px 0 8px;
+  outline: none;
+  border: 1px solid var(--input);
+  border-radius: var(--radius-lg);
+  color: var(--foreground);
+  background-color: var(--secondary);
+  background-image:
+    linear-gradient(45deg, transparent 50%, var(--muted-foreground) 50%),
+    linear-gradient(135deg, var(--muted-foreground) 50%, transparent 50%);
+  background-position:
+    calc(100% - 14px) 50%,
+    calc(100% - 10px) 50%;
+  background-repeat: no-repeat;
+  background-size: 4px 4px;
+  cursor: var(--cursor-interaction, default);
+}
+
+.form-select:not(:disabled):hover {
+  background-color: color-mix(in srgb, var(--foreground) 6%, var(--secondary));
+}
+
+.form-select:focus-visible {
+  border-color: var(--ring);
+  box-shadow: inset 0 0 0 1px var(--ring);
+}
+
+.form-check {
+  display: flex;
+  min-height: 20px;
+  align-items: center;
+  gap: 6px;
+}
+
+.form-check-input {
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  flex: 0 0 auto;
+  margin: 0;
+  border: 1px solid var(--input);
+  color: var(--primary-foreground);
+  background-color: transparent;
+  cursor: var(--cursor-interaction, default);
+  transition:
+    background-color 150ms,
+    border-color 150ms,
+    box-shadow 150ms;
+}
+
+.form-check:not(.form-switch) .form-check-input[type="checkbox"] {
+  border-color: var(--input);
+  border-radius: var(--radius-sm);
+  background-color: var(--secondary);
+  box-shadow: var(--shadow-sm);
+}
+
+.form-check:not(.form-switch)
+  .form-check-input:not(:disabled):not(:checked):hover {
+  background-color: var(--card);
+}
+
+.form-check:not(.form-switch) .form-check-input[type="checkbox"]:checked {
+  border-color: var(--primary);
+  background-color: var(--primary);
+}
+
+.form-check:not(.form-switch)
+  .form-check-input[type="checkbox"]:checked::before {
+  display: block;
+  width: 100%;
+  height: 100%;
+  background: var(--primary-foreground);
+  content: "";
+  mask: var(--checkmark-image) center / 12px 12px no-repeat;
+}
+
+.form-check-input[type="radio"] {
+  width: 14px;
+  height: 14px;
+  border-radius: var(--radius-full);
+}
+
+.form-check-input[type="radio"]:checked {
+  border: 2px solid var(--primary);
+  background:
+    radial-gradient(circle, var(--primary-foreground) 0 2.5px, transparent 3px),
+    var(--primary);
+}
+
+.form-check:not(.form-switch) .form-check-input:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+
+.form-check:not(.form-switch) .form-check-input:disabled {
+  cursor: not-allowed;
+  pointer-events: none;
+}
+
+.form-check:not(.form-switch) .form-check-input:disabled + .form-check-label {
+  cursor: not-allowed;
+}
+
+.form-switch .form-check-input:disabled,
+.form-switch .form-check-input:disabled + .form-check-label {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.form-check-label {
+  color: var(--foreground);
+  cursor: var(--cursor-interaction, default);
+}
+
+.form-switch .form-check-input {
+  position: relative;
+  width: 32px;
+  height: 20px;
+  border: 0;
+  border-radius: var(--radius-full);
+  background: var(--muted);
+  box-shadow: none;
+  transition: background-color 200ms cubic-bezier(0, 0, 0.2, 1);
+}
+
+.form-switch .form-check-input::before {
+  position: absolute;
+  top: 50%;
+  left: 0;
+  width: 16px;
+  height: 16px;
+  box-sizing: border-box;
+  border: 1px solid light-dark(var(--primary-foreground), var(--foreground));
+  border-radius: var(--radius-full);
+  background: light-dark(var(--primary-foreground), var(--foreground));
+  box-shadow: var(--shadow-sm);
+  content: "";
+  transform: translate(2px, -50%);
+  transition: transform 200ms cubic-bezier(0, 0, 0.2, 1);
+}
+
+.form-switch .form-check-input:checked {
+  background: var(--primary);
+}
+
+.form-switch .form-check-input:checked::before {
+  transform: translate(14px, -50%);
+}
+
+.form-switch .form-check-input:focus-visible {
+  box-shadow: 0 0 0 2px var(--ring);
+}
+
+.form-range {
+  appearance: none;
+  display: block;
+  width: 100%;
+  height: 28px;
+  flex: 1;
+  margin: 0;
+  padding: 0;
+  outline: none;
+  border: 0;
+  accent-color: var(--primary);
+  background: linear-gradient(
+      color-mix(in srgb, var(--foreground) 7%, transparent),
+      color-mix(in srgb, var(--foreground) 7%, transparent)
+    )
+    center / 100% 2px no-repeat;
+}
+
+.form-range::-webkit-slider-runnable-track {
+  height: 28px;
+  background: transparent;
+}
+
+.form-range::-webkit-slider-thumb {
+  appearance: none;
+  width: 20px;
+  height: 20px;
+  margin-top: 4px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-full);
+  background: light-dark(var(--primary-foreground), var(--foreground));
+}
+
+.form-range:focus-visible::-webkit-slider-thumb {
+  border-color: var(--ring);
+  box-shadow: inset 0 0 0 1px var(--ring);
+}
+
+.form-range::-moz-range-track {
+  height: 28px;
+  background: transparent;
+}
+
+.form-range::-moz-range-thumb {
+  width: 20px;
+  height: 20px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-full);
+  background: light-dark(var(--primary-foreground), var(--foreground));
+}
+
+.form-range:focus-visible::-moz-range-thumb {
+  border-color: var(--ring);
+  box-shadow: inset 0 0 0 1px var(--ring);
+}
+
+.form-range:disabled {
+  cursor: not-allowed;
+  opacity: 0.4;
+}
+
+.btn:not(.btn-primary, .viz-tile):is(
+    [aria-pressed="true"],
+    [aria-selected="true"],
+    .is-selected
+  ) {
+  border-color: var(--primary);
+  color: var(--primary-foreground);
+  background: var(--primary);
+}
+
+.btn.viz-tile:is([aria-pressed="true"], [aria-selected="true"], .is-selected) {
+  border-color: var(--primary);
+  box-shadow: inset 0 0 0 1px var(--primary);
+}
+
+.btn:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+
+svg {
+  display: block;
+  max-width: 100%;
+  height: auto;
+}
+
+#widget > svg {
+  width: 100%;
+}
+
+.text-warning,
+.text-destructive {
+  color: var(--destructive);
+}
+</style>
+</head>
+<body>
+<section id="millefleur1" aria-label="Millefleur Plants 1 simulation">
+  <style>
+    #millefleur1{width:100%;color:var(--foreground);font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+    #millefleur1 .mf1-controls{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-bottom:8px}
+    #millefleur1 .mf1-stats{flex:1 1 360px;color:var(--muted-foreground)}
+    #millefleur1 .mf1-stats b{color:var(--foreground);font-weight:500}
+    #millefleur1 canvas{display:block;width:100%;height:auto;aspect-ratio:3/2;background:var(--background);image-rendering:pixelated;touch-action:manipulation}
+    #millefleur1 .mf1-detail{min-height:1.5em;margin-top:7px;color:var(--muted-foreground)}
+    #millefleur1 .mf1-key{display:flex;flex-wrap:wrap;gap:6px 14px;margin-top:5px;color:var(--muted-foreground)}
+    #millefleur1 .mf1-key span{white-space:nowrap}
+    #millefleur1 .mf1-swatch{display:inline-block;width:.72em;height:.72em;margin-right:.35em;vertical-align:baseline}
+    #millefleur1 .mf1-liquid{background:#2f82e4}.mf1-vapor{background:#83b8c7}.mf1-sap{background:#4de0ff}.mf1-light{background:#ffd64a}.mf1-sugar{background:#ff9830}.mf1-seed{background:#efc867}.mf1-body{background:#62c96b}
+  </style>
+  <div class="mf1-controls viz-controls">
+    <button class="btn btn-primary" id="mf1-run" type="button">pause</button>
+    <button class="btn" id="mf1-step" type="button">step</button>
+    <button class="btn" id="mf1-speed" type="button">speed 4×</button>
+    <button class="btn" id="mf1-new" type="button">new world</button>
+    <div class="mf1-stats" id="mf1-stats" aria-live="polite">starting…</div>
+  </div>
+  <canvas id="mf1-stage" width="192" height="128" role="img" aria-label="A soil-free plane of upright, separated evolving plant forms with falling water and random-walking vapor"></canvas>
+  <div class="mf1-detail" id="mf1-detail">Each gold seed anchors one equal 15×15 garden; bright terminal cells exchange water.</div>
+  <div class="mf1-key text-small" aria-label="Simulation legend">
+    <span><i class="mf1-swatch mf1-body"></i>complete body</span>
+    <span><i class="mf1-swatch mf1-seed"></i>seed</span>
+    <span><i class="mf1-swatch mf1-liquid"></i>falling water (sampled)</span>
+    <span><i class="mf1-swatch mf1-sap"></i>inward sap</span>
+    <span><i class="mf1-swatch mf1-vapor"></i>random-walk vapor</span>
+    <span><i class="mf1-swatch mf1-light"></i>lateral light (sampled)</span>
+    <span><i class="mf1-swatch mf1-sugar"></i>inward sugar</span>
+  </div>
+  <script>
+  (function(){
+  "use strict";
+
+  function createMillefleur1Sim(cfg){
+    cfg=cfg||{};
+    var COLS=cfg.cols||192,ROWS=cfg.rows||128,N=COLS*ROWS;
+    var P=Object.assign({
+      START_PLANTS:54,
+      BODY_RADIUS:7,
+      MIN_SEED_DISTANCE:15,
+      MIN_NODES:3,
+      MAX_NODES:64,
+      WATER_COUNT:Math.round(N*.060),
+      LIGHT_COUNT:Math.round(N*.150),
+      LIGHT_YIELD:128,
+      VAPOR_MIN:28,
+      VAPOR_JITTER:96,
+      PLANT_LIFE:1800,
+      LIFE_JITTER:1800,
+      REPRO_BASE:6,
+      REPRO_PER_NODE:2,
+      REPRO_COOLDOWN:84,
+      PROP_WALK:48,
+      PROP_LIFE:6000,
+      PROP_EVENTS:64,
+      PROP_SETTLE_RATE:.18,
+      MAX_PROPAGULES:2400,
+      MUT_RATE:0.22,
+      MUT_DUP:0.12,
+      MUT_ADD:0.30,
+      MUT_PRUNE:0.29,
+      HUE_DRIFT:8
+    },cfg.params||{});
+
+    var EMPTY=0,WATER=1,VAPOR=2,SAP=3,LIGHT=4,SUGAR=5;
+    var DX4=new Int8Array([0,1,0,-1]),DY4=new Int8Array([-1,0,1,0]);
+    var DX8=new Int8Array([0,1,1,1,0,-1,-1,-1]),DY8=new Int8Array([-1,-1,0,1,1,1,0,-1]);
+    var bodyOwner=new Int32Array(N),bodyNode=new Int16Array(N),parentCell=new Int32Array(N),tipCell=new Uint8Array(N);
+    var fluidAt=new Int32Array(N),sapAt=new Int32Array(N);
+    parentCell.fill(-1);bodyNode.fill(-1);
+    var plants=new Map(),particles=[],propagules=[];
+    var tick=0,nextPid=1,maxGen=0,particleCursor=0,propCursor=0;
+    var stats={born:0,died:0,mutations:0,duplicated:0,added:0,pruned:0,turned:0,captured:0,delivered:0,lightCaptured:0,lightDelivered:0,seedsMade:0,germinated:0,propagulesExpired:0,blockedBirths:0,seedCapBlocks:0,waterMoves:0,vaporMoves:0,lightMoves:0,sapMoves:0};
+    var rngState=(cfg.seed==null?731927:cfg.seed)>>>0;
+
+    function rand(){rngState^=rngState<<13;rngState>>>=0;rngState^=rngState>>>17;rngState^=rngState<<5;rngState>>>=0;return rngState/4294967296}
+    function ri(n){return(rand()*n)|0}
+    function clamp(v,lo,hi){return v<lo?lo:v>hi?hi:v}
+    function idx(x,y){return y*COLS+x}
+    function xof(i){return i%COLS}
+    function yof(i){return(i/COLS)|0}
+    function wrapX(x){return x<0?x+COLS:x>=COLS?x-COLS:x}
+    function wrapY(y){return y<0?y+ROWS:y>=ROWS?y-ROWS:y}
+    function at(x,y){return idx(wrapX(x),wrapY(y))}
+    function insideGarden(x,y){var r=P.BODY_RADIUS;return x>=r&&x<COLS-r&&y>=2*r&&y<ROWS}
+
+    function defaultRaw(){return{parents:[-1,0,1,2],turns:[0,0,0,0]}}
+    function cloneRaw(g){return{parents:Array.prototype.slice.call(g.parents),turns:Array.prototype.slice.call(g.turns)}}
+    function hashGenome(g){var h=2166136261>>>0;function push(v){h^=(v|0)+37;h=Math.imul(h,16777619)>>>0}push(g.size);for(var i=1;i<g.size;i++){push(g.parents[i]+1);push(g.turns[i]+2)}return h>>>0}
+    function compileGenome(raw){
+      if(!raw||!raw.parents||raw.parents.length<1||raw.parents.length!==raw.turns.length)return null;
+      var size=raw.parents.length;if(size<P.MIN_NODES||size>P.MAX_NODES||raw.parents[0]!==-1)return null;
+      var parents=new Int16Array(size),turns=new Int8Array(size),heads=new Int8Array(size),xs=new Int8Array(size),ys=new Int8Array(size),childCount=new Uint8Array(size),depths=new Uint8Array(size),seen={"0,0":1};
+      parents[0]=-1;turns[0]=0;heads[0]=0;depths[0]=1;
+      var minx=0,maxx=0,miny=0,maxy=0,depth=1;
+      for(var i=1;i<size;i++){
+        var p=raw.parents[i]|0,t=raw.turns[i]|0;if(p<0||p>=i||t<-1||t>1)return null;
+        for(var j=1;j<i;j++)if((raw.parents[j]|0)===p&&(raw.turns[j]|0)===t)return null;
+        parents[i]=p;turns[i]=t;childCount[p]++;
+        var h=(heads[p]+t+4)&3,x=xs[p]+DX4[h],y=ys[p]+DY4[h],key=x+","+y;
+        if(Math.abs(x)>P.BODY_RADIUS||y>=0||y<(-2*P.BODY_RADIUS)||seen[key])return null;
+        seen[key]=1;heads[i]=h;xs[i]=x;ys[i]=y;depths[i]=depths[p]+1;if(depths[i]>depth)depth=depths[i];
+        if(x<minx)minx=x;if(x>maxx)maxx=x;if(y<miny)miny=y;if(y>maxy)maxy=y;
+      }
+      var leaves=0,forks=0;for(var k=0;k<size;k++){if(!childCount[k])leaves++;if(childCount[k]>1)forks++}
+      var g={parents:parents,turns:turns,heads:heads,xs:xs,ys:ys,childCount:childCount,size:size,leaves:leaves,forks:forks,depth:depth,spanX:maxx-minx+1,spanY:maxy-miny+1,radius:Math.max(Math.abs(minx),Math.abs(maxx),Math.abs(miny),Math.abs(maxy))};
+      g.hash=hashGenome(g);return g;
+    }
+    function defaultGenome(){return compileGenome(defaultRaw())}
+    function genomeLabel(g){return g.size+" cells · "+g.leaves+" tips · "+g.forks+" forks · "+g.spanX+"×"+g.spanY}
+    function rawGenome(g){return{parents:Array.prototype.slice.call(g.parents),turns:Array.prototype.slice.call(g.turns)}}
+    function leafIndices(raw){var cc=new Uint8Array(raw.parents.length);for(var i=1;i<raw.parents.length;i++)cc[raw.parents[i]]++;var out=[];for(var j=1;j<cc.length;j++)if(!cc[j])out.push(j);return out}
+    function vacantTurns(raw,p,except){var used=[false,false,false];for(var i=1;i<raw.parents.length;i++)if(raw.parents[i]===p&&i!==except)used[raw.turns[i]+1]=true;var out=[];for(var t=-1;t<=1;t++)if(!used[t+1])out.push(t);return out}
+    function removeLeaf(raw,n){raw.parents.splice(n,1);raw.turns.splice(n,1);for(var i=1;i<raw.parents.length;i++)if(raw.parents[i]>n)raw.parents[i]--}
+    function subtreeIndices(raw,root){
+      var out=[];for(var i=root;i<raw.parents.length;i++){var n=i;while(n>root)n=raw.parents[n];if(n===root)out.push(i)}return out
+    }
+    function duplicateSubtree(raw){
+      var sources=[];for(var n=1;n<raw.parents.length;n++){var nodes=subtreeIndices(raw,n);if(nodes.length>=2&&raw.parents.length+nodes.length<=P.MAX_NODES)sources.push({root:n,nodes:nodes})}
+      if(!sources.length)return false;var source=sources[ri(sources.length)],targets=[];
+      for(var p=0;p<raw.parents.length;p++){var slots=vacantTurns(raw,p,-1);for(var s=0;s<slots.length;s++)targets.push([p,slots[s]])}
+      if(!targets.length)return false;var target=targets[ri(targets.length)],map={};
+      for(var k=0;k<source.nodes.length;k++){var old=source.nodes[k],fresh=raw.parents.length;map[old]=fresh;raw.parents.push(old===source.root?target[0]:map[raw.parents[old]]);raw.turns.push(old===source.root?target[1]:raw.turns[old])}
+      return true
+    }
+    function mutateGenome(parent){
+      if(rand()>=P.MUT_RATE)return{g:compileGenome(rawGenome(parent)),changed:false,note:"clone"};
+      for(var tries=0;tries<28;tries++){
+        var raw=rawGenome(parent),roll=rand(),note="";
+        if(roll<P.MUT_DUP){
+          if(!duplicateSubtree(raw))continue;note="copy subtree";
+        }else if(roll<P.MUT_DUP+P.MUT_ADD&&raw.parents.length<P.MAX_NODES){
+          var candidates=[];for(var p=0;p<raw.parents.length;p++){var slots=vacantTurns(raw,p,-1);for(var s=0;s<slots.length;s++)candidates.push([p,slots[s]])}
+          if(!candidates.length)continue;var add=candidates[ri(candidates.length)];raw.parents.push(add[0]);raw.turns.push(add[1]);note="add tip";
+        }else if(roll<P.MUT_DUP+P.MUT_ADD+P.MUT_PRUNE&&raw.parents.length>P.MIN_NODES){
+          var leaves=leafIndices(raw);if(!leaves.length)continue;removeLeaf(raw,leaves[ri(leaves.length)]);note="prune tip";
+        }else{
+          if(raw.parents.length<2)continue;var n=1+ri(raw.parents.length-1),options=vacantTurns(raw,raw.parents[n],n),choices=[];for(var q=0;q<options.length;q++)if(options[q]!==raw.turns[n])choices.push(options[q]);
+          if(!choices.length)continue;raw.turns[n]=choices[ri(choices.length)];note="turn branch";
+        }
+        var g=compileGenome(raw);if(g&&g.hash!==parent.hash){stats.mutations++;if(note==="copy subtree")stats.duplicated++;else if(note==="add tip")stats.added++;else if(note==="prune tip")stats.pruned++;else stats.turned++;return{g:g,changed:true,note:note}}
+      }
+      return{g:compileGenome(rawGenome(parent)),changed:false,note:"clone"}
+    }
+
+    function territoryClear(x,y,ignorePid){
+      var clear=true;plants.forEach(function(pl){if(!clear||pl.pid===ignorePid)return;var dx=Math.abs(pl.x-x),dy=Math.abs(pl.y-y);if(Math.max(dx,dy)<P.MIN_SEED_DISTANCE)clear=false});return clear
+    }
+    function bodyClear(g,x,y){for(var n=0;n<g.size;n++)if(bodyOwner[idx(x+g.xs[n],y+g.ys[n])])return false;return true}
+    function stampPlant(pl){
+      pl.cells=[];for(var n=0;n<pl.genome.size;n++){var i=idx(pl.x+pl.genome.xs[n],pl.y+pl.genome.ys[n]);bodyOwner[i]=pl.pid;bodyNode[i]=n;tipCell[i]=pl.genome.childCount[n]?0:1;pl.cells.push(i)}
+      for(var k=0;k<pl.genome.size;k++){var cell=pl.cells[k];parentCell[cell]=k?pl.cells[pl.genome.parents[k]]:-1}
+    }
+    function collectorAt(i){
+      if(!bodyOwner[i]||bodyNode[i]===0)return false;var x=xof(i),y=yof(i),open=0;
+      for(var d=0;d<4;d++)if(!bodyOwner[at(x+DX4[d],y+DY4[d])])open++;
+      return open>=3
+    }
+    function newPlant(g,gen,hue,muts,x,y,parentHash,note,force){
+      if(!insideGarden(x,y)||(!force&&!territoryClear(x,y,0))||!bodyClear(g,x,y))return null;
+      var pid=nextPid++,life=P.PLANT_LIFE+ri(P.LIFE_JITTER+1),pl={pid:pid,genome:g,hash:g.hash,gen:gen,hue:hue,muts:muts,x:x,y:y,energy:0,light:0,born:tick,deathTick:tick+life,nextRepro:tick+P.REPRO_COOLDOWN,cells:[],seedsMade:0,children:0,parentHash:parentHash||0,note:note||"common ancestor"};
+      plants.set(pid,pl);stampPlant(pl);stats.born++;if(gen>maxGen)maxGen=gen;return pl
+    }
+    function findFluidSlot(start){
+      if(fluidAt[start]===0&&!bodyOwner[start])return start;var x=xof(start),y=yof(start),off=ri(8);for(var k=0;k<8;k++){var d=(off+k)&7,j=at(x+DX8[d],y+DY8[d]);if(fluidAt[j]===0&&!bodyOwner[j])return j}
+      for(var t=0;t<32;t++){var q=ri(N);if(fluidAt[q]===0&&!bodyOwner[q])return q}return-1
+    }
+    function vaporize(p,where){
+      if(p.state===SAP){if(sapAt[p.pos]===p.id+1)sapAt[p.pos]=0}else if(fluidAt[p.pos]===p.id+1)fluidAt[p.pos]=0;
+      var slot=findFluidSlot(where);if(slot<0)slot=findFluidSlot(p.pos);if(slot<0)return false;
+      p.state=VAPOR;p.pos=slot;p.age=0;p.ttl=P.VAPOR_MIN+ri(P.VAPOR_JITTER+1);fluidAt[slot]=p.id+1;return true
+    }
+    function reemitLight(p){
+      if(p.state===SUGAR){if(sapAt[p.pos]===p.id+1)sapAt[p.pos]=0}else if(fluidAt[p.pos]===p.id+1)fluidAt[p.pos]=0;
+      var slot=-1;for(var t=0;t<64;t++){var j=ri(N);if(!fluidAt[j]&&!bodyOwner[j]){slot=j;break}}if(slot<0){for(var j=0;j<N;j++)if(!fluidAt[j]&&!bodyOwner[j]){slot=j;break}}if(slot<0)return false;
+      p.state=LIGHT;p.pos=slot;p.age=0;p.ttl=0;p.dir=rand()<.5?-1:1;fluidAt[slot]=p.id+1;return true
+    }
+    function removePlant(pl){
+      for(var k=0;k<pl.cells.length;k++){var i=pl.cells[k],sid=sapAt[i]-1;if(sid>=0){var p=particles[sid];sapAt[i]=0;if(p&&p.state===SAP)vaporize(p,i);else if(p&&p.state===SUGAR)reemitLight(p)}bodyOwner[i]=0;bodyNode[i]=-1;parentCell[i]=-1;tipCell[i]=0}
+      plants.delete(pl.pid);stats.died++
+    }
+    function makePropagule(pl){
+      if(propagules.length>=P.MAX_PROPAGULES){stats.seedCapBlocks++;return false}
+      propagules.push({x:pl.x,y:pl.y,g:pl.genome,gen:pl.gen+1,hue:pl.hue,muts:pl.muts,parentPid:pl.pid,parentHash:pl.hash,born:tick,walk:P.PROP_WALK,dead:false});pl.seedsMade++;stats.seedsMade++;return true
+    }
+    function plantEvents(){
+      var doomed=[];plants.forEach(function(pl){
+        if(tick>=pl.deathTick){doomed.push(pl);return}
+        var cost=P.REPRO_BASE+P.REPRO_PER_NODE*pl.genome.size;
+        if(pl.energy>=cost&&pl.light>=cost&&tick>=pl.nextRepro&&makePropagule(pl)){pl.energy-=cost;pl.light-=cost;pl.nextRepro=tick+P.REPRO_COOLDOWN}
+      });for(var i=0;i<doomed.length;i++)removePlant(doomed[i])
+    }
+    function propaguleEvent(s){
+      if(s.dead)return;if(tick-s.born>P.PROP_LIFE){s.dead=true;stats.propagulesExpired++;return}
+      var d=ri(8);s.x=wrapX(s.x+DX8[d]);s.y=wrapY(s.y+DY8[d]);if(s.walk>0){s.walk--;return}
+      if(rand()>=P.PROP_SETTLE_RATE||!insideGarden(s.x,s.y)||!territoryClear(s.x,s.y,0))return;
+      var mu=mutateGenome(s.g),hue=s.hue,muts=s.muts;if(mu.changed){hue=clamp(hue+(rand()*2-1)*P.HUE_DRIFT,78,150);muts++}
+      var pl=newPlant(mu.g,s.gen,hue,muts,s.x,s.y,s.parentHash,mu.note,false);if(pl){var parent=plants.get(s.parentPid);if(parent)parent.children++;s.dead=true;stats.germinated++}else stats.blockedBirths++
+    }
+    function compactPropagules(){var out=[];for(var i=0;i<propagules.length;i++)if(!propagules[i].dead)out.push(propagules[i]);propagules=out;if(propCursor>=propagules.length)propCursor=0}
+
+    function moveFluid(p,j){fluidAt[p.pos]=0;p.pos=j;fluidAt[j]=p.id+1}
+    function tryWaterTarget(p,j){
+      if(bodyOwner[j]){if(collectorAt(j)&&!sapAt[j]){fluidAt[p.pos]=0;p.state=SAP;p.pos=j;p.age=0;sapAt[j]=p.id+1;stats.captured++;return true}return false}
+      if(!fluidAt[j]){moveFluid(p,j);stats.waterMoves++;return true}return false
+    }
+    function waterEvent(p){
+      var x=xof(p.pos),y=yof(p.pos),down=at(x,y+1);if(tryWaterTarget(p,down))return;
+      var lr=rand()<.5?-1:1;if(tryWaterTarget(p,at(x+lr,y+1)))return;if(tryWaterTarget(p,at(x-lr,y+1)))return;
+      if(tryWaterTarget(p,at(x+lr,y)))return;tryWaterTarget(p,at(x-lr,y))
+    }
+    function lightEvent(p){
+      var x=xof(p.pos),y=yof(p.pos),j=at(x+p.dir,y);
+      if(bodyOwner[j]){if(bodyNode[j]!==0&&!sapAt[j]){fluidAt[p.pos]=0;p.state=SUGAR;p.pos=j;p.age=0;sapAt[j]=p.id+1;stats.lightCaptured++}else p.dir=-p.dir;return}
+      if(!fluidAt[j]){moveFluid(p,j);stats.lightMoves++}
+    }
+    function vaporEvent(p){
+      p.age++;var d=ri(4),x=xof(p.pos),y=yof(p.pos),j=at(x+DX4[d],y+DY4[d]);if(!fluidAt[j]){moveFluid(p,j);stats.vaporMoves++}
+      if(p.age>=p.ttl){p.state=WATER;p.age=0}
+    }
+    function sapEvent(p){
+      var i=p.pos,pid=bodyOwner[i],pl=plants.get(pid);if(!pl){vaporize(p,i);return}
+      var n=bodyNode[i];if(n===0){pl.energy++;stats.delivered++;vaporize(p,i);return}
+      var parent=parentCell[i];if(parent>=0&&!sapAt[parent]){sapAt[i]=0;sapAt[parent]=p.id+1;p.pos=parent;stats.sapMoves++}
+    }
+    function sugarEvent(p){
+      var i=p.pos,pid=bodyOwner[i],pl=plants.get(pid);if(!pl){reemitLight(p);return}
+      var n=bodyNode[i];if(n===0){pl.light+=P.LIGHT_YIELD;stats.lightDelivered+=P.LIGHT_YIELD;reemitLight(p);return}
+      var parent=parentCell[i];if(parent>=0&&!sapAt[parent]){sapAt[i]=0;sapAt[parent]=p.id+1;p.pos=parent;stats.sapMoves++}
+    }
+    function particleEvents(){
+      if(!particles.length)return;var start=particleCursor++%particles.length;for(var k=0;k<particles.length;k++){var p=particles[(start+k)%particles.length];if(p.state===WATER)waterEvent(p);else if(p.state===VAPOR)vaporEvent(p);else if(p.state===LIGHT)lightEvent(p);else if(p.state===SAP)sapEvent(p);else sugarEvent(p)}
+    }
+    function spawnParticles(){
+      for(var n=0;n<P.WATER_COUNT;n++){var i=-1;for(var t=0;t<80;t++){var q=ri(N);if(!fluidAt[q]&&!bodyOwner[q]){i=q;break}}if(i<0)break;var p={id:particles.length,state:WATER,pos:i,age:0,ttl:0,dir:0};particles.push(p);fluidAt[i]=p.id+1}
+      for(var n=0;n<P.LIGHT_COUNT;n++){var i=-1;for(var t=0;t<80;t++){var q=ri(N);if(!fluidAt[q]&&!bodyOwner[q]){i=q;break}}if(i<0)break;var p={id:particles.length,state:LIGHT,pos:i,age:0,ttl:0,dir:rand()<.5?-1:1};particles.push(p);fluidAt[i]=p.id+1}
+    }
+    function placeFounders(){
+      var g=defaultGenome(),r=P.BODY_RADIUS,side=2*r+1,nx=Math.floor(COLS/side),ny=Math.floor(ROWS/side),ox=ri(Math.max(1,COLS-nx*side+1)),oy=ri(Math.max(1,ROWS-ny*side+1)),slots=[];
+      for(var gy=0;gy<ny;gy++)for(var gx=0;gx<nx;gx++)slots.push([ox+r+gx*side,oy+2*r+gy*side]);
+      for(var a=slots.length-1;a>0;a--){var b=ri(a+1),tmp=slots[a];slots[a]=slots[b];slots[b]=tmp}
+      for(var n=0;n<P.START_PLANTS&&n<slots.length;n++)newPlant(g,0,104,0,slots[n][0],slots[n][1],0,"common ancestor",false)
+    }
+    function step(){
+      tick++;particleEvents();plantEvents();var count=Math.min(P.PROP_EVENTS,propagules.length);for(var i=0;i<count&&propagules.length;i++){if(propCursor>=propagules.length)propCursor=0;propaguleEvent(propagules[propCursor++])}if((tick&127)===0)compactPropagules()
+    }
+    function reset(){
+      bodyOwner.fill(0);bodyNode.fill(-1);parentCell.fill(-1);tipCell.fill(0);fluidAt.fill(0);sapAt.fill(0);plants.clear();particles=[];propagules=[];tick=0;nextPid=1;maxGen=0;particleCursor=0;propCursor=0;for(var k in stats)stats[k]=0;rngState=(cfg.seed==null?731927:cfg.seed)>>>0;placeFounders();spawnParticles()
+    }
+    function injectPlant(raw,x,y,hue){var g=raw&&raw.parents?compileGenome(raw):defaultGenome();if(!g)return null;return newPlant(g,0,hue==null?104:hue,0,x,y,0,"injected",true)}
+    function verify(){
+      var cells=0,expected=0,minDistance=1e9,arr=Array.from(plants.values());for(var i=0;i<N;i++)if(bodyOwner[i])cells++;for(var a=0;a<arr.length;a++){expected+=arr[a].genome.size;for(var b=a+1;b<arr.length;b++){var d=Math.max(Math.abs(arr[a].x-arr[b].x),Math.abs(arr[a].y-arr[b].y));if(d<minDistance)minDistance=d}}
+      return{bodyCells:cells,expectedCells:expected,overlaps:cells===expected?0:expected-cells,minSeedDistance:minDistance===1e9?null:minDistance,territoryValid:minDistance===1e9||minDistance>=P.MIN_SEED_DISTANCE}
+    }
+    function snapshot(){
+      var forms=new Map(),nodes=0,leaves=0,forks=0,depth=0,spanX=0,spanY=0,radius=0,energy=0,lightEnergy=0,muts=0,generations=0,branching=0,ancestor=defaultGenome().hash;
+      plants.forEach(function(pl){var g=pl.genome;nodes+=g.size;leaves+=g.leaves;forks+=g.forks;depth+=g.depth;spanX+=g.spanX;spanY+=g.spanY;radius+=g.radius;energy+=pl.energy;lightEnergy+=pl.light;muts+=pl.muts;generations+=pl.gen;if(g.forks)branching++;var f=forms.get(g.hash);if(!f){f={hash:g.hash,hue:pl.hue,label:genomeLabel(g),plants:0,cells:0,gen:0,muts:pl.muts,nodes:g.size,leaves:g.leaves,forks:g.forks,depth:g.depth,spanX:g.spanX,spanY:g.spanY,genome:rawGenome(g)};forms.set(g.hash,f)}f.plants++;f.cells+=g.size;if(pl.gen>f.gen)f.gen=pl.gen});
+      var water=0,vapor=0,sap=0,light=0,sugar=0;for(var p=0;p<particles.length;p++){if(particles[p].state===WATER)water++;else if(particles[p].state===VAPOR)vapor++;else if(particles[p].state===SAP)sap++;else if(particles[p].state===LIGHT)light++;else sugar++}
+      var lineages=Array.from(forms.values()).sort(function(a,b){return b.plants-a.plants||b.gen-a.gen||b.nodes-a.nodes}).slice(0,6),count=plants.size,ancestral=0;var af=forms.get(ancestor);if(af)ancestral=af.plants;
+      var collectors=0;for(var c=0;c<N;c++)if(collectorAt(c))collectors++;
+      return{tick:tick,plants:count,forms:forms.size,cells:nodes,propagules:propagules.length,water:water,vapor:vapor,sap:sap,lightParticles:light,sugar:sugar,gen:maxGen,meanGen:count?generations/count:0,mutations:stats.mutations,mutationTypes:{duplicated:stats.duplicated,added:stats.added,pruned:stats.pruned,turned:stats.turned},meanNodes:count?nodes/count:0,meanLeaves:count?leaves/count:0,meanCollectors:count?collectors/count:0,meanForks:count?forks/count:0,meanDepth:count?depth/count:0,meanSpanX:count?spanX/count:0,meanSpanY:count?spanY/count:0,meanRadius:count?radius/count:0,meanMuts:count?muts/count:0,branching:count?branching/count:0,completeness:count?1:0,ancestralFraction:count?ancestral/count:0,energy:energy,lightEnergy:lightEnergy,born:stats.born,died:stats.died,captured:stats.captured,delivered:stats.delivered,lightCaptured:stats.lightCaptured,lightDelivered:stats.lightDelivered,seedsMade:stats.seedsMade,germinated:stats.germinated,propagulesExpired:stats.propagulesExpired,seedCapBlocks:stats.seedCapBlocks,lineages:lineages,verification:verify()}
+    }
+    reset();
+    return{COLS:COLS,ROWS:ROWS,N:N,P:P,EMPTY:EMPTY,WATER:WATER,VAPOR:VAPOR,SAP:SAP,LIGHT:LIGHT,SUGAR:SUGAR,bodyOwner:bodyOwner,bodyNode:bodyNode,parentCell:parentCell,tipCell:tipCell,fluidAt:fluidAt,sapAt:sapAt,plants:plants,particles:particles,get propagules(){return propagules},get tick(){return tick},step:step,reset:reset,spawnParticles:spawnParticles,snapshot:snapshot,verify:verify,defaultGenome:defaultGenome,compileGenome:compileGenome,rawGenome:rawGenome,mutateGenome:mutateGenome,genomeLabel:genomeLabel,injectPlant:injectPlant,isCollector:collectorAt};
+  }
+
+  if(typeof window!=="undefined")window.createMillefleur1Sim=createMillefleur1Sim;
+
+  if(typeof document!=="undefined"){
+    var root=document.getElementById("millefleur1");if(!root)return;
+    var canvas=document.getElementById("mf1-stage"),ctx=canvas.getContext("2d",{alpha:false}),statsEl=document.getElementById("mf1-stats"),detail=document.getElementById("mf1-detail");
+    var params=new URLSearchParams(location.search),worldSeed=Number(params.get("seed")||731927)>>>0,sim=createMillefleur1Sim({cols:canvas.width,rows:canvas.height,seed:worldSeed});
+    var running=true,speeds=[1,4,16,64],speedAt=1,selectedPid=0;
+    function hsl(h,s,l){h=((h%360)+360)%360/360;var r,g,b;if(!s)r=g=b=l;else{var q=l<.5?l*(1+s):l+s-l*s,p=2*l-q;function f(t){if(t<0)t++;if(t>1)t--;return t<1/6?p+(q-p)*6*t:t<.5?q:t<2/3?p+(q-p)*(2/3-t)*6:p}r=f(h+1/3);g=f(h);b=f(h-1/3)}return[r*255,g*255,b*255]}
+    function put(data,i,c){var o=i*4;data[o]=c[0]|0;data[o+1]=c[1]|0;data[o+2]=c[2]|0;data[o+3]=255}
+    function blend(data,i,c,a){var o=i*4;data[o]=(data[o]*(1-a)+c[0]*a)|0;data[o+1]=(data[o+1]*(1-a)+c[1]*a)|0;data[o+2]=(data[o+2]*(1-a)+c[2]*a)|0}
+    function draw(){
+      var im=ctx.createImageData(sim.COLS,sim.ROWS),data=im.data,i,p,pl,c;for(i=0;i<sim.N;i++)put(data,i,[4,9,14]);
+      for(i=0;i<sim.particles.length;i++){p=sim.particles[i];if(p.state===sim.WATER&&p.id%3===0)put(data,p.pos,[34,87,163]);else if(p.state===sim.VAPOR&&p.id%2===0)blend(data,p.pos,[100,156,174],.52);else if(p.state===sim.LIGHT&&p.id%10===0)put(data,p.pos,[164,127,31])}
+      for(i=0;i<sim.N;i++)if(sim.bodyOwner[i]){pl=sim.plants.get(sim.bodyOwner[i]);c=hsl(pl?pl.hue:104,.58,sim.isCollector(i) ? .66 : .38);put(data,i,c);if(sim.bodyNode[i]===0)put(data,i,[239,200,103])}
+      for(i=0;i<sim.particles.length;i++){p=sim.particles[i];if(p.state===sim.SAP)put(data,p.pos,[74,222,255]);else if(p.state===sim.SUGAR)put(data,p.pos,[255,152,48])}
+      for(i=0;i<sim.propagules.length;i++){var sd=sim.propagules[i];if(!sd.dead&&i%10===0&&sd.x>=0&&sd.y>=0)put(data,sd.y*sim.COLS+sd.x,[132,104,48])}
+      ctx.putImageData(im,0,0)
+    }
+    function hud(){
+      var s=sim.snapshot();statsEl.innerHTML="tick <b>"+s.tick.toLocaleString()+"</b> · g<b>"+s.gen+"</b> · <b>"+s.plants+"</b> plants · <b>"+s.forms+"</b> forms · plan <b>"+s.meanNodes.toFixed(1)+"</b> · collectors <b>"+s.meanCollectors.toFixed(1)+"</b> · forks <b>"+s.meanForks.toFixed(1)+"</b>";
+      if(selectedPid){var pl=sim.plants.get(selectedPid);if(pl)detail.textContent="plant "+pl.pid+" · generation "+pl.gen+" · "+sim.genomeLabel(pl.genome)+" · "+pl.muts+" inherited mutations · "+pl.energy+" water / "+pl.light+" light";else{selectedPid=0;detail.textContent="That territory is now vacant."}}
+    }
+    document.getElementById("mf1-run").addEventListener("click",function(){running=!running;this.textContent=running?"pause":"run"});
+    document.getElementById("mf1-step").addEventListener("click",function(){running=false;document.getElementById("mf1-run").textContent="run";sim.step();draw();hud()});
+    document.getElementById("mf1-speed").addEventListener("click",function(){speedAt=(speedAt+1)%speeds.length;this.textContent="speed "+speeds[speedAt]+"×"});
+    document.getElementById("mf1-new").addEventListener("click",function(){worldSeed=(worldSeed+2654435769)>>>0;sim=createMillefleur1Sim({cols:canvas.width,rows:canvas.height,seed:worldSeed});selectedPid=0;detail.textContent="Each gold seed anchors one equal 15×15 garden; bright terminal cells exchange water.";draw();hud()});
+    canvas.addEventListener("pointerdown",function(e){var r=canvas.getBoundingClientRect(),x=clampInt(Math.floor((e.clientX-r.left)/r.width*sim.COLS),0,sim.COLS-1),y=clampInt(Math.floor((e.clientY-r.top)/r.height*sim.ROWS),0,sim.ROWS-1),pid=sim.bodyOwner[y*sim.COLS+x];selectedPid=pid||0;if(pid){var pl=sim.plants.get(pid);detail.textContent="plant "+pl.pid+" · generation "+pl.gen+" · "+sim.genomeLabel(pl.genome)+" · "+pl.muts+" inherited mutations · "+pl.energy+" water / "+pl.light+" light"}else detail.textContent="Empty reserved space: body geometry never determines whether a seed can establish."});
+    function clampInt(v,a,b){return v<a?a:v>b?b:v}
+    var frames=0;function loop(){if(running)for(var i=0;i<speeds[speedAt];i++)sim.step();draw();if((frames++&7)===0)hud();requestAnimationFrame(loop)}
+    window.__millefleur1={get sim(){return sim},step:function(n){for(var i=0;i<(n||1);i++)sim.step();draw();hud();return sim.snapshot()},snapshot:function(){return sim.snapshot()}};
+    draw();hud();requestAnimationFrame(loop)
+  }
+  })();
+  </script>
+</section>
+
+<script id="codex-visualization-floating-ui-core" src="https://unpkg.com/@floating-ui/core@1.7.3/dist/floating-ui.core.umd.min.js"></script>
+<script id="codex-visualization-floating-ui-dom" src="https://unpkg.com/@floating-ui/dom@1.7.4/dist/floating-ui.dom.umd.min.js"></script>
+<script id="codex-visualization-lucide" async src="https://unpkg.com/lucide@1.17.0/dist/umd/lucide.js"></script>
+<script id="codex-visualization-tooltip">/* oxlint-disable typescript/no-unsafe-argument, typescript/no-unsafe-call, typescript/no-unsafe-return */
+// Runs inside the visualization sandbox, not the host webview.
+(() => {
+  if (window.FloatingUIDOM == null) {
+    return;
+  }
+  const { autoUpdate, computePosition, flip, offset, shift, size } =
+    window.FloatingUIDOM;
+  const tooltipPlacements = new Set(["top", "right", "bottom", "left"]);
+  const tooltipId = `codex-visualization-tooltip-${
+    window.crypto?.randomUUID?.() ?? Date.now().toString(36)
+  }`;
+  const tooltipGap = 5;
+  const hoverDelay = 700;
+  const skipDelay = 300;
+  let activeTrigger = null;
+  let pendingTrigger = null;
+  let tooltip = null;
+  let openTimeout = null;
+  let autoUpdateCleanup = null;
+  let positionRequest = 0;
+  let skipDelayUntil = 0;
+
+  const getTrigger = (target) =>
+    target?.nodeType === Node.ELEMENT_NODE
+      ? target.closest("[data-tooltip]")
+      : null;
+  const containsTarget = (trigger, target) =>
+    target?.nodeType != null && trigger.contains(target);
+  const getContent = (trigger) =>
+    trigger.getAttribute("data-tooltip")?.trim() ?? "";
+  const getPlacement = (trigger) => {
+    const placement = trigger.getAttribute("data-tooltip-placement");
+    return tooltipPlacements.has(placement) ? placement : "top";
+  };
+  const getTooltip = () => {
+    if (tooltip == null) {
+      tooltip = document.createElement("div");
+      tooltip.id = tooltipId;
+      tooltip.className = "tooltip";
+      tooltip.setAttribute("role", "tooltip");
+    }
+    return tooltip;
+  };
+  const setDescribedBy = (trigger, described) => {
+    const ids = new Set(
+      (trigger.getAttribute("aria-describedby") ?? "")
+        .split(/\s+/)
+        .filter(Boolean),
+    );
+    if (described) {
+      ids.add(tooltipId);
+    } else {
+      ids.delete(tooltipId);
+    }
+    if (ids.size === 0) {
+      trigger.removeAttribute("aria-describedby");
+    } else {
+      trigger.setAttribute("aria-describedby", [...ids].join(" "));
+    }
+  };
+  const clearOpenTimeout = () => {
+    if (openTimeout != null) {
+      window.clearTimeout(openTimeout);
+      openTimeout = null;
+    }
+    pendingTrigger = null;
+  };
+  const closeTooltip = (activateSkipDelay = true) => {
+    clearOpenTimeout();
+    positionRequest += 1;
+    autoUpdateCleanup?.();
+    autoUpdateCleanup = null;
+    if (activeTrigger == null) {
+      return;
+    }
+    setDescribedBy(activeTrigger, false);
+    activeTrigger = null;
+    tooltip?.remove();
+    if (activateSkipDelay) {
+      skipDelayUntil = Date.now() + skipDelay;
+    }
+  };
+  const updatePosition = (trigger, floating) => {
+    const request = ++positionRequest;
+    void computePosition(trigger, floating, {
+      middleware: [
+        offset(tooltipGap),
+        flip({ padding: tooltipGap }),
+        shift({ padding: tooltipGap }),
+        size({
+          padding: tooltipGap,
+          apply({ availableHeight, availableWidth, elements }) {
+            elements.floating.style.setProperty(
+              "--tooltip-available-width",
+              `${Math.max(0, availableWidth)}px`,
+            );
+            elements.floating.style.setProperty(
+              "--tooltip-available-height",
+              `${Math.max(0, availableHeight)}px`,
+            );
+          },
+        }),
+      ],
+      placement: getPlacement(trigger),
+      strategy: "fixed",
+    })
+      .then(({ x, y }) => {
+        if (activeTrigger !== trigger || request !== positionRequest) {
+          return;
+        }
+        const scale = window.devicePixelRatio || 1;
+        floating.style.transform = `translate(${Math.round(x * scale) / scale}px, ${Math.round(y * scale) / scale}px)`;
+        floating.style.visibility = "visible";
+      })
+      .catch(() => {
+        if (activeTrigger === trigger && request === positionRequest) {
+          closeTooltip(false);
+        }
+      });
+  };
+  const openTooltip = (trigger) => {
+    const content = getContent(trigger);
+    if (!trigger.isConnected || content.length === 0) {
+      return;
+    }
+    clearOpenTimeout();
+    if (activeTrigger === trigger) {
+      return;
+    }
+    closeTooltip();
+    const floating = getTooltip();
+    floating.textContent = content;
+    floating.style.visibility = "hidden";
+    floating.style.transform = "translate(0, 0)";
+    document.body.appendChild(floating);
+    activeTrigger = trigger;
+    setDescribedBy(trigger, true);
+    autoUpdateCleanup = autoUpdate(trigger, floating, () => {
+      updatePosition(trigger, floating);
+    });
+  };
+  const requestOpen = (trigger, immediate = false) => {
+    if (
+      getContent(trigger).length === 0 ||
+      activeTrigger === trigger ||
+      pendingTrigger === trigger
+    ) {
+      return;
+    }
+    clearOpenTimeout();
+    pendingTrigger = trigger;
+    const delay =
+      immediate || activeTrigger != null || Date.now() < skipDelayUntil
+        ? 0
+        : hoverDelay;
+    if (delay === 0) {
+      openTooltip(trigger);
+      return;
+    }
+    openTimeout = window.setTimeout(() => {
+      openTimeout = null;
+      pendingTrigger = null;
+      openTooltip(trigger);
+    }, delay);
+  };
+  const handlePointerOpen = (event) => {
+    if (event.pointerType === "touch") {
+      return;
+    }
+    const trigger = getTrigger(event.target);
+    if (trigger == null || containsTarget(trigger, event.relatedTarget)) {
+      return;
+    }
+    requestOpen(trigger);
+  };
+  const handleLeave = (event) => {
+    const trigger = getTrigger(event.target);
+    if (trigger == null || containsTarget(trigger, event.relatedTarget)) {
+      return;
+    }
+    if (activeTrigger === trigger || pendingTrigger === trigger) {
+      closeTooltip();
+    }
+  };
+  const handleFocusIn = (event) => {
+    const trigger = getTrigger(event.target);
+    if (trigger?.matches(":focus-visible")) {
+      requestOpen(trigger, true);
+    }
+  };
+  const handleKeyDown = (event) => {
+    if (event.key === "Escape") {
+      closeTooltip();
+    }
+  };
+  const handleContextMenu = (event) => {
+    const trigger = getTrigger(event.target);
+    if (activeTrigger === trigger || pendingTrigger === trigger) {
+      closeTooltip();
+    }
+  };
+  const destroy = () => {
+    closeTooltip(false);
+    document.removeEventListener("pointerover", handlePointerOpen);
+    document.removeEventListener("pointerout", handleLeave);
+    document.removeEventListener("focusin", handleFocusIn);
+    document.removeEventListener("focusout", handleLeave);
+    document.removeEventListener("keydown", handleKeyDown);
+    document.removeEventListener("contextmenu", handleContextMenu);
+    tooltip = null;
+  };
+
+  document.addEventListener("pointerover", handlePointerOpen);
+  document.addEventListener("pointerout", handleLeave);
+  document.addEventListener("focusin", handleFocusIn);
+  document.addEventListener("focusout", handleLeave);
+  document.addEventListener("keydown", handleKeyDown);
+  document.addEventListener("contextmenu", handleContextMenu);
+  window.addEventListener("pagehide", destroy, { once: true });
+})();
+</script>
+<script id="codex-visualization-lucide-initialization">(() => {
+  const initialize = () => {
+    globalThis.lucide?.createIcons({ attrs: { width: 16, height: 16 } });
+  };
+  if (globalThis.lucide != null) {
+    initialize();
+    return;
+  }
+  document
+    .getElementById("codex-visualization-lucide")
+    ?.addEventListener("load", initialize, { once: true });
+})();
+</script>
+</body>
+</html>

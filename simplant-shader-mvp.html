@@ -1,0 +1,152 @@
+<!doctype html>
+<html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Simplant · Shader Garden</title>
+<style>
+*{box-sizing:border-box}body{margin:0;background:#080e15;color:#dbe9e8;font:14px system-ui}main{max-width:1000px;margin:auto;padding:16px}h1{font-size:22px;margin:0}header{display:flex;justify-content:space-between;align-items:center;gap:12px}small{color:#8da9aa}canvas{width:100%;display:block;image-rendering:pixelated;background:#080e15;touch-action:none;border:1px solid #294146;margin:14px 0}nav{display:flex;gap:8px;flex-wrap:wrap}button,select{background:#193036;color:#eff;border:1px solid #416066;border-radius:6px;padding:9px;font:inherit}button{cursor:pointer}#status{font-variant-numeric:tabular-nums;color:#b0ccc5;margin:10px 0;min-height:20px}summary{cursor:pointer}details{line-height:1.6;margin-top:14px}#error{color:#ffbda7;white-space:pre-wrap}#selected{min-height:22px;color:#f3d28f}a{color:#a9dcbb}
+</style><main><header><div><h1>Simplant · Shader Garden</h1><small>Shader simulation · standalone · deterministic seed 14</small></div><small>2D branching evolution</small></header>
+<div id="viewport" style="overflow:auto;max-height:65vh"><canvas id="world" width="256" height="192"></canvas></div>
+<nav><button id="pause">Pause</button><button id="step">Step</button><select id="speed" aria-label="Speed"><option value="1">1 tick / frame</option><option value="4" selected>4 ticks / frame</option><option value="16">16 ticks / frame</option></select><select id="zoom" aria-label="View zoom"><option value="1">View 1×</option><option value="2">View 2×</option><option value="4">View 4×</option></select><button id="reset">Reset</button><button id="rain">Add seeds</button><button id="export">Export genomes</button></nav>
+<div id="status"></div><div id="selected">Tap a plant to inspect its triple-bit genome.</div><pre id="error"></pre>
+<details><summary>Rules, controls & MVP limits</summary><p>Green: living plant. Gold: mobile seed. Ochre: sand. White: petrified plant. Tap to inspect a cell; Add seeds is an explicit intervention, never automatic reseeding.</p>
+<p>Each genome is a depth-first sequence of left / forward / right triples. Relative orientation is inherited through branches. Mutation adds or removes a terminal node, up to 10 nodes. Plants collect energy through exposed stem cells, pay for growth, and release mutated offspring from their final genome tip. Offspring compete for space. Plants live 720 ticks.</p>
+<p>Seeds wander in two dimensions and germinate in unoccupied space. Dead plants disappear. The bounded world has solid edges. There is no terrain or gravity.</p><p>This is a shader-native reinterpretation, not exact Simplant v20: finite genomes, synchronous growth arbitration, direct root energy credit instead of traveling light packets, fixed lifespan instead of starvation, no distance bonus. The grid is fixed at 256 × 192. Growth, exposure, energy, mutation, reproduction, movement and rendering use integer GPU textures. CPU work schedules passes, handles controls and reads occasional statistics. The CPU does not calculate any plant updates. Statistics read back roughly once per second.</p>
+<p>Seed 14 and the same interventions at the same ticks reproduce the same run. Pausing a hidden tab preserves ticks. This MVP is not a demonstration of open-ended evolution: the genome space is bounded. No network access or dependencies.</p></details></main>
+<script>
+'use strict';
+const FORK=false, W=256,H=192,MAX=10;
+const canvas=document.getElementById('world'),status=document.getElementById('status');
+const gl=canvas.getContext('webgl2',{alpha:false,antialias:false,depth:false,preserveDrawingBuffer:true});
+const vs=`#version 300 es
+void main(){vec2 p=vec2((gl_VertexID<<1)&2,gl_VertexID&2);gl_Position=vec4(p*2.-1.,0.,1.);}`;
+const common=`#version 300 es
+precision highp float;precision highp int;precision highp usampler2D;
+uniform usampler2D src;uniform usampler2D decisions;uniform int tick;uniform int forked;uniform int mode;uniform int review;uniform int shiftRow;
+const ivec2 SZ=ivec2(256,192);const int MAX=10;
+uint hash(uint x){x^=x>>16;x*=2246822519u;x^=x>>13;x*=3266489917u;return x^(x>>16);}
+uint rnd(ivec2 p){return hash(uint(p.x+p.y*256)^uint(tick)*747796405u^14u);}
+uint typ(uvec4 s){return s.x&7u;}int node(uvec4 s){return int((s.x>>3)&15u);}
+ivec2 pos(uint id){return ivec2(int(id)%256,int(id)/256);}uint ident(ivec2 p){return uint(p.x+p.y*256);}
+bool inside(ivec2 p){return all(greaterThanEqual(p,ivec2(0)))&&all(lessThan(p,SZ));}
+uvec4 get(ivec2 p){return inside(p)?texelFetch(src,p,0):uvec4(4u,0u,0u,0u);}
+bool live(uvec4 s){return typ(s)==1u||typ(s)==2u;}bool solid(uvec4 s){return live(s)||typ(s)==3u||typ(s)==4u;}
+ivec2 dirs[4]=ivec2[4](ivec2(0,1),ivec2(1,0),ivec2(0,-1),ivec2(-1,0));
+int bits[10];int par[10];int fac[10];ivec2 off[10];int count;
+void decode(uint genome){
+ int stack[10];int slots[10];int depth=0;count=1;bits[0]=int(genome&7u);par[0]=-1;fac[0]=0;off[0]=ivec2(0);stack[0]=0;slots[0]=0;
+ for(int it=0;it<40;it++){
+  if(depth<0)break;int p=stack[depth],s=slots[depth];
+  if(s>=3){depth--;continue;}slots[depth]++;
+  if((bits[p]&(1<<s))==0)continue;if(count>=MAX)break;
+  int n=count++;bits[n]=int((genome>>uint(n*3))&7u);par[n]=p;fac[n]=(fac[p]+s+3)%4;off[n]=off[p]+dirs[fac[n]];depth++;stack[depth]=n;slots[depth]=0;
+ }
+}
+uint mutate(uint genome,uint r){
+ decode(genome);if(r%4u!=0u)return genome;
+ int n=int((r>>3)%uint(count)),s=int((r>>8)%3u);bool occupied=(bits[n]&(1<<s))!=0;
+ int at=n+1; // insertion follows preceding sibling subtrees in DFS order
+ for(int j=1;j<10;j++){if(j>=count)break;if(par[j]==n&&((fac[j]-fac[n]+5)%4)<s){int end=j+1;for(int k=j+1;k<10;k++){if(k>=count)break;int a=par[k];for(int z=0;z<10;z++){if(a<=j)break;a=par[a];}if(a==j)end=k+1;else break;}at=end;}}
+ if(occupied){int target=-1;for(int j=1;j<10;j++){if(j>=count)break;if(par[j]==n&&fac[j]==(fac[n]+s+3)%4)target=j;}if(target<0||bits[target]!=0||count<=2)return genome;bits[n]^=1<<s;for(int j=0;j<9;j++)if(j>=target)bits[j]=bits[j+1];count--;}
+ else {if(count>=10)return genome;for(int j=9;j>0;j--)if(j>at)bits[j]=bits[j-1];bits[at]=0;bits[n]|=1<<s;count++;}
+ uint outg=0u;for(int j=0;j<10;j++){if(j>=count)break;outg|=uint(bits[j])<<uint(j*3);}return outg;
+}
+int age(uvec4 root){return int(root.w&65535u);}int energy(uvec4 root){return int(root.w>>16);}
+bool same(uvec4 s,uint owner,int n){return live(s)&&s.z==owner&&node(s)==n;}
+bool growable(ivec2 root,uint owner,int n){if(n<=0)return false;ivec2 p=root+off[n];if(!inside(p)||typ(get(p))!=0u||!same(get(root+off[par[n]]),owner,par[n]))return false;for(int i=0;i<4;i++){uvec4 q=get(p+dirs[i]);if(live(q)&&q.z!=owner)return false;}return true;}
+bool emission(uvec4 root){return age(root)>40&&age(root)%64==0&&energy(root)>=count*2;}
+uvec4 seedAt(uvec4 root,ivec2 p){uint g=mutate(root.y,hash(root.y^uint(tick)^root.z));return uvec4(5u,g,0u,0u);}
+`;
+const bio=common+`
+layout(location=0) out uvec4 outState;
+void main(){ivec2 p=ivec2(gl_FragCoord.xy);uvec4 a=get(p);outState=a;
+ if(live(a)){
+  uvec4 root=get(pos(a.z));
+  if(typ(root)!=1u||(!bool(forked)&&age(root)>=720)){outState=uvec4(0u);return;}
+  if(typ(a)==2u)return;
+  decode(a.y);int e=energy(a),t=age(a),n=1+(t%max(1,count-1));
+  if(t%4==0){for(int j=1;j<10;j++){if(j>=count)break;ivec2 q=p+off[j];if(!same(get(q),a.z,j))continue;int exposed=0;for(int d=0;d<4;d++)if(typ(get(q+dirs[d]))==0u)exposed++;if(exposed>=3&&hash(rnd(q))%8u==0u)e++;}}
+  if(e>0&&growable(p,a.z,n))e--;
+  if(emission(a)){ivec2 q=p+off[count-1]+dirs[fac[count-1]];if(same(get(p+off[count-1]),a.z,count-1)&&typ(get(q))==0u)e-=count;}
+  outState.w=uint(min(255,e))<<16|uint(min(65535,t+1));return;
+ }
+ if(typ(a)==5u){
+  if(a.w>1600u){outState=uvec4(0u);return;}outState.w++;
+  bool supported=forked==0||solid(get(p+ivec2(0,-1)));bool clear=true;
+  for(int d=0;d<4;d++){uvec4 q=get(p+dirs[d]);if(live(q))clear=false;}
+  if(supported&&clear&&(forked==1||a.w>24u)){outState=uvec4(1u,a.y,ident(p),uint(10)<<16);}
+  return;
+ }
+ if(typ(a)!=0u)return;
+ uint priority=0xffffffffu;uvec4 winner=uvec4(0u);
+ for(int d=0;d<4;d++){
+  ivec2 q=p+dirs[d];uvec4 parent=get(q);if(!live(parent))continue;uvec4 root=get(pos(parent.z));if(typ(root)!=1u||age(root)>=720)continue;
+  decode(parent.y);int n=1+(age(root)%max(1,count-1));uint rank=hash(parent.z^uint(tick));
+  if(energy(root)>0&&pos(parent.z)+off[n]==p&&growable(pos(parent.z),parent.z,n)&&rank<priority){winner=uvec4(2u|uint(n)<<3,parent.y,parent.z,0u);priority=rank;}
+  if(node(parent)==count-1&&emission(root)&&q+dirs[fac[count-1]]==p&&rank<priority){winner=seedAt(root,p);priority=rank;}
+ }
+ outState=winner;
+}`;
+const physics=common+`
+layout(location=0) out uvec4 outState;
+bool mobile(uvec4 a){return typ(a)==3u||typ(a)==5u;}
+void swapCells(inout uvec4 a,inout uvec4 b){uvec4 t=a;a=b;b=t;}
+void main(){ivec2 p=ivec2(gl_FragCoord.xy);int parity=tick&1;ivec2 origin=((p-ivec2(parity)+SZ)/2)*2+ivec2(parity)-SZ;
+ // cells in each disjoint 2x2 block: bottom-left, bottom-right, top-left, top-right
+ uvec4 a=get(origin),b=get(origin+ivec2(1,0)),c=get(origin+ivec2(0,1)),d=get(origin+ivec2(1,1));
+ if(forked==1){
+  if(mobile(c)&&typ(a)==0u)swapCells(c,a);if(mobile(d)&&typ(b)==0u)swapCells(d,b);
+  if((rnd(origin)&1u)==0u){if(mobile(c)&&typ(b)==0u)swapCells(c,b);if(mobile(d)&&typ(a)==0u)swapCells(d,a);}
+  else {if(mobile(d)&&typ(a)==0u)swapCells(d,a);if(mobile(c)&&typ(b)==0u)swapCells(c,b);}
+ }else{
+  if((rnd(origin)&1u)==0u){if((mobile(a)&&typ(c)==0u)||(mobile(c)&&typ(a)==0u))swapCells(a,c);if((mobile(b)&&typ(d)==0u)||(mobile(d)&&typ(b)==0u))swapCells(b,d);}
+  else {if((mobile(a)&&typ(b)==0u)||(mobile(b)&&typ(a)==0u))swapCells(a,b);if((mobile(c)&&typ(d)==0u)||(mobile(d)&&typ(c)==0u))swapCells(c,d);}
+ }
+ ivec2 local=p-origin;outState=local.y==0?(local.x==0?a:b):(local.x==0?c:d);
+}`;
+const transform=common+`
+layout(location=0) out uvec4 outState;
+void main(){ivec2 p=ivec2(gl_FragCoord.xy),q=p+ivec2(0,shiftRow);uvec4 a=inside(q)?get(q):uvec4(0u);
+ if(live(a)&&review==1){uint verdict=texelFetch(decisions,pos(a.z),0).x;if(verdict>0u)a=uvec4(verdict==1u?4u:3u,0u,0u,0u);}
+ if(live(a)&&shiftRow==1){if(a.z<256u)a=uvec4(3u,0u,0u,0u);else a.z-=256u;}
+ outState=a;
+}`;
+const display=common+`
+out vec4 color;void main(){ivec2 p=ivec2(gl_FragCoord.xy);uvec4 a=get(p);uint t=typ(a);vec3 c=vec3(.03,.055,.08);
+ if(t==1u)c=mix(vec3(.2,.75,.4),vec3(1.,.8,.22),float(min(energy(a),20))/20.);
+ if(t==2u){float h=float(hash(a.y)%1000u)/1000.;c=vec3(.2+.25*h,.55+.35*h,.28+.2*(1.-h));}
+ if(t==3u)c=vec3(.61,.41,.19);if(t==4u)c=vec3(.88,.94,.93);if(t==5u)c=vec3(1.,.73,.18);color=vec4(c,1.);}`;
+let tick=0,paused=false,rowsCleared=0,novel=new Set(),archive=[],front=0,frames=0,last=performance.now(),fps=0;
+let states=[],decision,programs={},readback=new Uint32Array(W*H*4),verdicts=new Uint32Array(W*H*4),stats={};
+function compile(type,source){const s=gl.createShader(type);gl.shaderSource(s,source);gl.compileShader(s);if(!gl.getShaderParameter(s,gl.COMPILE_STATUS))throw Error(gl.getShaderInfoLog(s));return s;}
+function program(source){const p=gl.createProgram();gl.attachShader(p,compile(gl.VERTEX_SHADER,vs));gl.attachShader(p,compile(gl.FRAGMENT_SHADER,source));gl.linkProgram(p);if(!gl.getProgramParameter(p,gl.LINK_STATUS))throw Error(gl.getProgramInfoLog(p));return p;}
+function texture(data){let t=gl.createTexture();gl.bindTexture(gl.TEXTURE_2D,t);for(const k of [gl.TEXTURE_MIN_FILTER,gl.TEXTURE_MAG_FILTER])gl.texParameteri(gl.TEXTURE_2D,k,gl.NEAREST);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_S,gl.CLAMP_TO_EDGE);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_T,gl.CLAMP_TO_EDGE);gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA32UI,W,H,0,gl.RGBA_INTEGER,gl.UNSIGNED_INT,data);let f=gl.createFramebuffer();gl.bindFramebuffer(gl.FRAMEBUFFER,f);gl.framebufferTexture2D(gl.FRAMEBUFFER,gl.COLOR_ATTACHMENT0,gl.TEXTURE_2D,t,0);if(gl.checkFramebufferStatus(gl.FRAMEBUFFER)!==gl.FRAMEBUFFER_COMPLETE)throw Error('Integer framebuffer unavailable');return {t,f};}
+function upload(target,data){gl.activeTexture(gl.TEXTURE0);gl.bindTexture(gl.TEXTURE_2D,target.t);gl.texSubImage2D(gl.TEXTURE_2D,0,0,0,W,H,gl.RGBA_INTEGER,gl.UNSIGNED_INT,data);}
+function run(name,opts={}){let p=programs[name];gl.useProgram(p);gl.bindFramebuffer(gl.FRAMEBUFFER,name==='display'?null:states[1-front].f);gl.viewport(0,0,W,H);gl.activeTexture(gl.TEXTURE0);gl.bindTexture(gl.TEXTURE_2D,states[front].t);gl.uniform1i(gl.getUniformLocation(p,'src'),0);gl.activeTexture(gl.TEXTURE1);gl.bindTexture(gl.TEXTURE_2D,decision.t);gl.uniform1i(gl.getUniformLocation(p,'decisions'),1);for(const [k,v] of Object.entries({tick,forked:+FORK,review:0,shiftRow:0,...opts}))gl.uniform1i(gl.getUniformLocation(p,k),v);gl.drawArrays(gl.TRIANGLES,0,3);if(name!=='display')front=1-front;}
+function snapshot(){gl.bindFramebuffer(gl.FRAMEBUFFER,states[front].f);gl.readPixels(0,0,W,H,gl.RGBA_INTEGER,gl.UNSIGNED_INT,readback);return readback;}
+function triples(g){let pending=1,s=[];for(let j=0;j<10&&pending;j++){let b=(g>>>(j*3))&7;s.push(b.toString(2).padStart(3,'0'));pending--;pending+=(b&1)+((b>>1)&1)+((b>>2)&1);}return s.join('-');}
+function inspect(reviewDeath=false){snapshot();stats={plants:0,seeds:0,sand:0,stone:0};verdicts.fill(0);let changed=false;
+ for(let i=0;i<W*H;i++){let t=readback[i*4]&7;if(t===1){stats.plants++;if(reviewDeath&&(readback[i*4+3]&65535)>=720){let g=readback[i*4+1],fresh=!novel.has(g);verdicts[i*4]=fresh?1:2;changed=true;if(fresh){novel.add(g);archive.push({genome:triples(g),packed:g,tick,rowsCleared});}}}else if(t===5)stats.seeds++;else if(t===3)stats.sand++;else if(t===4)stats.stone++;}
+ let full=FORK&&reviewDeath;for(let x=0;x<W&&full;x++){const t=readback[x*4]&7;if(t===0||t===5)full=false;}
+ if(changed||full){upload(decision,verdicts);run('transform',{review:+changed,shiftRow:+full});if(full)rowsCleared++;}
+}
+function addSeeds(initial=false){snapshot();let r=14+tick;function random(){r^=r<<13;r^=r>>>17;r^=r<<5;return (r>>>0)/4294967296;}
+ for(let i=0;i<36;i++){let x=8+Math.floor(random()*(W-16)),y=FORK?(initial?4+Math.floor(random()*12):H-4):8+Math.floor(random()*(H-16)),j=(y*W+x)*4;if(readback[j])continue;readback[j]=5;readback[j+1]=146;readback[j+2]=0;readback[j+3]=0;}upload(states[front],readback);}
+function reset(){tick=0;front=0;rowsCleared=0;novel.clear();archive=[];readback.fill(0);upload(states[0],readback);upload(states[1],readback);upload(decision,readback);addSeeds(true);inspect();run('display');}
+function step(){if(FORK&&tick%32===0)inspect(true);run('bio');run('physics');tick++;}
+function fatal(e){paused=true;document.getElementById('error').textContent='Unable to run: '+e.message;console.error(e);}
+try{
+ if(!gl)throw Error('WebGL 2 is required. Open this HTML in a browser with WebGL 2 enabled.');
+ gl.bindVertexArray(gl.createVertexArray());gl.disable(gl.BLEND);gl.disable(gl.DEPTH_TEST);
+ programs={bio:program(bio),physics:program(physics),transform:program(transform),display:program(display)};states=[texture(null),texture(null)];decision=texture(null);reset();
+ document.getElementById('pause').onclick=()=>{paused=!paused;document.getElementById('pause').textContent=paused?'Resume':'Pause';};
+ document.getElementById('step').onclick=()=>{paused=true;document.getElementById('pause').textContent='Resume';step();run('display');};
+ document.getElementById('reset').onclick=reset;document.getElementById('rain').onclick=()=>addSeeds(false);
+ document.getElementById('zoom').onchange=e=>{canvas.style.width=(100*Number(e.target.value))+'%';if(FORK)document.getElementById('viewport').scrollTop=document.getElementById('viewport').scrollHeight;};
+ if(FORK)document.getElementById('viewport').scrollTop=document.getElementById('viewport').scrollHeight;
+ document.getElementById('export').onclick=()=>{snapshot();const living=[...new Set(Array.from({length:W*H},(_,i)=>i).filter(i=>(readback[i*4]&7)===1).map(i=>readback[i*4+1]))].map(triples);const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([JSON.stringify({tick,rowsCleared,archive,living},null,2)],{type:'application/json'}));a.download='simplant-genomes.json';a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000);};
+ canvas.onclick=e=>{let b=canvas.getBoundingClientRect(),x=Math.min(W-1,Math.floor((e.clientX-b.left)/b.width*W)),y=Math.min(H-1,H-1-Math.floor((e.clientY-b.top)/b.height*H));snapshot();let j=(y*W+x)*4,t=readback[j]&7;document.getElementById('selected').textContent=(t===1||t===2||t===5)?'Genome: '+triples(readback[j+1]):['Empty','Root','Stem','Sand','Petrified plant','Seed'][t];};
+ function loop(now){try{if(!paused&&!document.hidden){let n=+document.getElementById('speed').value;for(let i=0;i<n;i++)step();}run('display');frames++;if(now-last>1000){fps=Math.round(frames*1000/(now-last));frames=0;last=now;inspect(false);}status.textContent='Tick '+tick.toLocaleString()+' · '+stats.plants+' plants · '+stats.seeds+' seeds · '+fps+' fps'+(FORK?' · '+novel.size+' fossils · '+rowsCleared+' rows passed':'');requestAnimationFrame(loop);}catch(e){fatal(e);}}
+ // Inspection hook permits deterministic headless validation without a CPU simulation.
+ window.mvp={step:(n=1)=>{for(let i=0;i<n;i++)step();run('display');},pause:()=>{paused=true;},inspect:()=>{inspect(false);return {tick,...stats,novel:novel.size,rowsCleared,error:gl.getError()};},snapshot,reset,triples,load:data=>{upload(states[front],data);},review:()=>inspect(true),get archive(){return archive;},get state(){return states[front];},gl};
+ requestAnimationFrame(loop);
+}catch(e){fatal(e);}
+</script></html>

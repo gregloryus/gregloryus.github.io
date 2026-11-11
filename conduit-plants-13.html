@@ -1,0 +1,653 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no" />
+    <title>conduit plants 13 — the day is the world</title>
+    <style>
+      :root { color-scheme: dark; }
+      * { box-sizing: border-box; }
+      html, body { margin: 0; height: 100%; background: #06080b; color: #cfd8d2;
+        font: 11px ui-monospace, SFMono-Regular, Menlo, monospace; overflow: hidden; }
+      body { display: flex; flex-direction: column; padding: env(safe-area-inset-top) 0 env(safe-area-inset-bottom); }
+      #bar { flex: 0 0 auto; display: flex; gap: 5px; align-items: center; padding: 6px 8px;
+        border-bottom: 1px solid #1b2620; overflow-x: auto; white-space: nowrap; }
+      button { font: inherit; color: #cfd8d2; background: #131d18; border: 1px solid #2b3a31;
+        border-radius: 6px; padding: 6px 8px; min-height: 32px; }
+      button:active { background: #1d2c24; }
+      input { font: inherit; color: #cfd8d2; background: #0d1512; border: 1px solid #2b3a31;
+        border-radius: 6px; padding: 5px 6px; width: 62px; }
+      #wrap { flex: 1 1 auto; position: relative; min-height: 0; }
+      canvas { position: absolute; inset: 0; width: 100%; height: 100%; image-rendering: pixelated; }
+      #hud { flex: 0 0 auto; padding: 5px 8px; border-top: 1px solid #1b2620; line-height: 1.45; color: #8fa396; }
+      #hud b { color: #e3ece5; font-weight: 600; }
+      #plans { flex: 0 0 auto; max-height: 24%; overflow-y: auto; padding: 0 8px 6px; color: #8fa396; }
+      .sw { display: inline-block; width: 8px; height: 8px; border-radius: 2px; margin-right: 5px; }
+      #keys { padding: 0 8px 7px; color: #64766b; line-height: 1.5; }
+    </style>
+  </head>
+  <body>
+    <div id="bar"></div>
+    <div id="wrap"><canvas id="c"></canvas></div>
+    <div id="hud">starting…</div>
+    <div id="plans"></div>
+    <div id="keys"></div>
+    <script>
+      /* ==== SIM CORE (DOM-free) ==== */
+      function createSim(cfg) {
+        const COLS = cfg.cols | 0,
+          ROWS = cfg.rows | 0,
+          N = COLS * ROWS;
+
+        const P = {
+          WATER_TOTAL: 1600, // conserved exactly, forever
+          CONDENSE: 0.05,
+          DAY: 256, // ticks in a day. Phase is a gene, so this is a niche axis.
+          WINDOW: 96, // how long a body stays open before it folds back
+          BUILD: 1, // bank spent per cell laid
+          KEEP: 14, // paid once a day per seed, whatever size it is
+          CATCH: 1, // bank gained per droplet intercepted
+          SEED_COST: 26,
+          SEED_BANK: 30, // what a new seed is given to open with
+          SEED_WALK: 7,
+          SEED_LIFE: 100000, // effectively none: the toll is what kills
+          START_SEEDS: 90,
+          MUT_SEED: 0.5,
+          MUT_FIELD: 0.9,
+          MUT_DUP: 0.05,
+          MUT_DEL: 0.05,
+          MUT_PHASE: 0.35, // chance the offspring wakes at a different hour
+          PHASE_STEP: 12,
+          MOD_CAP: 16,
+          MOD_FLOOR: 2,
+          MAX_PLANTS: 3000,
+          STUCK_MAX: 10,
+        };
+        if (cfg.params) for (const k in cfg.params) P[k] = cfg.params[k];
+
+        let s0 = (cfg.seed | 0) || 1;
+        function rand() {
+          s0 ^= s0 << 13; s0 ^= s0 >>> 17; s0 ^= s0 << 5;
+          return ((s0 >>> 0) % 1000000) / 1000000;
+        }
+        const ri = (n) => (rand() * n) | 0;
+        const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
+
+        const DX = [0, 1, 1, 1, 0, -1, -1, -1];
+        const DY = [-1, -1, 0, 1, 1, 1, 0, -1];
+        const HDIRS = 64;
+        const SIN = new Float32Array(HDIRS), COS = new Float32Array(HDIRS);
+        for (let h = 0; h < HDIRS; h++) {
+          const a = (h / HDIRS) * Math.PI * 2;
+          SIN[h] = Math.sin(a); COS[h] = -Math.cos(a);
+        }
+
+        const AIR = 0, SEED = 1, CELL = 2;
+
+        const type = new Uint8Array(N);
+        const owner = new Uint32Array(N);
+        const caught = new Uint8Array(N); // droplets this cell has intercepted today
+        const drop = new Uint8Array(N);
+        const vapor = new Uint8Array(N);
+
+        const plants = new Map();
+        let nextPid = 1, tick = 0;
+        const stats = { born: 0, died: 0, folds: 0, laid: 0, starved: 0, harvest: 0, built: 0 };
+
+        function NB(i, d) {
+          const x = i % COLS, y = (i / COLS) | 0;
+          return (((y + DY[d] + ROWS) % ROWS) * COLS) + ((x + DX[d] + COLS) % COLS);
+        }
+
+        // ------------------------------------------------------------- genome
+        const END_NEXT = 0, END_FORK = 1, END_STOP = 2;
+        function mod(len, curve, reps, brEvery, brAngle, child, next, end) {
+          return { len, curve, reps, brEvery, brAngle, child, next, end };
+        }
+        function defaultGenome() {
+          return {
+            start: 0, rot: 0, phase: 0,
+            modules: [mod(4, 0, 1, 0, 16, 1, 1, END_NEXT), mod(3, 2, 1, 0, 20, 0, 0, END_STOP)],
+          };
+        }
+        const copyGenome = (g) => ({
+          start: g.start, rot: g.rot, phase: g.phase, modules: g.modules.map((m) => ({ ...m })),
+        });
+        function hashGenome(g) {
+          let h = (2166136261 ^ g.start ^ (g.rot << 8)) >>> 0;
+          for (const m of g.modules)
+            for (const v of [m.len, m.curve + 64, m.reps, m.brEvery, m.brAngle, m.child, m.next, m.end]) {
+              h ^= v | 0; h = Math.imul(h, 16777619) >>> 0;
+            }
+          return h >>> 0;
+        }
+        function reachModules(g) {
+          const n = g.modules.length, seen = new Uint8Array(n), stack = [];
+          const push = (v) => { if (v >= 0 && v < n && !seen[v]) { seen[v] = 1; stack.push(v); } };
+          push(g.start);
+          while (stack.length) {
+            const m = g.modules[stack.pop()];
+            if (m.end === END_NEXT) push(m.next);
+            if (m.brEvery > 0 || m.end === END_FORK) push(m.child);
+          }
+          let c = 0; for (let k = 0; k < n; k++) c += seen[k];
+          return c;
+        }
+        const genomeLabel = (g) =>
+          g.modules.map((m, k) => (k === g.start ? "*" : "") + m.len + "x" + m.reps + (m.brEvery ? "/" + m.brEvery : "")).join(" ");
+
+        function mutate(g) {
+          const c = copyGenome(g); let muts = 0;
+          if (rand() < P.MUT_DUP && c.modules.length < P.MOD_CAP) {
+            c.modules.push({ ...c.modules[ri(c.modules.length)] }); muts++;
+          }
+          if (rand() < P.MUT_DEL && c.modules.length > P.MOD_FLOOR) {
+            const k = ri(c.modules.length);
+            c.modules.splice(k, 1);
+            const fix = (v) => (v === k ? 0 : v > k ? v - 1 : v);
+            c.start = fix(c.start);
+            for (const m of c.modules) { m.child = fix(m.child); m.next = fix(m.next); }
+            muts++;
+          }
+          // Waking at a different hour is a mutation like any other. It is the
+          // cheapest way out of a crowded neighbourhood, and it costs a lineage
+          // nothing in body plan — which is exactly why it should be available.
+          if (rand() < P.MUT_PHASE) {
+            c.phase = (c.phase + (rand() < 0.5 ? -1 : 1) * (1 + ri(P.PHASE_STEP)) + P.DAY) % P.DAY;
+            muts++;
+          }
+          if (rand() < P.MUT_SEED) {
+            const m = c.modules[ri(c.modules.length)];
+            if (rand() < P.MUT_FIELD) {
+              const step = rand() < 0.5 ? -1 : 1;
+              switch (ri(7)) {
+                case 0: m.len = clamp(m.len + step, 1, 14); break;
+                case 1: m.curve = clamp(m.curve + step, -12, 12); break;
+                case 2: m.reps = clamp(m.reps + step, 1, 9); break;
+                case 3: m.brEvery = clamp(m.brEvery + step, 0, 6); break;
+                case 4: m.brAngle = clamp(m.brAngle + step, 2, 30); break;
+                case 5: m.end = clamp(m.end + step, 0, 2); break;
+                case 6: c.rot = (c.rot + step * 2 + HDIRS) % HDIRS; break;
+              }
+            } else {
+              const n = c.modules.length;
+              if (rand() < 0.5) m.child = (m.child + (rand() < 0.5 ? 1 : n - 1)) % n;
+              else m.next = (m.next + (rand() < 0.5 ? 1 : n - 1)) % n;
+            }
+            muts++;
+          }
+          return { g: c, muts };
+        }
+
+        // -------------------------------------------------------------- seeds
+        function seedFits(i) {
+          if (type[i] !== AIR || drop[i]) return false;
+          // seeds keep their distance from each other, but not from bodies: a
+          // body is a thing that happens for an hour and is gone
+          for (let d = 0; d < 8; d++) if (type[NB(i, d)] === SEED) return false;
+          return true;
+        }
+        function plantSeed(i, g, gen, hue, muts, bank) {
+          if (plants.size >= P.MAX_PLANTS || !seedFits(i)) return null;
+          const pid = nextPid++;
+          const pl = {
+            pid, idx: i, genome: g, gen, hue, muts, bank,
+            state: 0, tips: [], laid: 0, lastForm: 0, days: 0, age: 0,
+            hash: hashGenome(g), opened: -1,
+          };
+          plants.set(pid, pl);
+          type[i] = SEED; owner[i] = pid;
+          stats.born++;
+          return pl;
+        }
+
+        // ---------------------------------------------------------------- rain
+        // Water falls straight down, deflects around what it meets, and re-enters
+        // at the top of the column it left. It is never consumed: a body that
+        // catches a droplet breathes it straight back out as vapour, which
+        // wanders at random until it condenses somewhere else.
+        function rainPass() {
+          for (let y = ROWS - 1; y >= 0; y--) {
+            const row = y * COLS, x0 = ri(COLS);
+            for (let k = 0; k < COLS; k++) {
+              const i = row + ((x0 + k) % COLS);
+              if (!drop[i]) continue;
+              const order = rand() < 0.5 ? [4, 3, 5, 2, 6] : [4, 5, 3, 6, 2];
+              for (const d of order) {
+                const j = NB(i, d);
+                if (type[j] === CELL) {
+                  // intercepted. This is the only income in the world, and the
+                  // only thing a body is for. The droplet leaves as vapour; if
+                  // there is nowhere for it to go, the catch does not happen.
+                  const d0 = ri(8);
+                  let out = -1;
+                  for (let q = 0; q < 8; q++) {
+                    const v = NB(j, (d0 + q) & 7);
+                    if (type[v] === AIR && !drop[v] && !vapor[v]) { out = v; break; }
+                  }
+                  if (out < 0) continue;
+                  if (caught[j] < 250) caught[j]++;
+                  drop[i] = 0;
+                  vapor[out] = 1;
+                  break;
+                }
+                if (type[j] !== AIR || drop[j] || vapor[j]) continue;
+                drop[i] = 0; drop[j] = 1;
+                break;
+              }
+            }
+          }
+        }
+        function vaporPass() {
+          const start = ri(N);
+          for (let k = 0; k < N; k++) {
+            const i = (start + k) % N;
+            if (!vapor[i]) continue;
+            if (rand() < P.CONDENSE) { vapor[i] = 0; drop[i] = 1; continue; }
+            const j = NB(i, ri(8));
+            if (type[j] !== AIR || drop[j] || vapor[j]) continue;
+            vapor[i] = 0; vapor[j] = 1;
+          }
+        }
+
+        // --------------------------------------------------------- the day
+        function cellAt(tp, h) {
+          const px = tp.px + SIN[h] * 1024, py = tp.py + COS[h] * 1024;
+          const nx = ((Math.round(px / 1024) % COLS) + COLS) % COLS;
+          const ny = ((Math.round(py / 1024) % ROWS) + ROWS) % ROWS;
+          const j = ny * COLS + nx;
+          return j === tp.y * COLS + tp.x ? -1 : j;
+        }
+        function unfurl(pl) {
+          pl.state = 1;
+          pl.opened = tick;
+          pl.laid = 0;
+          const g = pl.genome;
+          const x = pl.idx % COLS, y = (pl.idx / COLS) | 0;
+          type[pl.idx] = CELL;
+          pl.tips = [{
+            x, y, h: g.rot, pid: pl.pid, mi: clamp(g.start, 0, g.modules.length - 1),
+            step: 0, rep: 0, laid: 0, stuck: 0, px: x * 1024, py: y * 1024,
+          }];
+        }
+        function grow(pl) {
+          const g = pl.genome, live = [];
+          for (const tp of pl.tips) {
+            if (pl.bank < P.BUILD) break; // cannot afford another cell today
+            const m = g.modules[clamp(tp.mi, 0, g.modules.length - 1)];
+            if (tp.step >= m.len) {
+              if (m.brEvery > 0 && tp.laid % m.brEvery === 0) {
+                const bh = (tp.h + (rand() < 0.5 ? m.brAngle : HDIRS - m.brAngle)) & 63;
+                const bj = cellAt(tp, bh);
+                if (bj >= 0 && type[bj] === AIR && !drop[bj] && pl.bank >= P.BUILD) {
+                  // a branch starts attached: it lays the cell it stands on
+                  type[bj] = CELL; owner[bj] = pl.pid; caught[bj] = 0;
+                  pl.bank -= P.BUILD; pl.laid++; stats.laid++;
+                  live.push({ x: bj % COLS, y: (bj / COLS) | 0, h: bh, pid: pl.pid,
+                    mi: clamp(m.child, 0, g.modules.length - 1), step: 0, rep: 0, laid: 0,
+                    stuck: 0, px: (bj % COLS) * 1024, py: ((bj / COLS) | 0) * 1024 });
+                }
+              }
+              tp.rep++;
+              if (tp.rep < m.reps) tp.step = 0;
+              else if (m.end === END_STOP) continue;
+              else { tp.mi = m.end === END_FORK ? m.child : m.next; tp.step = 0; tp.rep = 0; }
+              live.push(tp);
+              continue;
+            }
+            tp.h = (tp.h + m.curve + 64) & 63;
+            const target = cellAt(tp, tp.h);
+            // A body will not open through anything: not another plant's tissue,
+            // not a dormant seed, not standing water. A crowded hour truncates
+            // your form and you go home with less.
+            // Only the cell itself has to be free. A body may open right past a
+            // sleeping seed or another plant's body — it simply cannot occupy
+            // the same cell. That is what makes the day worth sharing: two
+            // plants can hold the same ground as long as they hold it at
+            // different hours.
+            let blocked = target < 0 || type[target] !== AIR || drop[target];
+            if (blocked) {
+              tp.h = (tp.h + (rand() < 0.5 ? 1 : 63)) & 63;
+              if (++tp.stuck < P.STUCK_MAX) live.push(tp);
+              continue;
+            }
+            tp.stuck = 0;
+            type[target] = CELL; owner[target] = pl.pid; caught[target] = 0;
+            pl.bank -= P.BUILD;
+            pl.laid++;
+            stats.laid++;
+            tp.x = target % COLS; tp.y = (target / COLS) | 0;
+            tp.px = tp.x * 1024; tp.py = tp.y * 1024;
+            tp.step++; tp.laid++;
+            live.push(tp);
+          }
+          pl.tips = live;
+          if (!live.length) pl.state = 2;
+        }
+        // Folding sweeps back through the body from the seed, taking in what each
+        // cell caught. Nothing is remembered about the body's shape — it is
+        // rebuilt from the plan tomorrow — so there is no stored body anywhere,
+        // only a seed, a plan, and a bank.
+        function fold(pl) {
+          const stack = [pl.idx], seen = new Set([pl.idx]);
+          const sx = pl.idx % COLS, sy = (pl.idx / COLS) | 0;
+          const HC = COLS >> 1, HR = ROWS >> 1;
+          let minx = 0, maxx = 0, miny = 0, maxy = 0;
+          let harvest = 0, cells = 0;
+          while (stack.length) {
+            const i = stack.pop();
+            cells++;
+            const dx = (((i % COLS) - sx + COLS + HC) % COLS) - HC;
+            const dy = ((((i / COLS) | 0) - sy + ROWS + HR) % ROWS) - HR;
+            if (dx < minx) minx = dx; if (dx > maxx) maxx = dx;
+            if (dy < miny) miny = dy; if (dy > maxy) maxy = dy;
+            harvest += caught[i] * P.CATCH;
+            caught[i] = 0;
+            type[i] = AIR; owner[i] = 0;
+            for (let d = 0; d < 8; d++) {
+              const j = NB(i, d);
+              if (type[j] === CELL && owner[j] === pl.pid && !seen.has(j)) { seen.add(j); stack.push(j); }
+            }
+          }
+          pl.bank += harvest - P.KEEP; // the day's takings, less the day's toll
+          stats.harvest += harvest;
+          stats.built += cells;
+          pl.lastForm = cells;
+          pl.lastW = maxx - minx + 1;
+          pl.lastH = maxy - miny + 1;
+          pl.tips = [];
+          pl.state = 0;
+          pl.days++;
+          stats.folds++;
+          // back to a seed, if there is still room for one
+          type[pl.idx] = SEED; owner[pl.idx] = pl.pid;
+          if (pl.days > P.SEED_LIFE) {
+            type[pl.idx] = AIR; owner[pl.idx] = 0;
+            plants.delete(pl.pid);
+            stats.died++;
+            stats.starved++;
+            return;
+          }
+          while (pl.bank >= P.SEED_COST + P.SEED_BANK) {
+            const res = mutate(pl.genome);
+            let i = pl.idx;
+            for (let w = 0; w < P.SEED_WALK; w++) {
+              const j = NB(i, ri(8));
+              if (type[j] !== AIR) break;
+              i = j;
+            }
+            const kid = plantSeed(i, res.g, pl.gen + 1,
+              (pl.hue + (res.muts ? (rand() < 0.5 ? 6 : -6) : 0) + 360) % 360,
+              pl.muts + res.muts, P.SEED_BANK);
+            if (!kid) break; // nowhere to put it: keep the capital, try tomorrow
+            pl.bank -= P.SEED_COST + P.SEED_BANK;
+          }
+        }
+
+        function dayPass() {
+          const dayT = tick % P.DAY;
+          if (dayT === 0) {
+            // Nothing persists between days. If tissue is standing there and its
+            // plant is not open, something has gone wrong and the world takes it
+            // back — an invariant, not a cleanup.
+            for (let i = 0; i < N; i++) {
+              if (type[i] !== CELL) continue;
+              const pl = plants.get(owner[i]);
+              if (!pl || pl.state === 0) { type[i] = AIR; owner[i] = 0; caught[i] = 0; }
+            }
+          }
+          for (const pl of [...plants.values()]) {
+            pl.age++;
+            if (pl.state === 0) {
+              if (dayT === pl.genome.phase) {
+                if (pl.bank >= P.BUILD) unfurl(pl);
+                else {
+                  // its hour came and it could not open: that is the end of it
+                  type[pl.idx] = AIR; owner[pl.idx] = 0;
+                  plants.delete(pl.pid);
+                  stats.died++; stats.starved++;
+                }
+              }
+            } else if (pl.state === 1) {
+              grow(pl);
+              if (tick - pl.opened >= P.WINDOW) pl.state = 2;
+            } else if (tick - pl.opened >= P.WINDOW) fold(pl);
+          }
+        }
+
+        function reset() {
+          type.fill(0); owner.fill(0); caught.fill(0); drop.fill(0); vapor.fill(0);
+          plants.clear(); nextPid = 1; tick = 0;
+          let placed = 0, guard = P.WATER_TOTAL * 80;
+          while (placed < P.WATER_TOTAL && guard-- > 0) {
+            const i = ri(N);
+            if (!drop[i]) { drop[i] = 1; placed++; }
+          }
+          for (let k = 0; k < P.START_SEEDS; k++) {
+            const g = defaultGenome();
+            g.phase = ri(P.DAY);
+            g.rot = ri(HDIRS);
+            let i = ri(N), tries = 0;
+            while (!seedFits(i) && tries++ < 200) i = ri(N);
+            plantSeed(i, g, 0, 96, 0, P.SEED_BANK);
+          }
+        }
+
+        function step() {
+          rainPass();
+          vaporPass();
+          dayPass();
+          tick++;
+        }
+
+        function snapshot() {
+          let open = 0, cells = 0, dropN = 0, vaporN = 0, formSum = 0, formN = 0;
+          let wSum = 0, hSum = 0;
+          for (let i = 0; i < N; i++) {
+            if (type[i] === CELL) cells++;
+            dropN += drop[i]; vaporN += vapor[i];
+          }
+          let reachSum = 0, modSum = 0, gen = 0, bankSum = 0, flatSum = 0;
+          const buckets = new Map(), phases = new Uint16Array(16);
+          for (const pl of plants.values()) {
+            if (pl.state !== 0) open++;
+            reachSum += reachModules(pl.genome);
+            modSum += pl.genome.modules.length;
+            bankSum += pl.bank;
+            flatSum += Math.abs(SIN[pl.genome.rot]);
+            if (pl.gen > gen) gen = pl.gen;
+            if (pl.lastForm) {
+              formSum += pl.lastForm;
+              wSum += pl.lastW; hSum += pl.lastH;
+              formN++;
+            }
+            phases[((pl.genome.phase / P.DAY) * 16) | 0]++;
+            let b = buckets.get(pl.hash);
+            if (!b) buckets.set(pl.hash, (b = { hue: pl.hue, label: genomeLabel(pl.genome),
+              reach: reachModules(pl.genome), n: 0, form: 0, phase: pl.genome.phase }));
+            b.n++; b.form += pl.lastForm;
+          }
+          const n = plants.size;
+          // how evenly the population is spread across the hours of the day
+          let occupied = 0;
+          for (let k = 0; k < 16; k++) if (phases[k]) occupied++;
+          return {
+            tick, day: (tick / P.DAY) | 0, plants: n, open, cells, gen,
+            strains: buckets.size,
+            form: formN ? formSum / formN : 0,
+            wide: formN ? wSum / formN : 0,
+            tall: formN ? hSum / formN : 0,
+            reach: n ? reachSum / n : 0,
+            mods: n ? modSum / n : 0,
+            bank: n ? bankSum / n : 0,
+            sideOn: n ? flatSum / n : 0,
+            hours: occupied, phases: [...phases],
+            drops: dropN, vapor: vaporN, waterTotal: dropN + vaporN,
+            folds: stats.folds, starved: stats.starved,
+            harvest: stats.harvest, built: stats.built,
+            lineages: [...buckets.values()].sort((a, b) => b.n - a.n).slice(0, 8),
+          };
+        }
+
+        function inspect(x, y) {
+          const i = y * COLS + x;
+          if (type[i] === AIR) return null;
+          const pl = plants.get(owner[i]);
+          if (!pl) return null;
+          return {
+            pid: pl.pid, gen: pl.gen, form: pl.lastForm, bank: pl.bank, days: pl.days,
+            phase: pl.genome.phase, muts: pl.muts,
+            reach: reachModules(pl.genome), mods: pl.genome.modules.length,
+            detail: pl.genome.modules.map((m, k) =>
+              (k === pl.genome.start ? "> " : "  ") + k + ": len " + m.len + "  curve " + m.curve +
+              "  reps " + m.reps + "  branch " + m.brEvery + "@" + m.brAngle +
+              "  -> " + ["next " + m.next, "fork " + m.child, "stop"][m.end]).join("\n"),
+          };
+        }
+
+        reset();
+        return { P, COLS, ROWS, N, AIR, SEED, CELL, type, owner, caught, drop, vapor,
+          plants, step, snapshot, reset, inspect, get tick() { return tick; } };
+      }
+
+      /* ==== RENDERER ==== */
+      (function () {
+        if (typeof document === "undefined") return;
+        var COLS = 200, ROWS = 140;
+        var sim = createSim({ cols: COLS, rows: ROWS, seed: (Math.random() * 1e9) | 0 });
+        var cv = document.getElementById("c"), ctx = cv.getContext("2d", { alpha: false });
+        cv.width = COLS; cv.height = ROWS;
+        var img = ctx.createImageData(COLS, ROWS);
+        var bar = document.getElementById("bar"), hud = document.getElementById("hud");
+        var plansEl = document.getElementById("plans"), keys = document.getElementById("keys");
+        var running = true, warp = 1, waterWanted = sim.P.WATER_TOTAL, sel = null;
+
+        function hue2rgb(h, s, l) {
+          var c = (1 - Math.abs(2 * l - 1)) * s, hp = (((h % 360) + 360) % 360) / 60,
+            x = c * (1 - Math.abs((hp % 2) - 1)), r = 0, g = 0, b = 0;
+          if (hp < 1) { r = c; g = x; } else if (hp < 2) { r = x; g = c; }
+          else if (hp < 3) { g = c; b = x; } else if (hp < 4) { g = x; b = c; }
+          else if (hp < 5) { r = x; b = c; } else { r = c; b = x; }
+          var m = l - c / 2;
+          return [(r + m) * 255, (g + m) * 255, (b + m) * 255];
+        }
+        function button(label, fn) {
+          var b = document.createElement("button");
+          b.textContent = label; b.addEventListener("click", fn); bar.appendChild(b); return b;
+        }
+        var pauseBtn = button("pause", function () { running = !running; pauseBtn.textContent = running ? "pause" : "run"; });
+        [1, 1000, 10000, 100000].forEach(function (w) {
+          button(w === 1 ? "1x" : w / 1000 + "k", function () { warp = w; });
+        });
+        button("new world", function () {
+          sim = createSim({ cols: COLS, rows: ROWS, seed: (Math.random() * 1e9) | 0,
+            params: { WATER_TOTAL: waterWanted } });
+          sel = null;
+        });
+        var waterIn = document.createElement("input");
+        waterIn.type = "number"; waterIn.min = "100"; waterIn.step = "100"; waterIn.value = String(waterWanted);
+        waterIn.title = "water in the world (needs a new world)";
+        waterIn.addEventListener("change", function () {
+          var v = parseInt(waterIn.value, 10);
+          waterWanted = isFinite(v) && v > 0 ? Math.min(v, sim.N / 3) : 400;
+          waterIn.value = String(waterWanted);
+        });
+        bar.appendChild(waterIn);
+
+        cv.addEventListener("pointerdown", function (e) {
+          var r = cv.getBoundingClientRect();
+          var x = Math.floor(((e.clientX - r.left) / r.width) * COLS);
+          var y = Math.floor(((e.clientY - r.top) / r.height) * ROWS);
+          sel = sim.inspect(Math.max(0, Math.min(COLS - 1, x)), Math.max(0, Math.min(ROWS - 1, y)));
+        });
+
+        function draw() {
+          var d = img.data, type = sim.type, owner = sim.owner, caught = sim.caught,
+            drop = sim.drop, vapor = sim.vapor, SEEDT = sim.SEED, CELL = sim.CELL;
+          for (var i = 0; i < sim.N; i++) {
+            var t = type[i], r, g, b;
+            if (t === 0) { r = 6; g = 9; b = 12; }
+            else {
+              var pl = sim.plants.get(owner[i]);
+              if (t === SEEDT) {
+                // a dormant seed: dim, so the field of them reads as texture and
+                // the few bodies that are open right now read as the picture
+                var cs = hue2rgb(pl ? pl.hue : 96, 0.5, 0.2);
+                r = cs[0]; g = cs[1]; b = cs[2];
+              } else {
+                var c = hue2rgb(pl ? pl.hue : 96, 0.55, 0.42);
+                r = c[0]; g = c[1]; b = c[2];
+                var q = caught[i];
+                if (q) { r += 30 + q * 20; g += 20 + q * 12; }
+              }
+            }
+            if (drop[i]) { r = 30; g = 96; b = 210; }
+            else if (vapor[i]) { r = 44; g = 56; b = 70; }
+            var o = i * 4;
+            d[o] = r > 255 ? 255 : r; d[o + 1] = g > 255 ? 255 : g;
+            d[o + 2] = b > 255 ? 255 : b; d[o + 3] = 255;
+          }
+          ctx.putImageData(img, 0, 0);
+        }
+
+        function paintHud() {
+          var s = sim.snapshot();
+          var clock = "";
+          for (var k = 0; k < 16; k++) clock += s.phases[k] ? (s.phases[k] > 9 ? "#" : String(s.phases[k])) : ".";
+          hud.innerHTML =
+            "day <b>" + s.day + "</b>  hour <b>" + (((sim.tick % sim.P.DAY) / sim.P.DAY * 16) | 0) +
+            "</b>  gen <b>" + s.gen + "</b>  seeds <b>" + s.plants +
+            "</b>  open now <b>" + s.open + "</b>  plans <b>" + s.strains +
+            "</b>  form <b>" + s.form.toFixed(2) +
+            "</b>  w&times;h <b>" + s.wide.toFixed(1) + "&times;" + s.tall.toFixed(1) +
+            "</b>  modules used <b>" + s.reach.toFixed(2) +
+            "</b>  side-on <b>" + s.sideOn.toFixed(2) +
+            "</b>  bank <b>" + s.bank.toFixed(1) +
+            "</b><br />day&nbsp;<b>" + clock + "</b>&nbsp; hours in use <b>" + s.hours +
+            "/16</b>  water <b>" + s.waterTotal + "</b>  folds <b>" + s.folds +
+            "</b>  starved <b>" + s.starved + "</b>";
+          var html = "";
+          if (sel)
+            html += "<div style='color:#e3ece5'>plant " + sel.pid + " &middot; gen " + sel.gen +
+              " &middot; wakes at " + sel.phase + " &middot; last form " + sel.form +
+              " cells &middot; bank " + sel.bank + " &middot; " + sel.reach + " of " + sel.mods +
+              " modules used</div><pre style='margin:3px 0;color:#8fa396'>" + sel.detail + "</pre>";
+          s.lineages.forEach(function (L) {
+            var c = hue2rgb(L.hue, 0.55, 0.5);
+            html += "<div><span class='sw' style='background:rgb(" + (c[0] | 0) + "," + (c[1] | 0) + "," +
+              (c[2] | 0) + ")'></span><b style='color:#e3ece5'>" + L.n + "</b> seeds &middot; wakes at " +
+              L.phase + " &middot; " + L.label + " &middot; " + L.reach + " used &middot; " +
+              (L.n ? L.form / L.n : 0).toFixed(1) + " cells</div>";
+          });
+          plansEl.innerHTML = html;
+        }
+
+        keys.innerHTML =
+          "a plant is a seed, a plan, and a bank. At its own hour of the day it unfolds the plan " +
+          "into a body, spends bank building it, catches the rain falling through it, then folds " +
+          "back into the seed with what it caught. Nothing is alive between times, so nothing is " +
+          "immortal and every day is a generation.<br />" +
+          "a body will not open through another plant or through a dormant seed, so a crowded " +
+          "hour gives you a stunted form and a poor day. The hour a lineage wakes at is a gene: " +
+          "the cheapest escape from a crowd is to get up earlier. Watch the clock strip — " +
+          "when it fills out, the world has split the day between species.<br />" +
+          "tap anything to read its plan &middot; the box is water in the world, and needs a new world";
+
+        var last = 0;
+        function frame(t) {
+          if (running) {
+            var budget = performance.now();
+            for (var k = 0; k < warp; k++) {
+              sim.step();
+              if (performance.now() - budget > 12) break;
+            }
+          }
+          draw();
+          if (t - last > 250) { paintHud(); last = t; }
+          requestAnimationFrame(frame);
+        }
+        requestAnimationFrame(frame);
+      })();
+    </script>
+  </body>
+</html>

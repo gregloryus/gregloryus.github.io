@@ -1,0 +1,659 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="theme-color" content="#16151a">
+<title>Earth and Water</title>
+<style>
+  :root{color-scheme:dark;--ground:#16151a}
+  html,body{margin:0;height:100%;background:var(--ground);overflow:hidden;touch-action:none;-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}
+  body{display:flex;align-items:center;justify-content:center}
+  canvas{image-rendering:pixelated;image-rendering:crisp-edges;display:block}
+</style>
+</head>
+<body>
+<canvas id="c" width="128" height="256"></canvas>
+<script>
+"use strict";
+// Two kinds of matter, water and earth, plus empty space. Each kind takes a form set by its heat:
+//   water: ice / liquid / steam        earth: rock / loose rock / molten (magma underground, lava in the open)
+// A cell holds one particle; particles only ever change form, never kind, so both kinds are conserved.
+const X=128, Z=128, Y=64, XZ=X*Z, N=XZ*Y;
+const E=0, W=4, S=5, I=6, R=8, L=9, M=10;
+const kind=new Uint8Array(N), heat=new Uint8Array(N), age=new Uint8Array(N), aux=new Uint8Array(N), stamp=new Uint8Array(N);
+const CSH=2, CS=4, CX=X>>CSH, CZ=Z>>CSH, CY=Y>>CSH, NC=CX*CZ*CY;
+const chunkOf=new Uint16Array(N);
+const slowF=new Uint8Array(NC), ORDER=new Uint16Array(NC);
+for(let c=0;c<NC;c++) ORDER[c]=c;
+for(let c=NC-1;c>0;c--){ const j=(Math.random()*(c+1))|0, t=ORDER[c]; ORDER[c]=ORDER[j]; ORDER[j]=t; }
+const OFF=[1,-1,X,-X], DXS=[1,-1,0,0], DZS=[0,0,1,-1];
+
+const P={
+  MAGTOP:8, CRUST:11, SEA:20,
+  // heat thresholds (counts of heat units in a cell)
+  BOIL:12, EVAP:5, COND:2, ICEMELT:2, MELT:15, SOLID:10, BUBBLE:20, PIERCE:25, EXTRUDE:0.6, VENTMAX:36,
+  SUN:4200, SUNFRONT:1.0, SUNBACK:0.25, FLOORHEAT:0.5, FLOORMAX:13, PULSES:3, PULSEHEAT:60, PULSER:2, SOURCES:2, WANDER:1.2, JUMP:0.006,
+  K:[0.5,0,0,0, 0.07,0.25,0.05,0, 0.015,0.015,0.03],
+  AIRUP:0.55, AIRDOWN:0.08, RAD:0.1,
+  // motion
+  RAINFALL:0.5, SNOWFALL:0.3, SNOWY:52, VRISE:0.14, VADIA:0.3, VCOH:0.2, VCOOL:0.02, EVAPP:0.003, FILMDRY:0.002,
+  PUSH:0.35, WEATHER:0.01, SPLASH:0.3, SEEK:10, WAVE:0.02, LIFT:0.01,
+  RISE:0.08, CONV:0.6, BUBBLEP:0.35, QUENCH:0.8, LAVACOOL:0.25, LAVAFLOW:0.18,
+  COMPACT:0.0006, AGEP:0.02,
+  BMIN:400, BMAX:900,
+};
+let rs=(Math.random()*4294967295)>>>0||1;
+function rnd(){ rs^=rs<<13; rs^=rs>>>17; rs^=rs<<5; return (rs>>>0)*2.3283064365386963e-10; }
+let pulseAcc=0, tk=0, cycle=0, slowPtr=0, cycleCount=0, lastCycleCount=NC, slowBudget=600, sunAcc=0;
+
+const qA=new Int32Array(N), qB=new Int32Array(N), qmark=new Uint8Array(N);
+let qCur=qA, qNext=qB, nNext=0;
+function enq(i){ if(!qmark[i]){ qmark[i]=1; qNext[nNext++]=i; } }
+function wakeN(i){
+  slowF[chunkOf[i]]=1;
+  enq(i);
+  if(i>=XZ) enq(i-XZ);
+  if(i+1<N) enq(i+1); if(i>=1) enq(i-1);
+  if(i+X<N) enq(i+X); if(i>=X) enq(i-X);
+  const u=i+XZ;
+  if(u<N){ enq(u); if(u+1<N) enq(u+1); enq(u-1); if(u+X<N) enq(u+X); enq(u-X); }
+}
+function swap(i,j){
+  let t=kind[i]; kind[i]=kind[j]; kind[j]=t;
+  t=heat[i]; heat[i]=heat[j]; heat[j]=t;
+  t=age[i]; age[i]=age[j]; age[j]=t;
+  t=aux[i]; aux[i]=aux[j]; aux[j]=t;
+  stamp[i]=tk; stamp[j]=tk; wakeN(i); wakeN(j);
+}
+function sideOK(x,z,d){ return d===0? x<X-1 : d===1? x>0 : d===2? z<Z-1 : z>0; }
+function light(k){ return k===E||k===S; }            // things fall through these
+function yielding(k){ return k===E||k===S||k===W; }  // things sink or slump into these
+function earth(k){ return k>=R; }
+function solid(k){ return k===R||k===L||k===I; }
+function become(i,k){ kind[i]=k; wakeN(i); }
+
+// ---------- water ----------
+function waterMove(i,x,y,z){
+  if(y>0){
+    const b=i-XZ, kb=kind[b];
+    if(light(kb)){ if(rnd()>=P.RAINFALL) return 1; swap(i,b); aux[b]=(aux[b]&3)|64; return 1; }
+    if(aux[i]>=48 && y<Y-1 && !light(kind[i+XZ])) return 0;
+    if(aux[i]&64){
+      aux[i]&=~64;
+      if(kb===R && rnd()<P.SPLASH*P.WEATHER) become(b,L);
+    }
+    const st=(rnd()*4)|0;
+    for(let k=0;k<4;k++){
+      const d=(st+k)&3; if(!sideOK(x,z,d)) continue;
+      const s=i+OFF[d];
+      if(light(kind[s]) && light(kind[s-XZ])){
+        const q=s-XZ;
+        // running water carries loose rock down with it, and wears solid rock loose
+        if(kb===L && rnd()<P.PUSH){
+          const qk=kind[q],qh=heat[q],qa=age[q],qx=aux[q];
+          kind[q]=L; heat[q]=heat[b]; age[q]=age[b]; aux[q]=0;
+          kind[b]=W; heat[b]=heat[i]; age[b]=0; aux[b]=d;
+          kind[i]=qk; heat[i]=qh; age[i]=qa; aux[i]=qx;
+          stamp[q]=tk; stamp[b]=tk; stamp[i]=tk; wakeN(q); wakeN(b); wakeN(i);
+          return 1;
+        }
+        if(kb===R && rnd()<P.WEATHER) become(b,L);
+        swap(i,q); aux[q]=d; return 1;
+      }
+    }
+  }
+  const a=aux[i], rest=(a>>2)&15;
+  if(rest<12){
+    const d=a&3;
+    if(sideOK(x,z,d)){
+      const s=i+OFF[d];
+      if(light(kind[s])){ swap(i,s); aux[s]=d|((rest+1)<<2); return 1; }
+    }
+    aux[i]=((rnd()*4)|0)|((rest+1)<<2);
+    return 1;
+  }
+  if(y<Y-1 && kind[i+XZ]===E){
+    // settled surface water still seeks any lower surface a few cells away
+    const st=(rnd()*4)|0;
+    for(let k=0;k<4;k++){
+      const d=(st+k)&3; let cx=x, cz=z, j=i;
+      for(let n=0;n<P.SEEK;n++){
+        if(!sideOK(cx,cz,d)) break;
+        j+=OFF[d]; cx+=DXS[d]; cz+=DZS[d];
+        if(kind[j]!==E) break;
+        if(light(kind[j-XZ])){ const s=i+OFF[d]; swap(i,s); aux[s]=48|d; return 1; }
+      }
+    }
+  }
+  return 0;
+}
+function steamMove(i,x,y,z){
+  const u=i+XZ, top=y===Y-1, ku=top?R:kind[u];
+  // steam bubbles up through liquid water and molten rock
+  if(ku===W||ku===M){ if(rnd()<0.7) swap(i,u); return 1; }
+  if(heat[i]>0 && rnd()<P.VCOOL){ heat[i]--; if(!top && ku===E && heat[u]<250){ heat[u]++; slowF[chunkOf[u]]=1; } }
+  let nv=0;
+  if(x<X-1&&kind[i+1]===S) nv++; if(x>0&&kind[i-1]===S) nv++;
+  if(z<Z-1&&kind[i+X]===S) nv++; if(z>0&&kind[i-X]===S) nv++;
+  if(ku===S) nv++; if(y>0&&kind[i-XZ]===S) nv++;
+  // cool steam inside a cloud gathers into a falling drop (snow if it is cold and high)
+  if(heat[i]<P.COND && (nv>=1 ? rnd()<0.06 : (heat[i]===0 && rnd()<0.02))){
+    kind[i]= (heat[i]===0 && y>=P.SNOWY) ? I : W; aux[i]=64; wakeN(i); return 1;
+  }
+  if(rnd()<nv*P.VCOH) return 1;
+  const r=rnd();
+  if(ku===E && r<P.VRISE){
+    // rising steam expands and cools, leaving a unit of heat behind in the air
+    if(heat[i]>0 && rnd()<P.VADIA){ heat[i]--; const hh=heat[u]; if(hh<250) heat[u]=hh+1; slowF[chunkOf[u]]=1; }
+    swap(i,u); return 1;
+  }
+  if(r<0.5){ const s= x<X-1? i+1 : i-(X-1); if(kind[s]===E){ swap(i,s); return 1; } }
+  else if(r<0.8){ if(z>0 && kind[i-X]===E){ swap(i,i-X); return 1; } }
+  const d=(rnd()*4)|0;
+  if(sideOK(x,z,d)){ const s=i+OFF[d]; if(kind[s]===E){ swap(i,s); return 1; } }
+  return 1;
+}
+function iceMove(i,x,y,z){
+  if(y===0) return 0;
+  const b=i-XZ, kb=kind[b];
+  if(light(kb)){ if(rnd()>=P.SNOWFALL) return 1; if(rnd()<0.35 && x<X-1 && light(kind[b+1]) && light(kind[i+1])){ swap(i,b+1); return 1; } swap(i,b); return 1; }
+  // ice floats: it rises through liquid water
+  if(y<Y-1 && kind[i+XZ]===W && rnd()<0.5){ swap(i,i+XZ); return 1; }
+  if(kb===W) return 0;
+  // a flake landing on ground that isn't cold melts where it lands
+  if(heat[b]>0 && kb!==I){ become(i,W); aux[i]=0; return 1; }
+  if(rnd()<0.03){
+    const d=(rnd()*4)|0;
+    if(sideOK(x,z,d)){ const s=i+OFF[d]; if(yielding(kind[s]) && yielding(kind[s-XZ])){ if(kb===R&&rnd()<0.04) become(b,L); swap(i,s-XZ); return 1; } }
+  }
+  return 0;
+}
+
+// ---------- earth ----------
+function looseMove(i,x,y,z){
+  if(y===0) return 0;
+  const b=i-XZ, kb=kind[b];
+  if(light(kb)){
+    if(rnd()<0.3 && x<X-1 && light(kind[b+1]) && light(kind[i+1])){ swap(i,b+1); return 1; }
+    swap(i,b); return 1;
+  }
+  if(kb===W){ if(rnd()<0.5){ swap(i,b); return 1; } return 1; }
+  if(rnd()<0.9){
+    const st=(rnd()*4)|0;
+    for(let k=0;k<4;k++){
+      const d=(st+k)&3; if(!sideOK(x,z,d)) continue;
+      const s=i+OFF[d];
+      if(yielding(kind[s]) && yielding(kind[s-XZ])){ swap(i,s-XZ); return 1; }
+    }
+  }
+  return 0;
+}
+function held(s){ const k=kind[s]; return solid(k) && (s<XZ || !yielding(kind[s-XZ])); }
+function rockMove(i,x,y,z,slow){
+  if(y===0 || !yielding(kind[i-XZ])) return 0;
+  let sup=0;
+  for(let d=0;d<4;d++){ if(sideOK(x,z,d)&&held(i+OFF[d])) sup++; }
+  const p= sup>=3?0.0008 : sup===2?0.006 : sup===1?0.05 : 1;
+  if(rnd()<(slow?p*6:p)){ kind[i]=L; swap(i,i-XZ); return 1; }
+  return 0;
+}
+function extrude(i,x,y,z){
+  // find where the magma sea will give up the matching cell
+  let take=-1;
+  for(let t=0;t<4&&take<0;t++){
+    const a=rnd()*6.283, dist=3+rnd()*3;
+    const cx=Math.round(x+Math.cos(a)*dist), cz=Math.round(z+Math.sin(a)*dist);
+    if(cx<0||cx>=X||cz<0||cz>=Z) continue;
+    let yy=0, k=cx+X*cz;
+    if(kind[k]!==M) continue;
+    while(yy<Y-1 && kind[k+XZ]===M){ k+=XZ; yy++; }
+    if(yy<y-1) take=k;
+  }
+  if(take<0) return 0;
+  // the water above is lifted by one cell
+  let j=i+XZ, yy=y+1;
+  while(yy<Y && kind[j]!==E){ const k=kind[j]; if(k!==W&&k!==S&&k!==I) return 0; j+=XZ; yy++; }
+  if(yy>=Y) return 0;
+  for(let q=j;q>i+XZ;q-=XZ){ const l=q-XZ; kind[q]=kind[l]; heat[q]=heat[l]; age[q]=age[l]; aux[q]=aux[l]; stamp[q]=tk; wakeN(q); }
+  const u=i+XZ;
+  kind[u]=M; heat[u]=heat[i]-1; age[u]=0; aux[u]=0; stamp[u]=tk; wakeN(u);
+  kind[take]=E; heat[take]=0; wakeN(take);
+  return 1;
+}
+function moltenMove(i,x,y,z){
+  const h=heat[i];
+  let busy=0;
+  if(y<Y-1){
+    const u=i+XZ, ku=kind[u];
+    if(ku===R||ku===L){
+      // only the hottest molten rock is buoyant enough to push up through solid rock
+      if(h>=P.PIERCE){ busy=1; if(rnd()<P.RISE){ swap(i,u); return 1; } }
+    } else if(ku===M){
+      // hotter molten rock rises through cooler molten rock: the lava lamp
+      if(h>heat[u]+1){ busy=1; if(rnd()<P.CONV){ swap(i,u); return 1; } }
+    } else if(ku===W||ku===I){
+      busy=1;
+      if(h>1 && rnd()<P.QUENCH){ heat[i]=h-1; if(heat[u]<250) heat[u]++; slowF[chunkOf[u]]=1; }
+      // molten rock is heavier than water: it only pushes up into the water while more molten rock presses up behind it
+      // molten rock pressed from below pushes out onto the sea floor, lifting the water above it;
+      // the same amount is drawn from the top of the magma sea a few cells away, which sags there
+      if(h>=P.MELT && y>0 && kind[i-XZ]===M && rnd()<P.EXTRUDE){ if(extrude(i,x,y,z)) return 1; }
+    } else {
+      busy=1;
+      if(h>0 && rnd()<P.LAVACOOL){ heat[i]--; if(heat[u]<250) heat[u]++; slowF[chunkOf[u]]=1; }
+      // in the open too, molten rock pressed from below keeps welling out of the vent,
+      // though the pressure can only lift it so high, and never out of a lone spike
+      if(h>=P.MELT && y>0 && kind[i-XZ]===M && y<P.VENTMAX && rnd()<P.EXTRUDE*(P.VENTMAX-y)/(P.VENTMAX-P.SEA)){
+        let side=0; for(let d=0;d<4;d++) if(sideOK(x,z,d)&&earth(kind[i+OFF[d]])) side++;
+        if(side>=1 && extrude(i,x,y,z)) return 1;
+      }
+    }
+  }
+  { const d=(rnd()*4)|0; if(sideOK(x,z,d)){ const s=i+OFF[d]; if(kind[s]===W){ busy=1; if(heat[i]>1&&rnd()<P.QUENCH){ heat[i]--; if(heat[s]<250) heat[s]++; slowF[chunkOf[s]]=1; } } } }
+  if(y>0){
+    const b=i-XZ, kb=kind[b];
+    if(light(kb)){ swap(i,b); return 1; }
+    if(kb===W && h<P.BUBBLE){ busy=1; if(rnd()<0.5){ swap(i,b); return 1; } }
+  }
+  const ku= y<Y-1 ? kind[i+XZ] : R;
+  if(yielding(ku) || ku===I){
+    busy=1;
+    // lava in the open runs downhill, thick and slow
+    if(rnd()<P.LAVAFLOW){
+      const st=(rnd()*4)|0;
+      for(let k=0;k<4;k++){
+        const d=(st+k)&3; if(!sideOK(x,z,d)) continue;
+        const s=i+OFF[d];
+        if(y>0 && yielding(kind[s]) && yielding(kind[s-XZ])){ swap(i,s-XZ); return 1; }
+      }
+    }
+  }
+  return busy;
+}
+function moveCell(i,k,x,y,z){
+  switch(k){
+    case W: return waterMove(i,x,y,z);
+    case S: return steamMove(i,x,y,z);
+    case I: return iceMove(i,x,y,z);
+    case L: return looseMove(i,x,y,z);
+    case R: return rockMove(i,x,y,z,false);
+    case M: return moltenMove(i,x,y,z);
+  }
+  return 0;
+}
+
+// ---------- heat and change of form (slow pass) ----------
+function conduct(i,k,h,x,y,z){
+  if(rnd()>=h*P.K[k]) return;
+  let j;
+  if(k===E){
+    const r=rnd();
+    if(r<P.AIRUP){ if(y===Y-1){ heat[i]--; return; } j=i+XZ; }
+    else if(r<P.AIRUP+P.AIRDOWN){ if(y===0) return; j=i-XZ; }
+    else { const d=(rnd()*4)|0; if(!sideOK(x,z,d)) return; j=i+OFF[d]; }
+  } else {
+    const d=(rnd()*6)|0;
+    if(d<4){ if(!sideOK(x,z,d)) return; j=i+OFF[d]; }
+    else if(d===4){ if(y===Y-1){ if(k===S) heat[i]--; return; } j=i+XZ; }
+    else { if(y===0) return; j=i-XZ; }
+  }
+  if(heat[j]<250){ heat[i]--; heat[j]++; slowF[chunkOf[j]]=1; }
+}
+function slowCell(i,k,x,y,z){
+  const h=heat[i];
+  switch(k){
+    case W:{
+      if(h>=P.BOIL){ kind[i]=S; heat[i]=P.EVAP+1; aux[i]=0; wakeN(i); return; }
+      if(y<Y-1 && kind[i+XZ]===E){
+        if(h>=P.EVAP && rnd()<P.EVAPP){ kind[i]=S; heat[i]=P.EVAP+1; aux[i]=0; wakeN(i); return; }
+        if(y>0 && kind[i-XZ]!==W && rnd()<P.FILMDRY+0.03*h){ kind[i]=S; if(heat[i]<3) heat[i]=3; aux[i]=0; wakeN(i); return; }
+        if(h===0 && (y===0||heat[i-XZ]===0) && (x===0||heat[i-1]===0) && (x===X-1||heat[i+1]===0) && (z===0||heat[i-X]===0) && (z===Z-1||heat[i+X]===0)){
+          let nuc= y>0 && kind[i-XZ]!==W;
+          for(let d=0;d<4;d++) if(sideOK(x,z,d)&&kind[i+OFF[d]]===I) nuc=true;
+          if(rnd()<(nuc?0.12:0.0004)){ kind[i]=I; aux[i]=0; wakeN(i); return; }
+        }
+        // wind pushes the shallows: loose rock on the bottom edges along the shore, downwind
+        if(y>=2 && rnd()<P.WAVE){
+          let b=i-XZ, dep=1;
+          while(dep<4 && kind[b]===W){ b-=XZ; dep++; }
+          if(kind[b]===L && x<X-1){
+            const t=b+1;
+            if(kind[t]===W){ swap(b,t); return; }
+          }
+        }
+        if(y>0 && kind[i-XZ]!==E){
+          const st=(rnd()*4)|0;
+          for(let q=0;q<4;q++){
+            const d=(st+q)&3; let cx=x, cz=z, j=i;
+            for(let n=0;n<P.SEEK;n++){
+              if(!sideOK(cx,cz,d)) break;
+              j+=OFF[d]; cx+=DXS[d]; cz+=DZS[d];
+              if(kind[j]!==E) break;
+              if(light(kind[j-XZ])){ aux[i]=d; enq(i); return; }
+            }
+          }
+        }
+      }
+      return;
+    }
+    case I:{
+      let warm=h>=P.ICEMELT;
+      if(!warm && y>0){ const b=i-XZ; if(kind[b]===W&&heat[b]>=2) warm=true; else if(earth(kind[b])&&heat[b]>=1&&rnd()<0.08) warm=true; }
+      for(let d=0;d<4&&!warm;d++) if(sideOK(x,z,d)){ const s=i+OFF[d]; if(kind[s]===W&&heat[s]>=2) warm=true; }
+      if(warm && rnd()<0.3){ kind[i]=W; aux[i]=0; wakeN(i); return; }
+      if(y>0 && kind[i-XZ]!==W) iceMove(i,x,y,z);
+      return;
+    }
+    case M:
+      // molten rock that has lost enough heat sets solid, fresh and dark
+      if(h<P.SOLID){ kind[i]=R; age[i]=0; wakeN(i); }
+      else moltenMove(i,x,y,z);
+      return;
+    case R:
+      if(h>=P.MELT){ kind[i]=M; wakeN(i); return; }
+      if(age[i]<255 && rnd()<P.AGEP) age[i]++;
+      if(y>0 && yielding(kind[i-XZ])) rockMove(i,x,y,z,true);
+      return;
+    case L:{
+      if(h>=P.MELT){ kind[i]=M; wakeN(i); return; }
+      if(y===0||y===Y-1) return;
+      const ku=kind[i+XZ];
+      if(ku===E){
+        // dry loose rock in the open is picked up by the wind
+        let wet=false;
+        for(let d=0;d<4&&!wet;d++) if(sideOK(x,z,d)&&kind[i+OFF[d]]===W) wet=true;
+        if(!wet && x<X-1 && kind[i+1+XZ]===E && kind[i-XZ]!==W && rnd()<P.LIFT){ swap(i,i+XZ); return; }
+      } else if(earth(ku) && ku!==M && earth(kind[i-XZ]) && rnd()<P.COMPACT){
+        // buried loose rock is pressed back into solid rock
+        if(y<Y-2 && earth(kind[i+2*XZ])){ kind[i]=R; wakeN(i); }
+      }
+      return;
+    }
+  }
+}
+function slowChunk(c){
+  const cx=c%CX, cz=((c/CX)|0)%CZ, cy=(c/(CX*CZ))|0;
+  const x0=cx<<CSH, z0=cz<<CSH, y0=cy<<CSH;
+  let keep=0;
+  for(let yy=0;yy<CS;yy++){
+    const y=y0+yy;
+    for(let z=z0;z<z0+CS;z++){
+      const i0=X*z+XZ*y;
+      for(let x=x0;x<x0+CS;x++){
+        const i=i0+x, k=kind[i];
+        // heat rises into the world through its floor
+        // the deep earth below holds the floor at one steady temperature, warming or cooling it
+        if(y===0 && earth(k) && rnd()<P.FLOORHEAT) heat[i]=P.FLOORMAX;
+        const h=heat[i];
+        if(h){
+          keep=1; conduct(i,k,h,x,y,z);
+          if(solid(k)||k===M){ if(y<Y-1 && kind[i+XZ]===E && heat[i]>0 && rnd()<P.RAD){ heat[i]--; const u=i+XZ; if(heat[u]<250) heat[u]++; } }
+        }
+        if(k===E) continue;
+        if(k===S||k===M||y===0) keep=1;
+        slowCell(i,kind[i],x,y,z);
+      }
+    }
+  }
+  slowF[c]=keep;
+}
+function sunRay(){
+  const x=(rnd()*X)|0, z=(rnd()*Z)|0;
+  const f=P.SUNBACK+(P.SUNFRONT-P.SUNBACK)*(z/(Z-1));
+  if(rnd()>f) return;
+  let i=x+X*z+XZ*(Y-1);
+  for(let y=Y-1;y>=0;y--,i-=XZ){
+    const k=kind[i];
+    if(k===E) continue;
+    if(k===S){ if(rnd()<0.12) break; continue; }
+    if(k===W){ if(rnd()<0.4) break; continue; }
+    if(k===I){ if(rnd()<0.65) return; break; }
+    break;
+  }
+  if(i<0) return;
+  if(heat[i]<250){ heat[i]++; slowF[chunkOf[i]]=1; }
+}
+function step(){
+  tk=(tk+1)&255;
+  const cur=qNext, n=nNext;
+  qNext=qCur; qCur=cur; nNext=0;
+  for(let k=0;k<n;k++) qmark[cur[k]]=0;
+  for(let k=0;k<n;k++){
+    const i=cur[k];
+    if(stamp[i]===tk) continue;
+    const m=kind[i];
+    if(m===E) continue;
+    const y=(i/XZ)|0, r=i-y*XZ, z=r>>7, x=r&127;
+    if(moveCell(i,m,x,y,z)) enq(i);
+  }
+  let done=0, scanned=0;
+  while(done<slowBudget && scanned<NC){
+    const c=ORDER[slowPtr]; slowPtr++; scanned++;
+    if(slowPtr>=NC){ slowPtr=0; cycle++; lastCycleCount=Math.max(1,cycleCount); cycleCount=0; }
+    if(slowF[c]){ slowChunk(c); done++; cycleCount++; }
+  }
+  const frac=done/Math.max(1,lastCycleCount);
+  sunAcc+=P.SUN*frac;
+  while(sunAcc>=1){ sunAcc-=1; sunRay(); }
+  // now and then, somewhere at random, a surge of heat wells up through the floor
+  pulseAcc+=P.PULSES*frac;
+  while(pulseAcc>=1){ pulseAcc-=1; pulse(); }
+}
+// the surges come from a couple of wandering sources deep below: each surge rises near the last one from
+// the same source, the source drifts a little each time, and once in a while it gives out and starts afresh elsewhere
+const src=[];
+function newSource(){ return {x:8+rnd()*(X-16), z:8+rnd()*(Z-16)}; }
+function pulse(){
+  while(src.length<P.SOURCES) src.push(newSource());
+  const k=(rnd()*src.length)|0, so=src[k];
+  if(rnd()<P.JUMP){ src[k]=newSource(); return; }
+  so.x=Math.max(4,Math.min(X-5,so.x+(rnd()*2-1)*P.WANDER)); so.z=Math.max(4,Math.min(Z-5,so.z+(rnd()*2-1)*P.WANDER));
+  const cx=Math.round(so.x+(rnd()*2-1)*2), cz=Math.round(so.z+(rnd()*2-1)*2);
+  const pr=P.PULSER;
+  for(let dz=-pr;dz<=pr;dz++) for(let dx=-pr;dx<=pr;dx++){
+    if(dx*dx+dz*dz>pr*pr+1) continue;
+    const xx=cx+dx, zz=cz+dz; if(xx<0||xx>=X||zz<0||zz>=Z) continue;
+    for(let yy=1;yy<=2;yy++){ const i=xx+X*zz+XZ*yy; if(earth(kind[i])){ kind[i]=M; heat[i]=P.PULSEHEAT; wakeN(i); } }
+  }
+}
+function init(){
+  kind.fill(0); heat.fill(0); age.fill(0); aux.fill(0); stamp.fill(0);
+  for(let i=0;i<N;i++){
+    const y=(i/XZ)|0, z=((i%XZ)/X)|0;
+    chunkOf[i]=((i%X)>>CSH)+CX*((z>>CSH)+CZ*(y>>CSH));
+  }
+  // starting condition: a sea of molten rock, a thin crust over it, and the ocean on top. no land.
+  for(let z=0;z<Z;z++) for(let x=0;x<X;x++){
+    const f=z/(Z-1);
+    for(let y=0;y<Y;y++){
+      const i=x+X*z+XZ*y;
+      if(y<P.MAGTOP){ kind[i]=M; heat[i]=12+((rnd()*3)|0); }
+      else if(y<P.CRUST){ kind[i]=R; heat[i]=Math.max(1,10-3*(y-P.MAGTOP)+((rnd()*2)|0)); age[i]=60+((rnd()*40)|0); }
+      else if(y===P.CRUST){ kind[i]=L; heat[i]=2; }
+      else if(y<P.SEA){ kind[i]=W; aux[i]=48; heat[i]= (rnd()<0.3+2.2*f) ? 1+((rnd()*3*f)|0) : 0; }
+    }
+  }
+  slowF.fill(1); qmark.fill(0); nNext=0;
+  for(let i=0;i<N;i++) if(kind[i]!==E) enq(i);
+  src.length=0; tk=0; cycle=0; slowPtr=0; cycleCount=0; lastCycleCount=NC; sunAcc=0;
+}
+
+// ---------- render ----------
+const Wd=X, H=Z+2*Y, R0=2*(Y-1), HOR=64;
+function hex(h){ return [parseInt(h.slice(1,3),16),parseInt(h.slice(3,5),16),parseInt(h.slice(5,7),16)]; }
+const COL={
+  rockNew:hex('#34303a'), rockMid:hex('#6c6475'), rockOld:hex('#b09a78'), loose:hex('#dcc79b'),
+  ice:hex('#f4f8fb'), water:hex('#2a6cc0'), shallow:hex('#5fc4d6'), deep:hex('#1d4f9c'), rain:hex('#79aee6'), steam:hex('#ffffff'),
+  skyTop:hex('#8fbbe0'), skyBot:hex('#e9f0ee'), haze:hex('#c9d8e6'), gold:hex('#ffd35c'), foam:hex('#f2f7f5'),
+  farSea:hex('#3f86c9'), horizon:hex('#cfe2ea'),
+  magDeep:hex('#8e2412'), magHot:hex('#ff5a1a'), magWhite:hex('#ffe070'),
+};
+let cv, ctx, img, buf32, frame=0;
+const G=18;
+const colTop=new Int8Array(X*Z), fallShade=new Uint8Array(X*Z), DG=new Int16Array(X*Z), PG=new Int16Array(X*Z), STK=new Int16Array(Z);
+const HAZE=new Float32Array(Z); for(let z=0;z<Z;z++) HAZE[z]=0.3*Math.pow(1-z/Z,1.7);
+function render(){
+  frame++;
+  for(let c=0;c<X*Z;c++){
+    let y=Y-1, i=c+XZ*(Y-1);
+    while(y>=0 && kind[i]===E){ y--; i-=XZ; }
+    colTop[c]=y;
+    fallShade[c]= (y>0 && (kind[i]===W||kind[i]===I) && kind[i-XZ]===E) ? 1 : 0;
+  }
+  for(let x=0;x<X;x++){
+    let sp=0;
+    for(let z=0;z<Z;z++){
+      const c=x+X*z, d=2*colTop[c]-z; DG[c]=d;
+      while(sp>0 && DG[x+X*STK[sp-1]]<=d) sp--;
+      PG[c]= sp>0 ? STK[sp-1] : -1;
+      STK[sp++]=z;
+    }
+  }
+  const csh=COL.shallow, cw=COL.water, crn=COL.rain, cst=COL.steam, cdeep=COL.deep, chz=COL.haze;
+  const hsy=R0-HOR-2*P.SEA;
+  for(let sy=0;sy<H;sy++){
+    const r=sy-R0;
+    const yStart=Math.min(Y-1,(Z+1-r)>>1);
+    let sr,sg,sb;
+    const zs=r+2*P.SEA;
+    if(zs<0 && -zs<HOR){
+      const k=Math.pow((-zs)/HOR,0.7);
+      sr=COL.farSea[0]+(COL.horizon[0]-COL.farSea[0])*k; sg=COL.farSea[1]+(COL.horizon[1]-COL.farSea[1])*k; sb=COL.farSea[2]+(COL.horizon[2]-COL.farSea[2])*k;
+    } else {
+      const k=Math.max(0,Math.min(1,sy/Math.max(1,hsy)));
+      sr=COL.skyTop[0]+(COL.skyBot[0]-COL.skyTop[0])*k; sg=COL.skyTop[1]+(COL.skyBot[1]-COL.skyTop[1])*k; sb=COL.skyTop[2]+(COL.skyBot[2]-COL.skyTop[2])*k;
+    }
+    for(let x=0;x<Wd;x++){
+      let pr=0,pg=0,pb=0,T=1,gA=0,ghost=0,gsteps=0,stop=0,inW=0,gw=0;
+      let zq=Math.min(Z-1,r+2*(Y-1)), y0=-1;
+      if(zq>=0){
+        const t=-r;
+        while(zq>=0 && DG[x+X*zq]<t) zq=PG[x+X*zq];
+        if(zq>=0) y0=Math.min(yStart,(zq-r+2)>>1);
+      }
+      for(let y=y0;y>=0&&!stop;y--){
+        for(let face=0;face<3;face++){
+          const z= r+2*y-face;
+          if(z<0){ stop=1; break; }
+          if(z>=Z) continue;
+          const col=x+X*z;
+          if(!ghost && y>colTop[col]) continue;
+          const i=col+XZ*y;
+          const k=kind[i];
+          if(ghost){
+            // molten rock hidden close beneath shows through as a glow
+            if(k===M && heat[i]>=P.BUBBLE && !gw){ const a=0.5*(1-gsteps/G); if(a>gA) gA=a; }
+            if(++gsteps>=G){ stop=1; break; }
+            continue;
+          }
+          if(k===E) continue;
+          if(k===S||k===W){
+            let c,a;
+            if(k===S){
+              c=cst; let n=0;
+              if(kind[i+1]===S) n++; if(kind[i-1]===S) n++;
+              if(i+X<N&&kind[i+X]===S) n++; if(i>=X&&kind[i-X]===S) n++;
+              if(i+XZ<N&&kind[i+XZ]===S) n++; if(i>=XZ&&kind[i-XZ]===S) n++;
+              a= n===0 ? 0.03 : n===1 ? 0.12 : n===2 ? 0.28 : 0.45;
+            } else if(i>=XZ && light(kind[i-XZ])){ c=crn; a=0.4; }
+            else if(inW===2){ continue; }
+            else if(face===0 && inW===0){
+              let d=1, q=i-XZ; while(d<14 && q>=0 && kind[q]===W){ d++; q-=XZ; }
+              const dk=Math.min(1,(d-1)/7);
+              const wr=csh[0]+(cw[0]-csh[0])*dk, wg=csh[1]+(cw[1]-csh[1])*dk, wb=csh[2]+(cw[2]-csh[2])*dk;
+              if(d===1 && q>=0 && kind[q]!==W){
+                pr+=T*0.16*wr; pg+=T*0.16*wg; pb+=T*0.16*wb; T*=0.8; inW=2;
+                continue;
+              }
+              a=1-Math.pow(0.76,d);
+              let foam=0, nw=0;
+              if(x<X-1){ const q2=kind[i+1]; if(solid(q2)) foam++; else if(q2===W) nw++; }
+              if(x>0){ const q2=kind[i-1]; if(solid(q2)) foam++; else if(q2===W) nw++; }
+              if(z<Z-1){ const q2=kind[i+X]; if(solid(q2)) foam++; else if(q2===W) nw++; }
+              if(z>0){ const q2=kind[i-X]; if(solid(q2)) foam++; else if(q2===W) nw++; }
+              if(nw<2) foam=0;
+              pr+=T*(a*wr+18); pg+=T*(a*wg+18); pb+=T*(a*wb+18); T*=(1-a)*0.93;
+              if(foam && d<=3){ const fa=Math.min(0.6,0.3*foam); pr+=(COL.foam[0]-pr)*fa; pg+=(COL.foam[1]-pg)*fa; pb+=(COL.foam[2]-pb)*fa; T*=(1-fa); }
+              inW=2;
+              if(T<0.05){ pr+=T*cdeep[0]; pg+=T*cdeep[1]; pb+=T*cdeep[2]; T=0; ghost=1; gsteps=0; gw=1; }
+              continue;
+            }
+            else { c=cw; a=0.24; inW=1; }
+            pr+=T*a*c[0]; pg+=T*a*c[1]; pb+=T*a*c[2]; T*=(1-a);
+            if(T<0.05){ pr+=T*cdeep[0]; pg+=T*cdeep[1]; pb+=T*cdeep[2]; T=0; ghost=1; gsteps=0; gw=1; }
+            continue;
+          }
+          let cr,cg,cb;
+          if(k===M){
+            // molten rock: dark red when buried and dim, orange to yellow as it gets hotter
+            const t=Math.min(1,Math.max(0,(heat[i]-P.SOLID)/16));
+            let c0,c1,u;
+            if(t<0.5){ c0=COL.magDeep; c1=COL.magHot; u=t*2; } else { c0=COL.magHot; c1=COL.magWhite; u=(t-0.5)*2; }
+            cr=c0[0]+(c1[0]-c0[0])*u; cg=c0[1]+(c1[1]-c0[1])*u; cb=c0[2]+(c1[2]-c0[2])*u;
+            if(face!==0){ cr*=0.8; cg*=0.8; cb*=0.8; }
+          } else {
+            let c;
+            if(k===R){
+              const a=age[i]/255; let c0,c1,u;
+              if(a<0.5){ c0=COL.rockNew; c1=COL.rockMid; u=a*2; } else { c0=COL.rockMid; c1=COL.rockOld; u=(a-0.5)*2; }
+              c=[c0[0]+(c1[0]-c0[0])*u, c0[1]+(c1[1]-c0[1])*u, c0[2]+(c1[2]-c0[2])*u];
+            } else if(k===L) c=COL.loose; else c=COL.ice;
+            let sh= face===0?1.0:0.64;
+            if(face===0){
+              if(z<Z-1 && yielding(kind[i+X])) sh*=1.1;
+              if(z>0 && y<Y-1 && solid(kind[i-X+XZ])) sh*=0.86;
+            } else if(face===2 && y>0 && z<Z-1 && solid(kind[i-XZ+X])) sh*=0.86;
+            if(k!==I){ let q=Math.imul(i^(i>>>7),0x2c1b3c6d); q^=q>>>15; q=Math.imul(q,0x297a2d39); q^=q>>>13; sh*= face===0 ? 0.95+0.1*((q>>>29)/7) : 0.96+0.08*((q>>>30)/3); }
+            if(face===0 && fallShade[col]) sh*=0.72;
+            cr=c[0]*sh; cg=c[1]*sh; cb=c[2]*sh;
+            const hz=HAZE[z];
+            cr+=(chz[0]-cr)*hz; cg+=(chz[1]-cg)*hz; cb+=(chz[2]-cb)*hz;
+            const h=heat[i]-8;
+            if(h>0){ const a=Math.min(0.4,h*h*0.005); if(a>gA) gA=a; }
+          }
+          pr+=T*cr; pg+=T*cg; pb+=T*cb; T=0;
+          ghost=1; gsteps=0;
+        }
+      }
+      if(T>0){ pr+=T*sr; pg+=T*sg; pb+=T*sb; }
+      if(gA>0){ const gc=COL.magHot; pr+=(gc[0]-pr)*gA; pg+=(gc[1]-pg)*gA; pb+=(gc[2]-pb)*gA; }
+      buf32[sy*Wd+x]=0xff000000|((pb>255?255:pb)<<16)|((pg>255?255:pg)<<8)|(pr>255?255:pr);
+    }
+  }
+  ctx.putImageData(img,0,0);
+}
+
+// ---------- run ----------
+let speed=1, pressT=0;
+const SPEEDS=[1,3,8];
+function fit(){
+  const vw=document.body.clientWidth||window.innerWidth, vh=document.body.clientHeight||window.innerHeight;
+  const s=Math.min(vw/Wd, vh/H);
+  cv.style.width=(Wd*s)+'px'; cv.style.height=(H*s)+'px';
+}
+function loop(){
+  const t0=performance.now();
+  const steps=SPEEDS[speed-1]||1;
+  for(let k=0;k<steps;k++) step();
+  const simT=(performance.now()-t0)/steps;
+  if(simT>10) slowBudget=Math.max(P.BMIN,slowBudget*0.95); else slowBudget=Math.min(P.BMAX,slowBudget*1.03+4);
+  render();
+  requestAnimationFrame(loop);
+}
+if(typeof document!=='undefined' && document.getElementById('c')){
+  cv=document.getElementById('c'); ctx=cv.getContext('2d');
+  img=ctx.createImageData(Wd,H); buf32=new Uint32Array(img.data.buffer);
+  init(); fit(); window.addEventListener('resize',fit);
+  cv.addEventListener('contextmenu',e=>e.preventDefault());
+  cv.addEventListener('pointerdown',()=>{ pressT=performance.now(); });
+  cv.addEventListener('pointerup',()=>{
+    const d=performance.now()-pressT;
+    if(d>650){ init(); } else { speed=speed%3+1; }
+  });
+  requestAnimationFrame(loop);
+}
+</script>
+</body>
+</html>

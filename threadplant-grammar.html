@@ -1,0 +1,1558 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+  <title>Threadplant Grammar — recursive plants in a 2D world</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --panel: rgba(7, 17, 15, 0.94);
+      --line: rgba(176, 231, 190, 0.22);
+      --text: #e8f2e9;
+      --muted: #9db0a2;
+      --accent: #9eea85;
+    }
+    * { box-sizing: border-box; }
+    html, body {
+      width: 100%;
+      height: 100%;
+      margin: 0;
+      overflow: hidden;
+      background: #050b0d;
+      color: var(--text);
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      touch-action: manipulation;
+    }
+    body {
+      display: grid;
+      grid-template-rows: auto minmax(0, 1fr) auto;
+      padding-top: env(safe-area-inset-top);
+      padding-bottom: env(safe-area-inset-bottom);
+    }
+    #toolbar {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      min-height: 52px;
+      padding: 7px max(8px, env(safe-area-inset-right)) 7px max(8px, env(safe-area-inset-left));
+      background: var(--panel);
+      border-bottom: 1px solid var(--line);
+      overflow-x: auto;
+      scrollbar-width: none;
+      white-space: nowrap;
+    }
+    #toolbar::-webkit-scrollbar { display: none; }
+    button, label.control {
+      min-height: 36px;
+      border: 1px solid rgba(181, 229, 191, 0.28);
+      border-radius: 8px;
+      background: #14231e;
+      color: var(--text);
+      font: inherit;
+      font-size: 12px;
+      padding: 7px 10px;
+      cursor: pointer;
+      user-select: none;
+      -webkit-user-select: none;
+    }
+    button:active { transform: translateY(1px); background: #1e332a; }
+    label.control {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+    }
+    input { accent-color: var(--accent); }
+    #title {
+      color: var(--accent);
+      font-weight: 700;
+      letter-spacing: 0.03em;
+      margin-right: 2px;
+    }
+    #world-wrap {
+      position: relative;
+      min-height: 0;
+      overflow: hidden;
+      background: #050b0d;
+    }
+    canvas {
+      display: block;
+      width: 100%;
+      height: 100%;
+      image-rendering: pixelated;
+      image-rendering: crisp-edges;
+      cursor: crosshair;
+      touch-action: none;
+    }
+    #hint {
+      position: absolute;
+      left: 10px;
+      top: 9px;
+      max-width: min(88vw, 440px);
+      padding: 6px 8px;
+      border-radius: 6px;
+      background: rgba(0, 0, 0, 0.48);
+      color: rgba(235, 247, 235, 0.78);
+      font-size: 11px;
+      pointer-events: none;
+      transition: opacity 0.5s;
+    }
+    #startup-warning {
+      position: absolute;
+      z-index: 8;
+      left: 50%;
+      top: 50%;
+      width: min(520px, calc(100% - 32px));
+      transform: translate(-50%, -50%);
+      padding: 14px 16px;
+      border: 1px solid #b58b43;
+      border-radius: 9px;
+      background: rgba(29, 20, 7, 0.96);
+      color: #ffe0a3;
+      font-size: 12px;
+      line-height: 1.5;
+    }
+    #footer {
+      min-height: 42px;
+      padding: 5px max(9px, env(safe-area-inset-right)) 6px max(9px, env(safe-area-inset-left));
+      background: var(--panel);
+      border-top: 1px solid var(--line);
+      font-size: 11px;
+      line-height: 1.35;
+    }
+    #stats { color: #d5e5d8; }
+    #status { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    details {
+      position: absolute;
+      right: 9px;
+      bottom: 8px;
+      z-index: 4;
+      width: min(420px, calc(100% - 18px));
+      max-height: min(72%, 520px);
+      overflow: auto;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: rgba(6, 15, 13, 0.95);
+      font-size: 11px;
+      line-height: 1.45;
+    }
+    summary { padding: 8px 10px; cursor: pointer; color: #cfe5d2; }
+    details > div { padding: 0 12px 11px; color: #b9c9bc; }
+    details p { margin: 7px 0; }
+    .legend { display: flex; flex-wrap: wrap; gap: 4px 10px; margin: 7px 0; }
+    .swatch { display: inline-block; width: 9px; height: 9px; margin-right: 4px; border-radius: 2px; }
+    @media (max-width: 560px) {
+      #title { display: none; }
+      #toolbar { gap: 5px; }
+      button, label.control { min-height: 34px; padding: 6px 9px; }
+      #footer { font-size: 10px; }
+    }
+  </style>
+</head>
+<body>
+  <div id="toolbar">
+    <span id="title">THREADPLANT GRAMMAR</span>
+    <button id="pauseBtn" type="button">Pause</button>
+    <button id="speedBtn" type="button">4×</button>
+    <button id="resetBtn" type="button">New world</button>
+    <button id="seedBtn" type="button">Drop seed</button>
+    <label class="control"><input id="evolveToggle" type="checkbox" checked> evolve</label>
+    <label class="control"><input id="respToggle" type="checkbox" checked> water cycle</label>
+  </div>
+
+  <main id="world-wrap">
+    <canvas id="world" aria-label="A lattice simulation of evolving one-dimensional plants"></canvas>
+    <div id="startup-warning">The simulation script has not started. If this message remains visible, this file is open in a preview that blocks JavaScript. Use “Open in Safari” or a local HTML-viewer app rather than the in-chat file preview.</div>
+    <div id="hint">Tap empty space to drop a seed; tap a plant to inspect its local lineage.</div>
+    <details>
+      <summary>How this prototype works</summary>
+      <div>
+        <p>Bright tips are the only developmental agents. They move one lattice cell at a time, leaving green conduit behind. Touching cells of the same genet form the transport graph; there are no parent pointers or central plant object.</p>
+        <p>The world begins without soil: only a pool of water under open space. Dead tissue and failed seeds become falling organic matter, so the plants gradually manufacture the substrate that later plants encounter.</p>
+        <p>Blue packets enter through root-polarized tissue touching water. With the water cycle on, blue traffic enables exposed shoot tissue to make red energy and sometimes transpire water into vapor. Both colors perform ordinary random walks through adjacent tissue of the <em>same genet only</em>. A tip briefly latches one of each; red is spent on an action and blue returns to the network.</p>
+        <p>Every tip has a lineage ID, root/shoot polarity, continuous heading, and a current place within its seed's developmental grammar. A genome contains a variable number of modules. Each module encodes a segment length and curvature, repetition count, branching pattern and angle, child and continuation modules, environmental plasticity, and reproductive tendency.</p>
+        <p>The grammar supplies a heritable morphological theme while openness or wetness can bend its execution locally. Mutations can tune a module, rewire module calls, or duplicate and delete whole modules. Thus genome complexity and recursive body structure can expand rather than choosing among a fixed table of local reactions.</p>
+        <p>Conduit stays saturated only when both red and blue have recently passed. Crowded interfaces between unrelated genets pay an additional vitality cost. Unused paths fade into dead wood, then crumble into water-holding organic soil.</p>
+        <div class="legend">
+          <span><i class="swatch" style="background:#50d46a"></i>living conduit</span>
+          <span><i class="swatch" style="background:#d9ff9b"></i>tip</span>
+          <span><i class="swatch" style="background:#ff3b32"></i>red packet</span>
+          <span><i class="swatch" style="background:#3aa8ff"></i>blue packet/water</span>
+          <span><i class="swatch" style="background:#c9e4e7"></i>vapor</span>
+          <span><i class="swatch" style="background:#736a5d"></i>wood/organic soil</span>
+        </div>
+      </div>
+    </details>
+  </main>
+
+  <footer id="footer">
+    <div id="stats">Starting…</div>
+    <div id="status">One genome, two polarities: upward shoot and downward root.</div>
+  </footer>
+
+<script>
+(() => {
+  "use strict";
+
+  const startupWarning = document.getElementById("startup-warning");
+  function showStartupError(detail) {
+    if (!startupWarning) return;
+    startupWarning.style.display = "block";
+    startupWarning.textContent = `The simulation script encountered an error: ${detail}. Try opening this file in Safari; if it already is, send a screenshot of this message.`;
+  }
+  window.addEventListener("error", event => showStartupError(event.message || "unknown JavaScript error"));
+  window.addEventListener("unhandledrejection", event => showStartupError(String(event.reason || "unhandled error")));
+  if (startupWarning) startupWarning.style.display = "none";
+
+  // --- State codes --------------------------------------------------------
+  const AIR = 0, SOIL = 1, ORGANIC = 2;
+  const EMPTY = 0, CONDUIT = 1, TIP = 2, SEED = 3, WOOD = 4;
+  const RED = 1, BLUE = 2;
+
+  const DX = new Int8Array([0, 1, 1, 1, 0, -1, -1, -1]);
+  const DY = new Int8Array([-1, -1, 0, 1, 1, 1, 0, -1]);
+  const CARDINAL = [0, 2, 4, 6];
+
+  const CFG = {
+    targetPixel: 4,
+    minCols: 72,
+    maxCols: 170,
+    minRows: 86,
+    maxRows: 190,
+    initialVitality: 168,
+    maintenanceEvery: 24,
+    trafficGain: 18,
+    idleDecay: 4,
+    oneColorDecay: 2,
+    foreignTouchDecay: 7,
+    packetTTL: 330,
+    packetMicrosteps: 3,
+    tipCaptureChance: 0.46,
+    maxPacketFraction: 0.32,
+    latchTicks: 22,
+    rootAbsorbChance: 0.028,
+    absorbCooldown: 9,
+    photoChancePerSide: 0.018,
+    rootStepChance: 0.52,
+    seedChargeCost: 3,
+    seedMutationChance: 0.42,
+    woodCheckEvery: 8,
+    woodMinAge: 80,
+    woodDecayChance: 0.035,
+    organicMoveEvery: 3,
+    vaporCondenseAge: 95,
+  };
+
+  // --- DOM ---------------------------------------------------------------
+  const canvas = document.getElementById("world");
+  const ctx = canvas.getContext("2d", { alpha: false });
+  const wrap = document.getElementById("world-wrap");
+  const pauseBtn = document.getElementById("pauseBtn");
+  const speedBtn = document.getElementById("speedBtn");
+  const resetBtn = document.getElementById("resetBtn");
+  const seedBtn = document.getElementById("seedBtn");
+  const evolveToggle = document.getElementById("evolveToggle");
+  const respToggle = document.getElementById("respToggle");
+  const statsEl = document.getElementById("stats");
+  const statusEl = document.getElementById("status");
+  const hintEl = document.getElementById("hint");
+
+  // --- World storage -----------------------------------------------------
+  let cols = 0, rows = 0, N = 0, imageData = null;
+  let medium, water, plantState, genet, polarity, vitality, trafficMask, woodAge;
+  let tipAt, seedAt, redAt, blueAt, vaporAt, absorbCooldown;
+  let surface;
+
+  let tips = [], tipById = new Map(), nextTipId = 1;
+  let seeds = [], seedById = new Map(), nextSeedId = 1;
+  let packets = [], packetById = new Map(), nextPacketId = 1;
+  let vapors = [], nextVaporId = 1;
+  let genetMeta = new Map(), nextGenetId = 1;
+
+  let tickCount = 0;
+  let totalSeedsMade = 0;
+  let totalMutations = 0;
+  let paused = false;
+  const speedLevels = [1, 4, 12, 32];
+  let speedIndex = 1;
+  let worldSeed = readSeedFromURL();
+  let rngState = worldSeed >>> 0;
+  let selectedGenome = null;
+  let dropSeedMode = false;
+  let lastFrameTime = performance.now();
+  let fpsSmooth = 60;
+  let resizeTimer = null;
+
+  // --- Deterministic randomness -----------------------------------------
+  function readSeedFromURL() {
+    const n = Number.parseInt(new URLSearchParams(location.search).get("seed") || "731927", 10);
+    return Number.isFinite(n) ? n >>> 0 : 731927;
+  }
+
+  function rand() {
+    rngState ^= rngState << 13;
+    rngState ^= rngState >>> 17;
+    rngState ^= rngState << 5;
+    return (rngState >>> 0) / 4294967296;
+  }
+  function randInt(n) { return (rand() * n) | 0; }
+  function chance(p) { return rand() < p; }
+
+  // --- Utility -----------------------------------------------------------
+  function indexOf(x, y) { return y * cols + x; }
+  function xOf(i) { return i % cols; }
+  function yOf(i) { return (i / cols) | 0; }
+  function inBounds(x, y) { return x >= 0 && x < cols && y >= 0 && y < rows; }
+  function isLive(i) { return plantState[i] === CONDUIT || plantState[i] === TIP; }
+  function neighborIndex(i, dir) {
+    const x = xOf(i) + DX[dir], y = yOf(i) + DY[dir];
+    return inBounds(x, y) ? indexOf(x, y) : -1;
+  }
+  function forEachNeighbor(i, fn) {
+    const x = xOf(i), y = yOf(i);
+    for (let d = 0; d < 8; d++) {
+      const nx = x + DX[d], ny = y + DY[d];
+      if (inBounds(nx, ny)) fn(indexOf(nx, ny), d);
+    }
+  }
+  function packColor(r, g, b) { return [r | 0, g | 0, b | 0]; }
+  function mixColor(a, b, t) {
+    return [
+      (a[0] + (b[0] - a[0]) * t) | 0,
+      (a[1] + (b[1] - a[1]) * t) | 0,
+      (a[2] + (b[2] - a[2]) * t) | 0,
+    ];
+  }
+  function hslToRgb(h, s, l) {
+    h = ((h % 360) + 360) % 360 / 360;
+    let r, g, b;
+    if (s === 0) r = g = b = l;
+    else {
+      const hue2rgb = (p, q, t) => {
+        if (t < 0) t += 1;
+        if (t > 1) t -= 1;
+        if (t < 1 / 6) return p + (q - p) * 6 * t;
+        if (t < 1 / 2) return q;
+        if (t < 2 / 3) return p + (q - p) * (2 / 3 - t) * 6;
+        return p;
+      };
+      const q = l < 0.5 ? l * (1 + s) : l + s - l * s;
+      const p = 2 * l - q;
+      r = hue2rgb(p, q, h + 1 / 3);
+      g = hue2rgb(p, q, h);
+      b = hue2rgb(p, q, h - 1 / 3);
+    }
+    return [(r * 255) | 0, (g * 255) | 0, (b * 255) | 0];
+  }
+
+  // --- Genomes -----------------------------------------------------------
+  function module(span, repeats, curve, branch, angle, child, next, plasticity, seed) {
+    return { span, repeats, curve, branch, angle, child, next, plasticity, seed };
+  }
+
+  function makeAncestorGenome() {
+    return {
+      shootStart: 0,
+      rootStart: 3,
+      modules: [
+        // An indefinitely recurring shoot axis. Every four cells it launches
+        // an alternating lateral rachis and occasionally attempts a seed.
+        module(4, 0, 7, 1, 155, 1, 0, 24, 30),
+        // A finite three-node rachis with paired short pinnae.
+        module(2, 3, -4, 2, 105, 2, -1, 15, 0),
+        module(2, 1, 13, 0, 80, 2, -1, 10, 0),
+        // Root axis and finite rootlets use the same interpreter, but begin
+        // in different modules and weight wetness more strongly.
+        module(4, 0, -5, 1, 125, 4, 3, 72, 0),
+        module(3, 2, 8, 0, 90, 4, -1, 82, 0),
+      ],
+    };
+  }
+
+  const ANCESTOR_GENOME = makeAncestorGenome();
+
+  function cloneGenome(g) {
+    return {
+      shootStart: g.shootStart | 0,
+      rootStart: g.rootStart | 0,
+      modules: g.modules.map(m => ({ ...m })),
+    };
+  }
+  function genomeHash(g) {
+    let h = 2166136261 >>> 0;
+    const values = [g.shootStart, g.rootStart, g.modules.length];
+    for (const m of g.modules) {
+      values.push(m.span, m.repeats, m.curve + 128, m.branch, m.angle,
+        m.child + 1, m.next + 1, m.plasticity, m.seed);
+    }
+    for (let i = 0; i < values.length; i++) {
+      h ^= (values[i] | 0) + i * 17;
+      h = Math.imul(h, 16777619) >>> 0;
+    }
+    return h >>> 0;
+  }
+  function genomeLabel(g) {
+    const brief = g.modules.map((m, i) => {
+      const branch = m.branch === 2 ? "±" : m.branch === 1 ? "alt" : "—";
+      const repeat = m.repeats === 0 ? "∞" : m.repeats;
+      return `${i}:${m.span}×${repeat}/${branch}`;
+    }).join(" ");
+    return `${g.modules.length} modules · S${g.shootStart}/R${g.rootStart} · ${brief}`;
+  }
+
+  function clampInt(v, lo, hi) { return Math.max(lo, Math.min(hi, Math.round(v))); }
+
+  function deleteModule(g, removed) {
+    g.modules.splice(removed, 1);
+    const remap = v => {
+      if (v < 0) return -1;
+      if (v === removed) return Math.min(removed, g.modules.length - 1);
+      return v > removed ? v - 1 : v;
+    };
+    g.shootStart = remap(g.shootStart);
+    g.rootStart = remap(g.rootStart);
+    for (const m of g.modules) {
+      m.child = remap(m.child);
+      m.next = remap(m.next);
+    }
+  }
+
+  function mutateGenome(parent) {
+    const child = cloneGenome(parent);
+    if (!evolveToggle.checked || !chance(CFG.seedMutationChance)) return child;
+    // Module duplication and deletion let the developmental language itself
+    // expand and contract; parameter edits reshape an existing production.
+    if (chance(0.09) && child.modules.length < 24) {
+      const source = randInt(child.modules.length);
+      child.modules.push({ ...child.modules[source] });
+      const caller = child.modules[randInt(child.modules.length)];
+      if (chance(0.7)) caller.child = child.modules.length - 1;
+      else caller.next = child.modules.length - 1;
+      totalMutations++;
+    } else if (chance(0.045) && child.modules.length > 3) {
+      deleteModule(child, randInt(child.modules.length));
+      totalMutations++;
+    }
+
+    const edits = chance(0.16) ? 2 : 1;
+    for (let k = 0; k < edits; k++) {
+      if (chance(0.08)) {
+        if (chance(0.5)) child.shootStart = randInt(child.modules.length);
+        else child.rootStart = randInt(child.modules.length);
+        totalMutations++;
+        continue;
+      }
+      const m = child.modules[randInt(child.modules.length)];
+      switch (randInt(9)) {
+        case 0: m.span = clampInt(m.span + (chance(0.5) ? -1 : 1), 1, 12); break;
+        case 1: m.repeats = chance(0.18) ? 0 : clampInt(m.repeats + (chance(0.5) ? -1 : 1), 1, 8); break;
+        case 2: m.curve = clampInt(m.curve + (randInt(31) - 15), -65, 65); break;
+        case 3: m.branch = randInt(3); break;
+        case 4: m.angle = clampInt(m.angle + (randInt(61) - 30), 30, 280); break;
+        case 5: m.child = randInt(child.modules.length); break;
+        case 6: m.next = chance(0.22) ? -1 : randInt(child.modules.length); break;
+        case 7: m.plasticity = clampInt(m.plasticity + (randInt(31) - 15), 0, 100); break;
+        case 8: m.seed = clampInt(m.seed + (randInt(25) - 12), 0, 70); break;
+      }
+      totalMutations++;
+    }
+    return child;
+  }
+  function createGenet(genome) {
+    const id = nextGenetId++;
+    const hash = genomeHash(genome);
+    const hue = 84 + (hash % 66);
+    const palette = [];
+    for (let k = 0; k < 16; k++) {
+      const f = k / 15;
+      palette.push(hslToRgb(hue, 0.16 + f * 0.72, 0.23 + f * 0.22));
+    }
+    const meta = {
+      id,
+      genome,
+      hash,
+      hue,
+      palette,
+      tipColor: hslToRgb(hue, 0.82, 0.73),
+      seedColor: hslToRgb((hue + 255) % 360, 0.78, 0.64),
+      born: tickCount,
+    };
+    genetMeta.set(id, meta);
+    return meta;
+  }
+
+  // --- Initialization ----------------------------------------------------
+  function allocateWorld() {
+    const rect = wrap.getBoundingClientRect();
+    cols = Math.max(CFG.minCols, Math.min(CFG.maxCols, Math.floor(rect.width / CFG.targetPixel)));
+    rows = Math.max(CFG.minRows, Math.min(CFG.maxRows, Math.floor(rect.height / CFG.targetPixel)));
+    N = cols * rows;
+    canvas.width = cols;
+    canvas.height = rows;
+    ctx.imageSmoothingEnabled = false;
+    imageData = ctx.createImageData(cols, rows);
+
+    medium = new Uint8Array(N);
+    water = new Uint8Array(N);
+    plantState = new Uint8Array(N);
+    genet = new Uint32Array(N);
+    polarity = new Uint8Array(N);
+    vitality = new Uint8Array(N);
+    trafficMask = new Uint8Array(N);
+    woodAge = new Uint16Array(N);
+    tipAt = new Uint32Array(N);
+    seedAt = new Uint32Array(N);
+    redAt = new Uint32Array(N);
+    blueAt = new Uint32Array(N);
+    vaporAt = new Uint8Array(N);
+    absorbCooldown = new Uint8Array(N);
+    surface = new Int16Array(cols);
+  }
+
+  function buildTerrain() {
+    // A deliberately pre-pedogenic world: no mineral or organic substrate.
+    // Water begins as a quiet basin against the lower boundary; all later
+    // soil is accumulated dead plant matter.
+    const poolTop = Math.floor(rows * 0.86);
+    for (let x = 0; x < cols; x++) {
+      surface[x] = poolTop;
+      for (let y = poolTop; y < rows; y++) water[indexOf(x, y)] = 1;
+    }
+  }
+
+  function resetWorld(incrementSeed = false) {
+    if (incrementSeed) worldSeed = (worldSeed + 0x9e3779b9) >>> 0;
+    rngState = worldSeed >>> 0;
+    tickCount = 0;
+    totalSeedsMade = 0;
+    totalMutations = 0;
+    nextTipId = nextSeedId = nextPacketId = nextVaporId = nextGenetId = 1;
+    tips = []; tipById = new Map();
+    seeds = []; seedById = new Map();
+    packets = []; packetById = new Map();
+    vapors = [];
+    genetMeta = new Map();
+    selectedGenome = null;
+    dropSeedMode = false;
+    allocateWorld();
+    buildTerrain();
+
+    const starts = Math.max(3, Math.min(6, Math.floor(cols / 28)));
+    for (let s = 0; s < starts; s++) {
+      const x = Math.floor((s + 0.65) * cols / starts + (rand() - 0.5) * 7);
+      const clampedX = Math.max(2, Math.min(cols - 3, x));
+      const y = Math.max(1, surface[clampedX] - 2);
+      const g = cloneGenome(ANCESTOR_GENOME);
+      if (s === 1) {
+        g.modules[0].seed = 38;
+      } else if (s > 1 && chance(0.55)) {
+        const m = g.modules[randInt(g.modules.length)];
+        if (chance(0.5)) m.curve = clampInt(m.curve + randInt(25) - 12, -65, 65);
+        else m.span = clampInt(m.span + (chance(0.5) ? -1 : 1), 1, 12);
+      }
+      const seed = addSeed(indexOf(clampedX, y), g, true, CFG.seedChargeCost);
+      if (seed) germinateSeed(seed, true);
+    }
+    statusEl.textContent = `World seed ${worldSeed}. Bare water world; soil must be made by death.`;
+    updateButtons();
+    render();
+    updateStats();
+  }
+
+  // --- Tips and cells ----------------------------------------------------
+  function normalizeHeading(h) { return ((h % 8) + 8) % 8; }
+
+  function addTip(i, gid, heading, genome, root = false, moduleIndex = null, seedCharge = 0) {
+    if (i < 0 || plantState[i] !== EMPTY) return null;
+    const startModule = moduleIndex === null ? (root ? genome.rootStart : genome.shootStart) : moduleIndex;
+    const safeModule = Math.max(0, Math.min(genome.modules.length - 1, startModule | 0));
+    const id = nextTipId++;
+    const tip = {
+      id, idx: i, gid, heading: normalizeHeading(heading), genome,
+      root: !!root, moduleIndex: safeModule,
+      stepsLeft: genome.modules[safeModule].span,
+      moduleRepeat: 0, boundaryPrepared: false,
+      pendingBranches: [], transitionModule: safeModule, transitionRepeat: 0,
+      reproPending: false, hand: chance(0.5) ? 1 : -1,
+      errX: 0, errY: 0, seedCharge,
+      heldR: 0, heldB: 0, holdTicks: 0, dead: false,
+    };
+    tips.push(tip);
+    tipById.set(id, tip);
+    tipAt[i] = id;
+    plantState[i] = TIP;
+    genet[i] = gid;
+    polarity[i] = root ? 1 : 0;
+    vitality[i] = CFG.initialVitality;
+    return tip;
+  }
+
+  function removeTip(tip) {
+    if (!tip || tip.dead) return;
+    tip.dead = true;
+    tipById.delete(tip.id);
+    if (tipAt[tip.idx] === tip.id) tipAt[tip.idx] = 0;
+  }
+
+  function setConduit(i, gid, v = CFG.initialVitality) {
+    plantState[i] = CONDUIT;
+    genet[i] = gid;
+    vitality[i] = v;
+    tipAt[i] = 0;
+  }
+
+  function moveTip(tip, target) {
+    if (!tip || tip.dead || !target || target.idx < 0 || plantState[target.idx] !== EMPTY) return false;
+    const old = tip.idx;
+    setConduit(old, tip.gid, vitality[old]);
+    tip.idx = target.idx;
+    tip.heading = normalizeHeading(target.heading);
+    tip.errX = target.errX;
+    tip.errY = target.errY;
+    plantState[target.idx] = TIP;
+    genet[target.idx] = tip.gid;
+    polarity[target.idx] = tip.root ? 1 : 0;
+    vitality[target.idx] = CFG.initialVitality;
+    tipAt[target.idx] = tip.id;
+    return true;
+  }
+
+  function openNeighborCount(i) {
+    let n = 0;
+    forEachNeighbor(i, j => { if (plantState[j] === EMPTY) n++; });
+    return n;
+  }
+
+  function foreignNeighborCount(i) {
+    let n = 0;
+    const gid = genet[i];
+    forEachNeighbor(i, j => {
+      if (isLive(j) && genet[j] !== gid) n++;
+    });
+    return n;
+  }
+
+  function foreignNeighborsFor(i, gid) {
+    let n = 0;
+    forEachNeighbor(i, j => { if (isLive(j) && genet[j] !== gid) n++; });
+    return n;
+  }
+
+  function airExposure(i) {
+    let n = 0;
+    const x = xOf(i), y = yOf(i);
+    for (const d of CARDINAL) {
+      const nx = x + DX[d], ny = y + DY[d];
+      if (!inBounds(nx, ny)) continue;
+      const j = indexOf(nx, ny);
+      if (medium[j] === AIR && !water[j] && plantState[j] === EMPTY) n++;
+    }
+    return n;
+  }
+
+  function localWetness(i) {
+    let score = 0;
+    const cx = xOf(i), cy = yOf(i);
+    for (let dy = -3; dy <= 3; dy++) {
+      for (let dx = -3; dx <= 3; dx++) {
+        const nx = cx + dx, ny = cy + dy;
+        if (!inBounds(nx, ny)) continue;
+        const j = indexOf(nx, ny);
+        const dist = Math.max(Math.abs(dx), Math.abs(dy));
+        if (water[j]) score += 4 / (1 + dist);
+        if (medium[j] === ORGANIC && dist <= 1) score += 0.2;
+      }
+    }
+    return score;
+  }
+
+  function availableTargets(tip) {
+    const out = [];
+    for (let d = 0; d < 8; d++) {
+      const j = neighborIndex(tip.idx, d);
+      if (j >= 0 && plantState[j] === EMPTY) out.push({ idx: j, dir: d });
+    }
+    return out;
+  }
+
+  function headingDistance(a, b) {
+    const d = Math.abs(normalizeHeading(a) - normalizeHeading(b));
+    return Math.min(d, 8 - d);
+  }
+
+  function targetForHeading(tip, desiredHeading, plasticity, useError = true) {
+    const candidates = availableTargets(tip);
+    if (!candidates.length) return null;
+    const heading = normalizeHeading(desiredHeading);
+    const radians = heading * Math.PI / 4;
+    const accumulatedX = (useError ? tip.errX : 0) + Math.sin(radians);
+    const accumulatedY = (useError ? tip.errY : 0) - Math.cos(radians);
+    const idealX = Math.max(-1, Math.min(1, Math.round(accumulatedX)));
+    const idealY = Math.max(-1, Math.min(1, Math.round(accumulatedY)));
+    let best = -Infinity, choices = [];
+    for (const c of candidates) {
+      let score = -headingDistance(c.dir, heading) * 5.5;
+      if (DX[c.dir] === idealX && DY[c.dir] === idealY) score += 5.8;
+      const environment = tip.root
+        ? Math.min(9, localWetness(c.idx)) + (water[c.idx] ? 3 : 0)
+        : airExposure(c.idx) * 1.5 + openNeighborCount(c.idx) * 0.22 - (water[c.idx] ? 8 : 0);
+      score += environment * (plasticity / 100);
+      score -= foreignNeighborsFor(c.idx, tip.gid) * 3.5;
+      score += rand() * 0.08;
+      if (score > best + 0.001) { best = score; choices = [c]; }
+      else if (Math.abs(score - best) < 0.001) choices.push(c);
+    }
+    const target = choices[randInt(choices.length)];
+    target.heading = heading;
+    target.errX = useError ? accumulatedX - DX[target.dir] : 0;
+    target.errY = useError ? accumulatedY - DY[target.dir] : 0;
+    return target;
+  }
+
+  function investInSeed(tip) {
+    let consumeBlue = false;
+    if (tip.seedCharge < CFG.seedChargeCost) {
+      tip.seedCharge++;
+      consumeBlue = true;
+    }
+    if (tip.seedCharge >= CFG.seedChargeCost) {
+      const spots = [];
+      forEachNeighbor(tip.idx, j => {
+        if (plantState[j] === EMPTY && medium[j] === AIR && !water[j]) spots.push(j);
+      });
+      if (spots.length) {
+        const meta = genetMeta.get(tip.gid);
+        const seed = addSeed(spots[randInt(spots.length)],
+          mutateGenome(meta ? meta.genome : tip.genome), false, tip.seedCharge);
+        if (seed) {
+          tip.seedCharge = 0;
+          tip.reproPending = false;
+          totalSeedsMade++;
+        }
+      }
+    }
+    return { success: true, deferred: false, consumeBlue };
+  }
+
+  function prepareModuleBoundary(tip, m) {
+    tip.boundaryPrepared = true;
+    tip.pendingBranches = [];
+    if (m.branch === 1) {
+      tip.pendingBranches.push({ offset: tip.hand * m.angle / 100, module: m.child });
+      tip.hand *= -1;
+    } else if (m.branch === 2) {
+      tip.pendingBranches.push({ offset: -m.angle / 100, module: m.child });
+      tip.pendingBranches.push({ offset: m.angle / 100, module: m.child });
+    }
+    const completed = tip.moduleRepeat + 1;
+    if (m.repeats === 0 || completed < m.repeats) {
+      tip.transitionModule = tip.moduleIndex;
+      tip.transitionRepeat = m.repeats === 0 ? 0 : completed;
+    } else {
+      tip.transitionModule = m.next;
+      tip.transitionRepeat = 0;
+    }
+    if (!tip.root && m.seed > 0 && airExposure(tip.idx) > 0 && chance(m.seed / 100)) {
+      tip.reproPending = true;
+    }
+  }
+
+  function haltTip(tip) {
+    for (let n = 0; n < tip.seedCharge; n++) externalizeBlue(tip.idx);
+    tip.seedCharge = 0;
+    setConduit(tip.idx, tip.gid, vitality[tip.idx]);
+    removeTip(tip);
+  }
+
+  function performGrammarAction(tip) {
+    if (tip.dead) return { success: false, deferred: false, consumeBlue: false };
+    const m = tip.genome.modules[tip.moduleIndex];
+    if (!m) {
+      haltTip(tip);
+      return { success: true, deferred: false, consumeBlue: false };
+    }
+
+    if (tip.stepsLeft > 0) {
+      const desired = tip.heading + m.curve / 100;
+      const target = targetForHeading(tip, desired, m.plasticity, true);
+      if (!target) return { success: false, deferred: false, consumeBlue: false };
+      if (tip.root && water[target.idx] && !chance(CFG.rootStepChance)) {
+        return { success: false, deferred: true, consumeBlue: false };
+      }
+      const moved = moveTip(tip, target);
+      if (moved) tip.stepsLeft--;
+      return { success: moved, deferred: false, consumeBlue: false };
+    }
+
+    if (!tip.boundaryPrepared) prepareModuleBoundary(tip, m);
+    if (tip.reproPending) return investInSeed(tip);
+
+    if (tip.pendingBranches.length) {
+      const spec = tip.pendingBranches[0];
+      const desired = tip.heading + spec.offset;
+      const target = targetForHeading(tip, desired, m.plasticity * 0.35, false);
+      if (target && tip.root && water[target.idx] && !chance(CFG.rootStepChance)) {
+        return { success: false, deferred: true, consumeBlue: false };
+      }
+      tip.pendingBranches.shift();
+      if (!target) return { success: false, deferred: false, consumeBlue: false };
+      const childModule = Math.max(0, Math.min(tip.genome.modules.length - 1, spec.module | 0));
+      const child = addTip(target.idx, tip.gid, desired, tip.genome, tip.root, childModule, 0);
+      return { success: !!child, deferred: false, consumeBlue: false };
+    }
+
+    if (tip.transitionModule < 0 || tip.transitionModule >= tip.genome.modules.length) {
+      haltTip(tip);
+      return { success: true, deferred: false, consumeBlue: false };
+    }
+    tip.moduleIndex = tip.transitionModule;
+    tip.moduleRepeat = tip.transitionRepeat;
+    tip.stepsLeft = tip.genome.modules[tip.moduleIndex].span;
+    tip.boundaryPrepared = false;
+    tip.reproPending = false;
+    return performGrammarAction(tip);
+  }
+
+  function releaseFromTip(tip, kind, ttl) {
+    const candidates = [];
+    forEachNeighbor(tip.idx, j => {
+      if (isLive(j) && genet[j] === tip.gid && (kind === RED ? redAt[j] : blueAt[j]) === 0) candidates.push(j);
+    });
+    const target = candidates.length ? candidates[randInt(candidates.length)] : tip.idx;
+    const p = addPacket(kind, target, tip.gid, Math.max(24, ttl));
+    if (!p && kind === BLUE) externalizeBlue(tip.idx);
+  }
+
+  function stepTips() {
+    if (!tips.length) return;
+    const start = randInt(tips.length);
+    for (let k = 0; k < tips.length; k++) {
+      const tip = tips[(start + k) % tips.length];
+      if (!tip || tip.dead || plantState[tip.idx] !== TIP || tipAt[tip.idx] !== tip.id) continue;
+
+      if (tip.heldR && tip.heldB) {
+        const result = performGrammarAction(tip);
+        if (result.deferred) continue;
+
+        trafficMask[tip.idx] |= 3;
+        const blueTTL = tip.heldB;
+        tip.heldR = 0; // red is spent
+        tip.heldB = 0; // blue returns to circulation
+        tip.holdTicks = 0;
+        if (!result.consumeBlue) releaseFromTip(tip, BLUE, blueTTL - 5);
+      } else if (tip.heldR || tip.heldB) {
+        tip.holdTicks++;
+        if (tip.holdTicks >= CFG.latchTicks) {
+          if (tip.heldR) releaseFromTip(tip, RED, tip.heldR - 2);
+          if (tip.heldB) releaseFromTip(tip, BLUE, tip.heldB - 2);
+          tip.heldR = tip.heldB = 0;
+          tip.holdTicks = 0;
+        }
+      } else tip.holdTicks = 0;
+    }
+    if (tips.length > 256 && tickCount % 97 === 0) tips = tips.filter(t => !t.dead);
+  }
+
+  // --- Packets -----------------------------------------------------------
+  function occupancyFor(kind) { return kind === RED ? redAt : blueAt; }
+
+  function addPacket(kind, i, gid, ttl = CFG.packetTTL) {
+    if (i < 0 || !isLive(i) || genet[i] !== gid) return null;
+    const occ = occupancyFor(kind);
+    if (occ[i] !== 0 || packets.length > N * CFG.maxPacketFraction) return null;
+    const p = { id: nextPacketId++, kind, idx: i, gid, ttl, dead: false };
+    packets.push(p);
+    packetById.set(p.id, p);
+    occ[i] = p.id;
+    trafficMask[i] |= kind;
+    return p;
+  }
+
+  function removePacket(p) {
+    if (!p || p.dead) return;
+    const occ = occupancyFor(p.kind);
+    if (occ[p.idx] === p.id) occ[p.idx] = 0;
+    p.dead = true;
+    packetById.delete(p.id);
+  }
+
+  function externalizeBlue(i) {
+    if (i < 0) return;
+    if (medium[i] === AIR && polarity[i] !== 1) {
+      if (addVapor(i)) return;
+      // The atmosphere is a shared reservoir. If the local pixel already
+      // contains vapor, find another open atmospheric slot rather than
+      // silently discarding the conserved water unit.
+      const start = randInt(N);
+      for (let k = 0; k < N; k++) {
+        const j = (start + k) % N;
+        if (medium[j] === AIR && !vaporAt[j] && addVapor(j)) return;
+      }
+    }
+    if (!water[i]) {
+      water[i] = 1;
+      return;
+    }
+    const cx = xOf(i), cy = yOf(i);
+    for (let radius = 1; radius <= 4; radius++) {
+      const choices = [];
+      for (let dy = -radius; dy <= radius; dy++) {
+        for (let dx = -radius; dx <= radius; dx++) {
+          if (Math.max(Math.abs(dx), Math.abs(dy)) !== radius) continue;
+          const nx = cx + dx, ny = cy + dy;
+          if (!inBounds(nx, ny)) continue;
+          const j = indexOf(nx, ny);
+          if (medium[j] !== AIR && !water[j]) choices.push(j);
+        }
+      }
+      if (choices.length) {
+        water[choices[randInt(choices.length)]] = 1;
+        return;
+      }
+    }
+    // A saturated local pore expels the unit toward the air-soil boundary.
+    for (let y = cy; y >= 0; y--) {
+      const j = indexOf(cx, y);
+      if (medium[j] === AIR && !vaporAt[j] && addVapor(j)) return;
+    }
+    // Extremely crowded fallback: preserve mass in the first free liquid
+    // slot. This is rare, but makes every blue-packet failure conservative.
+    const start = randInt(N);
+    for (let k = 0; k < N; k++) {
+      const j = (start + k) % N;
+      if (!water[j]) { water[j] = 1; return; }
+    }
+  }
+
+  function expirePacket(p) {
+    const i = p.idx, kind = p.kind;
+    removePacket(p);
+    if (kind === BLUE) externalizeBlue(i);
+  }
+
+  function tryLatch(p) {
+    if (plantState[p.idx] !== TIP) return false;
+    const id = tipAt[p.idx];
+    const tip = id ? tipById.get(id) : null;
+    if (!tip || tip.dead || tip.gid !== p.gid) return false;
+    // A tip is a probabilistic sink, not an irresistible one. If it already
+    // holds the complementary color it accepts immediately; otherwise some
+    // packets bounce back into the network before eventually being caught.
+    const completesPair = p.kind === RED ? !!tip.heldB : !!tip.heldR;
+    if (!completesPair && !chance(CFG.tipCaptureChance)) return false;
+    if (p.kind === RED) {
+      if (tip.heldR) return false;
+      tip.heldR = p.ttl;
+    } else {
+      if (tip.heldB) return false;
+      tip.heldB = p.ttl;
+    }
+    trafficMask[p.idx] |= p.kind;
+    removePacket(p);
+    tip.holdTicks = 0;
+    return true;
+  }
+
+  function stepPackets() {
+    for (let micro = 0; micro < CFG.packetMicrosteps; micro++) {
+      const length = packets.length;
+      if (!length) break;
+      const start = randInt(length);
+      const backwards = chance(0.5);
+      for (let k = 0; k < length; k++) {
+        const pos = backwards ? (start - k + length) % length : (start + k) % length;
+        const p = packets[pos];
+        if (!p || p.dead) continue;
+        if (--p.ttl <= 0 || !isLive(p.idx) || genet[p.idx] !== p.gid) {
+          expirePacket(p);
+          continue;
+        }
+        trafficMask[p.idx] |= p.kind;
+        if (tryLatch(p)) continue;
+
+        const occ = occupancyFor(p.kind);
+        const choices = [];
+        forEachNeighbor(p.idx, j => {
+          if (isLive(j) && genet[j] === p.gid && occ[j] === 0) choices.push(j);
+        });
+        if (!choices.length) continue;
+        const target = choices[randInt(choices.length)];
+        if (occ[p.idx] === p.id) occ[p.idx] = 0;
+        p.idx = target;
+        occ[target] = p.id;
+        trafficMask[target] |= p.kind;
+        tryLatch(p);
+      }
+    }
+    if (packets.length > 128 && (tickCount & 15) === 0) packets = packets.filter(p => !p.dead);
+  }
+
+  // --- Resource entry and water cycle -----------------------------------
+  function harvestResources() {
+    for (let i = 0; i < N; i++) {
+      if (!isLive(i)) continue;
+      if (absorbCooldown[i]) absorbCooldown[i]--;
+
+      if (polarity[i] === 1 && !absorbCooldown[i] && blueAt[i] === 0 && chance(CFG.rootAbsorbChance)) {
+        const wetSources = [];
+        const cx = xOf(i), cy = yOf(i);
+        for (let dy = -2; dy <= 2; dy++) {
+          for (let dx = -2; dx <= 2; dx++) {
+            const nx = cx + dx, ny = cy + dy;
+            if (!inBounds(nx, ny)) continue;
+            const j = indexOf(nx, ny);
+            if (water[j]) wetSources.push(j);
+          }
+        }
+        const source = wetSources.length ? wetSources[randInt(wetSources.length)] : -1;
+        const p = source >= 0 ? addPacket(BLUE, i, genet[i]) : null;
+        if (p) {
+          water[source] = 0;
+          absorbCooldown[i] = CFG.absorbCooldown;
+        }
+      }
+
+      const exposed = polarity[i] === 0 ? airExposure(i) : 0;
+      if (!exposed || redAt[i] !== 0) continue;
+      const photoP = CFG.photoChancePerSide * exposed;
+      if (!chance(photoP)) continue;
+
+      if (respToggle.checked) {
+        // Recent blue traffic is the local proof that this exposed tissue is
+        // hydrated. Exact red/blue simultaneity made tiny tips hoard all water.
+        if (!(trafficMask[i] & BLUE)) continue;
+        const blueId = blueAt[i];
+        const bp = blueId ? packetById.get(blueId) : null;
+        const transpireNow = bp && !bp.dead;
+        if (transpireNow) removePacket(bp);
+        const madeRed = !!addPacket(RED, i, genet[i]);
+        if (transpireNow) {
+          if (madeRed) {
+            if (!addVaporNear(i)) externalizeBlue(i);
+          }
+          else externalizeBlue(i);
+        }
+      } else addPacket(RED, i, genet[i]);
+    }
+  }
+
+  function stepWater() {
+    const leftFirst = chance(0.5);
+    for (let y = rows - 1; y >= 0; y--) {
+      const xStart = randInt(cols);
+      for (let q = 0; q < cols; q++) {
+        const x = (xStart + q) % cols;
+        const i = indexOf(x, y);
+        if (!water[i]) continue;
+        const mobility = medium[i] === AIR ? 1 : medium[i] === SOIL ? 0.004 : 0.0012;
+        if (!chance(mobility)) continue;
+
+        let dirs;
+        if (medium[i] === AIR) {
+          dirs = leftFirst ? [4, 5, 3, 6, 2] : [4, 3, 5, 2, 6];
+        } else dirs = leftFirst ? [4, 5, 3] : [4, 3, 5];
+        for (const d of dirs) {
+          const nx = x + DX[d], ny = y + DY[d];
+          if (!inBounds(nx, ny)) continue;
+          const j = indexOf(nx, ny);
+          if (!water[j]) {
+            water[i] = 0;
+            water[j] = 1;
+            break;
+          }
+        }
+      }
+    }
+  }
+
+  function addVapor(i) {
+    if (i < 0 || medium[i] !== AIR || vaporAt[i]) return false;
+    const v = { id: nextVaporId++, idx: i, age: 0, dead: false };
+    vapors.push(v);
+    vaporAt[i] = 1;
+    return true;
+  }
+
+  function addVaporNear(i) {
+    const choices = [];
+    if (medium[i] === AIR && !vaporAt[i]) choices.push(i);
+    forEachNeighbor(i, j => { if (medium[j] === AIR && !vaporAt[j]) choices.push(j); });
+    return choices.length ? addVapor(choices[randInt(choices.length)]) : false;
+  }
+
+  function condense(v) {
+    if (v.dead) return;
+    let target = !water[v.idx] ? v.idx : -1;
+    if (target < 0) {
+      const start = randInt(cols);
+      for (let xStep = 0; xStep < cols && target < 0; xStep++) {
+        const x = (start + xStep) % cols;
+        for (let y = 0; y < Math.min(4, rows); y++) {
+          const j = indexOf(x, y);
+          if (!water[j]) { target = j; break; }
+        }
+      }
+    }
+    if (target < 0) return false;
+    vaporAt[v.idx] = 0;
+    v.dead = true;
+    water[target] = 1;
+    return true;
+  }
+
+  function stepVapors() {
+    for (const v of vapors) {
+      if (v.dead) continue;
+      v.age++;
+      const x = xOf(v.idx), y = yOf(v.idx);
+      if (y <= 1 || v.age >= CFG.vaporCondenseAge) { condense(v); continue; }
+      const dirs = [0, 0, 0, 7, 1, 6, 2];
+      const d = dirs[randInt(dirs.length)];
+      const nx = x + DX[d], ny = y + DY[d];
+      if (!inBounds(nx, ny)) { condense(v); continue; }
+      const j = indexOf(nx, ny);
+      if (medium[j] !== AIR || plantState[j] === WOOD || (vaporAt[j] && chance(0.45))) {
+        condense(v);
+        continue;
+      }
+      if (!vaporAt[j]) {
+        vaporAt[v.idx] = 0;
+        v.idx = j;
+        vaporAt[j] = 1;
+      }
+    }
+    if (vapors.length > 96 && (tickCount & 31) === 0) vapors = vapors.filter(v => !v.dead);
+  }
+
+  // --- Seeds -------------------------------------------------------------
+  function addSeed(i, genome, immediate = false, waterReserve = 0) {
+    if (i < 0 || plantState[i] !== EMPTY) return null;
+    const id = nextSeedId++;
+    const seed = {
+      id, idx: i, genome, age: 0, rest: immediate ? 30 : 0,
+      waterReserve, dead: false,
+    };
+    seeds.push(seed);
+    seedById.set(id, seed);
+    seedAt[i] = id;
+    plantState[i] = SEED;
+    return seed;
+  }
+
+  function removeSeed(seed, becomeOrganic = false) {
+    if (!seed || seed.dead) return;
+    seed.dead = true;
+    seedById.delete(seed.id);
+    if (seedAt[seed.idx] === seed.id) seedAt[seed.idx] = 0;
+    if (plantState[seed.idx] === SEED) plantState[seed.idx] = EMPTY;
+    if (becomeOrganic && seed.waterReserve) {
+      for (let n = 0; n < seed.waterReserve; n++) externalizeBlue(seed.idx);
+      seed.waterReserve = 0;
+    }
+    if (becomeOrganic && medium[seed.idx] === AIR) medium[seed.idx] = ORGANIC;
+  }
+
+  function wetWithin(i, radius = 2) {
+    const x = xOf(i), y = yOf(i);
+    for (let dy = -radius; dy <= radius; dy++) {
+      for (let dx = -radius; dx <= radius; dx++) {
+        const nx = x + dx, ny = y + dy;
+        if (inBounds(nx, ny) && water[indexOf(nx, ny)]) return true;
+      }
+    }
+    return false;
+  }
+
+  function germinationContext(i, hasStoredWater = false) {
+    let open = false;
+    forEachNeighbor(i, j => { if (plantState[j] === EMPTY) open = true; });
+    return open && (hasStoredWater || wetWithin(i, 4));
+  }
+
+  function germinateSeed(seed, force = false) {
+    if (!seed || seed.dead || (!force && !germinationContext(seed.idx, seed.waterReserve > 0))) return false;
+    const base = seed.idx;
+    const genome = seed.genome;
+    let reserve = seed.waterReserve || 0;
+    seed.waterReserve = 0;
+    removeSeed(seed, false);
+    const meta = createGenet(genome);
+    setConduit(base, meta.id, CFG.initialVitality + 25);
+
+    const candidates = [];
+    forEachNeighbor(base, (j, d) => {
+      if (plantState[j] !== EMPTY) return;
+      candidates.push({ idx: j, dir: d });
+    });
+    const shootOrder = candidates.slice().sort((a, b) =>
+      ((-DY[b.dir] * 5) + airExposure(b.idx) - water[b.idx] * 8) -
+      ((-DY[a.dir] * 5) + airExposure(a.idx) - water[a.idx] * 8)
+    );
+    const shoot = shootOrder[0] || null;
+    const rootOrder = candidates.filter(c => !shoot || c.idx !== shoot.idx).sort((a, b) =>
+      ((DY[b.dir] * 5) + localWetness(b.idx) + water[b.idx] * 8) -
+      ((DY[a.dir] * 5) + localWetness(a.idx) + water[a.idx] * 8)
+    );
+    const root = rootOrder[0] || null;
+    const shootTip = shoot ? addTip(shoot.idx, meta.id, shoot.dir, genome, false, genome.shootStart, 0) : null;
+    const rootTip = root ? addTip(root.idx, meta.id, root.dir, genome, true, genome.rootStart, 0) : null;
+    for (const t of [shootTip, rootTip]) {
+      if (!t) continue;
+      t.heldR = CFG.packetTTL;
+      if (reserve > 0) {
+        t.heldB = CFG.packetTTL;
+        reserve--;
+      }
+      trafficMask[t.idx] = t.heldB ? 3 : 1;
+    }
+    while (reserve > 0) {
+      externalizeBlue(base);
+      reserve--;
+    }
+    if (!shootTip && !rootTip) {
+      plantState[base] = WOOD;
+      woodAge[base] = 0;
+      return false;
+    }
+    return true;
+  }
+
+  function tryMoveSeed(seed) {
+    const x = xOf(seed.idx), y = yOf(seed.idx);
+    const below = y + 1 < rows ? indexOf(x, y + 1) : -1;
+    if (below < 0 || water[below] || medium[below] !== AIR || plantState[below] !== EMPTY) return false;
+    const candidates = [];
+    for (const d of [4, chance(0.5) ? 5 : 3, chance(0.5) ? 3 : 5, chance(0.5) ? 6 : 2, chance(0.5) ? 2 : 6]) {
+      const nx = x + DX[d], ny = y + DY[d];
+      if (!inBounds(nx, ny)) continue;
+      const j = indexOf(nx, ny);
+      if (medium[j] === AIR && !water[j] && plantState[j] === EMPTY) candidates.push(j);
+    }
+    if (!candidates.length) return false;
+    const target = candidates[0];
+    plantState[seed.idx] = EMPTY;
+    seedAt[seed.idx] = 0;
+    seed.idx = target;
+    plantState[target] = SEED;
+    seedAt[target] = seed.id;
+    return true;
+  }
+
+  function stepSeeds() {
+    for (const seed of seeds) {
+      if (seed.dead) continue;
+      seed.age++;
+      if (tryMoveSeed(seed)) seed.rest = 0;
+      else seed.rest++;
+      if (seed.rest > 18 && germinateSeed(seed, false)) continue;
+      if (seed.age > 10000) removeSeed(seed, true);
+    }
+    if (seeds.length > 96 && tickCount % 61 === 0) seeds = seeds.filter(s => !s.dead);
+  }
+
+  // --- Senescence, wood, and soil ---------------------------------------
+  function killLiveCell(i) {
+    if (!isLive(i)) return;
+    if (plantState[i] === TIP) {
+      const tip = tipById.get(tipAt[i]);
+      if (tip) {
+        if (tip.heldB) externalizeBlue(i);
+        for (let n = 0; n < tip.seedCharge; n++) externalizeBlue(i);
+        removeTip(tip);
+      }
+    }
+    const rid = redAt[i], bid = blueAt[i];
+    if (rid) removePacket(packetById.get(rid));
+    if (bid) {
+      const bp = packetById.get(bid);
+      if (bp) expirePacket(bp);
+    }
+    plantState[i] = WOOD;
+    vitality[i] = 0;
+    trafficMask[i] = 0;
+    woodAge[i] = randInt(16);
+    tipAt[i] = 0;
+  }
+
+  function maintainTissue() {
+    for (let i = 0; i < N; i++) {
+      if (!isLive(i)) continue;
+      const mask = trafficMask[i];
+      let v = vitality[i];
+      if (mask === 3) v = Math.min(255, v + CFG.trafficGain);
+      else if (mask) v = Math.max(0, v - CFG.oneColorDecay);
+      else v = Math.max(0, v - CFG.idleDecay);
+      v = Math.max(0, v - foreignNeighborCount(i) * CFG.foreignTouchDecay);
+      vitality[i] = v;
+      // A lone color remains as a fading local memory. Complementary traffic
+      // can arrive in a later window; a permanently one-color branch still
+      // loses vitality and eventually dies.
+      trafficMask[i] = mask === 3 ? 0 : mask;
+      if (!v) killLiveCell(i);
+    }
+  }
+
+  function stepWood() {
+    for (let i = 0; i < N; i++) {
+      if (plantState[i] !== WOOD) continue;
+      woodAge[i]++;
+      if (woodAge[i] > CFG.woodMinAge && chance(CFG.woodDecayChance)) {
+        plantState[i] = EMPTY;
+        genet[i] = 0;
+        polarity[i] = 0;
+        woodAge[i] = 0;
+        medium[i] = ORGANIC;
+      }
+    }
+  }
+
+  function stepOrganicSoil() {
+    for (let y = rows - 2; y >= 0; y--) {
+      const start = randInt(cols);
+      for (let q = 0; q < cols; q++) {
+        const x = (start + q) % cols;
+        const i = indexOf(x, y);
+        if (medium[i] !== ORGANIC || plantState[i] !== EMPTY) continue;
+        const options = chance(0.5) ? [4, 5, 3] : [4, 3, 5];
+        for (const d of options) {
+          const nx = x + DX[d], ny = y + DY[d];
+          if (!inBounds(nx, ny)) continue;
+          const j = indexOf(nx, ny);
+          if (medium[j] === AIR && plantState[j] === EMPTY) {
+            medium[i] = AIR;
+            medium[j] = ORGANIC;
+            if (water[i] && !water[j]) { water[i] = 0; water[j] = 1; }
+            break;
+          }
+        }
+      }
+    }
+  }
+
+  // --- Main tick ---------------------------------------------------------
+  function advanceTick() {
+    tickCount++;
+    stepWater();
+    if (tickCount % CFG.organicMoveEvery === 0) stepOrganicSoil();
+    stepVapors();
+    harvestResources();
+    stepPackets();
+    stepTips();
+    stepSeeds();
+    if (tickCount % CFG.maintenanceEvery === 0) maintainTissue();
+    if (tickCount % CFG.woodCheckEvery === 0) stepWood();
+  }
+
+  // --- Rendering ---------------------------------------------------------
+  function writePixel(data, i, c) {
+    const o = i * 4;
+    data[o] = c[0]; data[o + 1] = c[1]; data[o + 2] = c[2]; data[o + 3] = 255;
+  }
+
+  function render() {
+    if (!imageData) return;
+    const d = imageData.data;
+    const skyTop = [3, 10, 15], skyBottom = [8, 21, 19];
+    const soilC = [54, 43, 31], organicC = [91, 79, 66], woodC = [103, 92, 77];
+    const waterC = [24, 105, 191], vaporC = [193, 222, 222];
+    const redC = [255, 55, 42], blueC = [47, 153, 255], bothC = [245, 217, 255];
+
+    for (let i = 0; i < N; i++) {
+      const y = yOf(i);
+      let c;
+      if (medium[i] === AIR) c = mixColor(skyTop, skyBottom, y / Math.max(1, rows - 1));
+      else if (medium[i] === SOIL) c = soilC;
+      else c = organicC;
+
+      if (water[i]) c = mixColor(c, waterC, medium[i] === AIR ? 0.9 : 0.58);
+      if (vaporAt[i]) c = mixColor(c, vaporC, 0.82);
+
+      const ps = plantState[i];
+      if (ps === WOOD) c = mixColor(woodC, [65, 67, 62], Math.min(0.65, woodAge[i] / 180));
+      else if (ps === CONDUIT || ps === TIP) {
+        const meta = genetMeta.get(genet[i]);
+        if (meta) {
+          const level = Math.min(15, vitality[i] >> 4);
+          c = ps === TIP ? meta.tipColor : meta.palette[level];
+        } else c = [51, 150, 69];
+
+        const hasR = redAt[i] !== 0, hasB = blueAt[i] !== 0;
+        if (hasR && hasB) c = mixColor(c, bothC, 0.82);
+        else if (hasR) c = mixColor(c, redC, 0.72);
+        else if (hasB) c = mixColor(c, blueC, 0.72);
+
+        if (ps === TIP) {
+          const tip = tipById.get(tipAt[i]);
+          if (tip) {
+            if (tip.heldR && tip.heldB) c = bothC;
+            else if (tip.heldR) c = mixColor(redC, [245, 255, 180], 0.38);
+            else if (tip.heldB) c = mixColor(blueC, [225, 255, 240], 0.38);
+          }
+        }
+      } else if (ps === SEED) {
+        const seed = seedById.get(seedAt[i]);
+        c = seed ? hslToRgb(36 + (genomeHash(seed.genome) % 44), 0.83, 0.62) : [225, 170, 70];
+      }
+      writePixel(d, i, c);
+    }
+    ctx.putImageData(imageData, 0, 0);
+  }
+
+  function getStats() {
+    let liveCells = 0, wood = 0, waterCount = 0, rootCells = 0, wetRootCells = 0;
+    const liveGenets = new Set(), genomes = new Set();
+    for (let i = 0; i < N; i++) {
+      if (isLive(i)) {
+        liveCells++;
+        liveGenets.add(genet[i]);
+        if (polarity[i] === 1) {
+          rootCells++;
+          if (wetWithin(i, 2)) wetRootCells++;
+        }
+      }
+      else if (plantState[i] === WOOD) wood++;
+      if (water[i]) waterCount++;
+    }
+    let moduleMin = Infinity, moduleMax = 0;
+    for (const gid of liveGenets) {
+      const meta = genetMeta.get(gid);
+      if (meta) {
+        genomes.add(meta.hash);
+        moduleMin = Math.min(moduleMin, meta.genome.modules.length);
+        moduleMax = Math.max(moduleMax, meta.genome.modules.length);
+      }
+    }
+    let activeTips = 0, activeSeeds = 0, activePackets = 0, activeVapor = 0;
+    let heldR = 0, heldB = 0, redPackets = 0, bluePackets = 0;
+    let seedWater = 0, tipSeedWater = 0;
+    for (const t of tips) if (!t.dead) {
+      activeTips++;
+      if (t.heldR) heldR++;
+      if (t.heldB) heldB++;
+      tipSeedWater += t.seedCharge || 0;
+    }
+    for (const s of seeds) if (!s.dead) { activeSeeds++; seedWater += s.waterReserve || 0; }
+    for (const p of packets) if (!p.dead) {
+      activePackets++;
+      if (p.kind === RED) redPackets++; else bluePackets++;
+    }
+    for (const v of vapors) if (!v.dead) activeVapor++;
+    return {
+      tick: tickCount, liveCells, tips: activeTips, seeds: activeSeeds,
+      genets: liveGenets.size, genomes: genomes.size, packets: activePackets,
+      vapor: activeVapor, water: waterCount, wood, made: totalSeedsMade,
+      mutations: totalMutations, rootCells, wetRootCells, heldR, heldB,
+      redPackets, bluePackets, seedWater, tipSeedWater,
+      moduleMin: Number.isFinite(moduleMin) ? moduleMin : 0, moduleMax,
+      waterMatter: waterCount + activeVapor + bluePackets + heldB + seedWater + tipSeedWater,
+    };
+  }
+
+  function updateStats() {
+    const s = getStats();
+    const moduleRange = s.moduleMin === s.moduleMax ? `${s.moduleMax}` : `${s.moduleMin}–${s.moduleMax}`;
+    statsEl.textContent = `tick ${s.tick.toLocaleString()}  ·  ${s.liveCells} live cells  ·  ${s.tips} tips  ·  ${s.genets} genets / ${s.genomes} genomes  ·  ${moduleRange} modules  ·  ${s.seeds} seeds`;
+  }
+
+  // --- Interaction -------------------------------------------------------
+  function updateButtons() {
+    pauseBtn.textContent = paused ? "Run" : "Pause";
+    speedBtn.textContent = `${speedLevels[speedIndex]}×`;
+    seedBtn.textContent = dropSeedMode ? "Tap world…" : "Drop seed";
+    seedBtn.style.borderColor = dropSeedMode ? "#9eea85" : "rgba(181,229,191,.28)";
+  }
+
+  function worldCellFromPointer(e) {
+    const rect = canvas.getBoundingClientRect();
+    const x = Math.max(0, Math.min(cols - 1, Math.floor((e.clientX - rect.left) / rect.width * cols)));
+    const y = Math.max(0, Math.min(rows - 1, Math.floor((e.clientY - rect.top) / rect.height * rows)));
+    return { x, y, idx: indexOf(x, y) };
+  }
+
+  function dropSeedAt(x, y) {
+    let yy = Math.max(0, Math.min(rows - 1, y));
+    while (yy > 0 && (medium[indexOf(x, yy)] !== AIR || plantState[indexOf(x, yy)] !== EMPTY)) yy--;
+    if (medium[indexOf(x, yy)] !== AIR || plantState[indexOf(x, yy)] !== EMPTY) {
+      statusEl.textContent = "No open air cell exists in that column.";
+      return;
+    }
+    const i = indexOf(x, yy);
+    const genome = mutateGenome(selectedGenome || ANCESTOR_GENOME);
+    const seed = addSeed(i, genome, false, CFG.seedChargeCost);
+    if (seed) statusEl.textContent = `Dropped genome ${genomeHash(genome).toString(16)} at x=${x}.`;
+    else statusEl.textContent = "That cell is occupied; try another patch of sky.";
+  }
+
+  canvas.addEventListener("pointerdown", e => {
+    e.preventDefault();
+    hintEl.style.opacity = "0";
+    const c = worldCellFromPointer(e);
+    if (isLive(c.idx)) {
+      const gid = genet[c.idx], meta = genetMeta.get(gid);
+      if (meta) {
+        selectedGenome = meta.genome;
+        const role = polarity[c.idx] === 1 ? "root-polarized" : "shoot-polarized";
+        statusEl.textContent = `Genet ${gid}, ${role}, genome ${meta.hash.toString(16)}: ${genomeLabel(meta.genome)}. Its tips are executing this recursive grammar.`;
+      }
+      return;
+    }
+    dropSeedAt(c.x, c.y);
+    dropSeedMode = false;
+    updateButtons();
+  });
+
+  pauseBtn.addEventListener("click", () => { paused = !paused; updateButtons(); });
+  speedBtn.addEventListener("click", () => { speedIndex = (speedIndex + 1) % speedLevels.length; updateButtons(); });
+  resetBtn.addEventListener("click", () => resetWorld(true));
+  seedBtn.addEventListener("click", () => { dropSeedMode = !dropSeedMode; updateButtons(); });
+  evolveToggle.addEventListener("change", () => {
+    statusEl.textContent = evolveToggle.checked ? "Seed mutation enabled." : "Seed mutation paused; genomes copy exactly.";
+  });
+  respToggle.addEventListener("change", () => {
+    statusEl.textContent = respToggle.checked ? "Water cycle enabled: blue can transpire into vapor while producing red." : "Direct light enabled: exposed conduit produces red without blue transpiration.";
+  });
+
+  window.addEventListener("keydown", e => {
+    if (e.code === "Space") { paused = !paused; updateButtons(); e.preventDefault(); }
+    else if (e.key === "f" || e.key === "F") { speedIndex = (speedIndex + 1) % speedLevels.length; updateButtons(); }
+    else if (e.key === "r" || e.key === "R") resetWorld(true);
+    else if (e.key === "s" || e.key === "S") { dropSeedMode = !dropSeedMode; updateButtons(); }
+  });
+
+  window.addEventListener("resize", () => {
+    clearTimeout(resizeTimer);
+    resizeTimer = setTimeout(() => resetWorld(false), 180);
+  });
+
+  // --- Animation and test hooks -----------------------------------------
+  function loop(now) {
+    const dt = Math.max(1, now - lastFrameTime);
+    lastFrameTime = now;
+    fpsSmooth = fpsSmooth * 0.92 + (1000 / dt) * 0.08;
+    if (!paused) {
+      const target = speedLevels[speedIndex];
+      const start = performance.now();
+      for (let n = 0; n < target; n++) {
+        advanceTick();
+        if (performance.now() - start > 13) break;
+      }
+    }
+    render();
+    if ((tickCount & 31) === 0) updateStats();
+    requestAnimationFrame(loop);
+  }
+
+  window.__threadplant = {
+    step(n = 1) { for (let i = 0; i < n; i++) advanceTick(); render(); updateStats(); return getStats(); },
+    stats: getStats,
+    reset(seed) { if (Number.isFinite(seed)) worldSeed = seed >>> 0; resetWorld(false); return getStats(); },
+    pause(v = true) { paused = !!v; updateButtons(); },
+    genomeLabel,
+  };
+
+  resetWorld(false);
+  requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

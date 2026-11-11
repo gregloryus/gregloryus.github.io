@@ -1,0 +1,810 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
+<meta name="theme-color" content="#000000">
+<title>Thicket 01</title>
+<style>
+  :root{
+    color-scheme: dark;
+    --ink:#dfe6df;
+    --dim:#7f8a80;
+    --line:rgba(223,230,223,.16);
+    --panel:rgba(0,0,0,.72);
+  }
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  html,body{
+    margin:0;width:100%;height:100%;height:100dvh;overflow:hidden;background:#000;
+    color:var(--ink);
+    font:11px/1.4 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+    overscroll-behavior:none;touch-action:manipulation;
+  }
+  #field{
+    position:fixed;inset:0;display:block;width:100vw;height:100vh;height:100dvh;
+    object-fit:contain;image-rendering:pixelated;background:#000;touch-action:none;
+  }
+  .pane{
+    position:fixed;background:var(--panel);border:1px solid var(--line);
+    padding:6px 8px;backdrop-filter:blur(6px);border-radius:3px;
+  }
+  #hud{top:calc(env(safe-area-inset-top) + 6px);left:6px;min-width:158px}
+  #hud .row{display:flex;justify-content:space-between;gap:10px}
+  #hud .k{color:var(--dim)}
+  #hud .sep{height:5px}
+  #spark{display:block;margin-top:5px;border-top:1px solid var(--line);padding-top:4px}
+  #bar{
+    bottom:calc(env(safe-area-inset-bottom) + 6px);left:6px;right:6px;
+    display:flex;gap:4px;align-items:center;flex-wrap:wrap;
+  }
+  button{
+    font:inherit;color:var(--ink);background:transparent;border:1px solid var(--line);
+    padding:5px 8px;border-radius:3px;cursor:pointer;min-width:30px;
+  }
+  button:hover{border-color:rgba(223,230,223,.4)}
+  button:focus-visible{outline:2px solid #9fd3a8;outline-offset:1px}
+  button.on{background:rgba(223,230,223,.14);border-color:rgba(223,230,223,.42)}
+  .grow{flex:1}
+  #note{color:var(--dim);font-size:10px}
+  #card{
+    top:calc(env(safe-area-inset-top) + 6px);right:6px;max-width:186px;display:none;
+    white-space:pre-wrap;line-height:1.45;
+  }
+  #card b{color:#cfe8d2;font-weight:400}
+  #help{
+    position:fixed;inset:auto 6px 6px 6px;max-height:70dvh;overflow:auto;display:none;
+    background:var(--panel);border:1px solid var(--line);border-radius:3px;padding:10px 12px;
+    backdrop-filter:blur(6px);line-height:1.6;
+  }
+  #help h1{font-size:11px;font-weight:400;color:#cfe8d2;margin:0 0 6px}
+  #help p{margin:0 0 7px}
+  #help code{color:#cfe8d2}
+  @media (prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
+</head>
+<body>
+<canvas id="field"></canvas>
+
+<div class="pane" id="hud">
+  <div class="row"><span class="k">tick</span><span id="s_t">0</span></div>
+  <div class="row"><span class="k">plants</span><span id="s_p">0</span></div>
+  <div class="row"><span class="k">tissue</span><span id="s_c">0</span></div>
+  <div class="sep"></div>
+  <div class="row"><span class="k">mouth flux</span><span id="s_f">0%</span></div>
+  <div class="row"><span class="k">mouth tissue</span><span id="s_m">0%</span></div>
+  <div class="row"><span class="k">lineages</span><span id="s_l">0</span></div>
+  <div class="row"><span class="k">deaths/tick</span><span id="s_d">0</span></div>
+  <div class="row"><span class="k">mean spread</span><span id="s_r">0</span></div>
+  <canvas id="spark" width="150" height="34"></canvas>
+</div>
+
+<div class="pane" id="card"></div>
+
+<div class="pane" id="bar">
+  <button id="b_play">pause</button>
+  <button data-sp="1">1x</button>
+  <button data-sp="8">8x</button>
+  <button data-sp="64">64x</button>
+  <button data-sp="256">256x</button>
+  <span class="grow"></span>
+  <button id="b_mouth">mouths on</button>
+  <button id="b_reset">reseed</button>
+  <button id="b_help">?</button>
+</div>
+
+<div id="help">
+  <h1>Thicket 01</h1>
+  <p>Every plant carries one heritable number, its <b>signature</b>, drawn as its hue. Some tissue is a <b>mouth</b>: it takes energy from a touching cell of another plant, but only when that cell's signature matches the mouth's inherited key. The same number decides who you can eat and who can eat you.</p>
+  <p>Leaf tissue earns from open space around it, so income and crowding are the same quantity with opposite signs. Mouth tissue earns nothing from space. Rind earns nothing and cannot be eaten. Bloom tissue earns nothing, hoards, and spends to make a seed.</p>
+  <p>Everything starts from one ancestor genome: a single stalk ending in a bloom. Branching, mouths, rind, defence, and every signature but the first have to be invented by mutation.</p>
+  <p>The experiment: run the same seed with mouths on and off and compare lineages, deaths, and shapes. <code>?mouths=0&amp;seed=1</code></p>
+  <p>Tap the field to inspect a cell. All dials are URL parameters — <code>?photo=&amp;upkeep=&amp;drain=&amp;alpha=&amp;cellcost=&amp;seedcost=&amp;capacity=&amp;clear=&amp;founders=&amp;w=&amp;h=&amp;seed=</code></p>
+  <p><button id="b_close">close</button></p>
+</div>
+
+<script>
+"use strict";
+(function(){
+
+/* ---------------------------------------------------------------
+   1. dials
+   --------------------------------------------------------------- */
+var Q = new URLSearchParams(location.search);
+function num(k,d){ var v=Q.get(k); if(v===null) return d; v=parseFloat(v); return isFinite(v)?v:d; }
+
+var CFG = {
+  w:        num("w",360),
+  h:        num("h",600),
+  seed:     num("seed",1),
+  founders: num("founders",24),
+
+  photo:    num("photo",0.035),  // per open neighbour, per tick
+  upkeep:   num("upkeep",0.10),  // 1-thick line: 6 open -> +0.11. 2-thick ribbon: 3 open -> +0.005. 3-thick core: 0 open -> dead.
+  drain:    num("drain",0.20),   // = 2 x upkeep -> a mouth in contact earns like a good leaf, and nothing otherwise
+  alpha:    num("alpha",0.60),   // sharing between connected cells of one plant
+  capacity: num("capacity",6.0),
+  floor:    num("floor",0.15),   // energy a cell keeps back from a bloom that is pulling on it
+  bloomcost:num("bloomcost",1.0),// a bud will not open a flower until its tip holds this much
+  ripen:    num("ripen",600),    // ticks a bud will wait for that energy before giving up
+
+  cellcost: num("cellcost",0.30),
+  birthkeep:num("birthkeep",0.6),// share of cellcost the new cell keeps
+  seedcost: num("seedcost",3.0),
+  seede:    num("seede",1.0),
+
+  clear:    num("clear",0),
+  patience: num("patience",24),
+  maxcells: num("maxcells",300),
+  maxbuds:  num("maxbuds",24),
+  maxdepth: num("maxdepth",24),
+  maxstroke:num("maxstroke",8),
+
+  mouths:   num("mouths",1)|0
+};
+
+var W=CFG.w|0, H=CFG.h|0, N=W*H;
+
+/* ---------------------------------------------------------------
+   2. deterministic prng
+   --------------------------------------------------------------- */
+var s0,s1,s2,s3;
+function rotl(x,k){ return ((x<<k)|(x>>>(32-k)))>>>0; }
+function mix32(x){
+  x=Math.imul(x^(x>>>16),0x7feb352d);
+  x=Math.imul(x^(x>>>15),0x846ca68b);
+  return (x^(x>>>16))>>>0;
+}
+function seedRng(n){
+  s0=mix32(n>>>0 || 1); s1=mix32(s0+0x9e3779b9); s2=mix32(s1+0x9e3779b9); s3=mix32(s2+0x9e3779b9);
+  if(((s0|s1|s2|s3)>>>0)===0) s3=1;
+}
+function rnd32(){
+  var r=Math.imul(rotl(Math.imul(s1,5)>>>0,7),9)>>>0;
+  var t=(s1<<9)>>>0;
+  s2=(s2^s0)>>>0; s3=(s3^s1)>>>0; s1=(s1^s2)>>>0; s0=(s0^s3)>>>0;
+  s2=(s2^t)>>>0;  s3=rotl(s3,11);
+  return r;
+}
+function ri(n){ return n<=1?0:(rnd32()%n); }          // integer 0..n-1
+function rf(){ return rnd32()/4294967296; }            // float 0..1
+function chance(p){ return rf()<p; }
+function pm(k){ return ri(k)+1; }                      // 1..k
+
+/* ---------------------------------------------------------------
+   3. world arrays
+   --------------------------------------------------------------- */
+var EMPTY=0, LIVE=1;
+var LEAF=0, MOUTH=1, RIND=2, BLOOM=3;
+var END_STOP=0, END_BLOOM=1, END_NEXT=2, END_FORK=3;
+
+var kind  = new Uint8Array(N);
+var role  = new Uint8Array(N);
+var owner = new Int32Array(N);
+var en    = new Float32Array(N);
+
+var cellX = new Int32Array(N), cellY = new Int32Array(N);
+for(var i=0;i<N;i++){ cellX[i]=i%W; cellY[i]=(i/W)|0; }
+
+var wrapX = new Int32Array(W*3), wrapY = new Int32Array(H*3);
+for(var x=-W;x<2*W;x++) wrapX[x+W] = ((x%W)+W)%W;
+for(var y=-H;y<2*H;y++) wrapY[y+H] = ((y%H)+H)%H;
+
+// 8 directions, E clockwise
+var DX=[1,1,0,-1,-1,-1,0,1], DY=[0,1,1,1,0,-1,-1,-1];
+var nb = new Int32Array(8);
+var kin = new Int32Array(8);
+var NB = new Int32Array(N*8);
+(function buildNB(){
+  for(var i=0;i<N;i++){
+    var px=cellX[i], py=cellY[i], o=i*8;
+    for(var d=0;d<8;d++) NB[o+d] = wrapY[py+DY[d]+H]*W + wrapX[px+DX[d]+W];
+  }
+})();
+function neighbours(i){
+  var o=i*8;
+  nb[0]=NB[o];nb[1]=NB[o+1];nb[2]=NB[o+2];nb[3]=NB[o+3];
+  nb[4]=NB[o+4];nb[5]=NB[o+5];nb[6]=NB[o+6];nb[7]=NB[o+7];
+}
+
+var liveList = new Int32Array(N), liveN=0;
+var scratch  = new Int32Array(N);
+
+/* ---------------------------------------------------------------
+   4. plants
+   --------------------------------------------------------------- */
+var PMAX = 60000;
+var pAlive  = new Uint8Array(PMAX);
+var pDoomed = new Uint8Array(PMAX);
+var pSigma  = new Int32Array(PMAX);
+var pDelta  = new Int32Array(PMAX);
+var pWidth  = new Int32Array(PMAX);
+var pDisp   = new Int32Array(PMAX);
+var pCells  = new Int32Array(PMAX);
+var pBlooms = new Int32Array(PMAX);
+var pGen    = new Array(PMAX);
+var pBuds   = new Array(PMAX);
+var pBorn   = new Int32Array(PMAX);
+var pIn     = new Uint8Array(PMAX);
+var freeP   = new Int32Array(PMAX), freeN=0;
+var activeP = [];   // rebuilt lazily
+
+function resetPlants(){
+  pAlive.fill(0); pDoomed.fill(0); pIn.fill(0); freeN=0; activeP.length=0;
+  for(var k=PMAX-1;k>=0;k--){ freeP[freeN++]=k; pGen[k]=null; pBuds[k]=null; }
+}
+
+function newPlant(g){
+  if(freeN===0) return -1;
+  var s=freeP[--freeN];
+  pAlive[s]=1; pDoomed[s]=0;
+  pGen[s]=g; pBuds[s]=[];
+  pSigma[s]=g.sig; pDelta[s]=g.del; pWidth[s]=g.wid; pDisp[s]=g.disp;
+  pCells[s]=0; pBlooms[s]=0; pBorn[s]=tick;
+  if(!pIn[s]){ pIn[s]=1; activeP.push(s); }
+  return s;
+}
+function freePlant(s){
+  pAlive[s]=0; pDoomed[s]=0; pGen[s]=null; pBuds[s]=null;
+  freeP[freeN++]=s;
+}
+
+/* ---------------------------------------------------------------
+   5. genome
+   --------------------------------------------------------------- */
+function stroke(turn,len,r,end,a,b){ return {turn:turn,len:len,role:r,end:end,a:a,b:b}; }
+
+function ancestor(){
+  return {
+    sig: 90, del: 0, wid: 4, disp: 12,
+    st: [ stroke(0,4,LEAF,END_NEXT,1,1),
+          stroke(0,4,LEAF,END_BLOOM,0,0) ]
+  };
+}
+function cloneGen(g){
+  var st=new Array(g.st.length);
+  for(var i=0;i<g.st.length;i++){ var s=g.st[i]; st[i]=stroke(s.turn,s.len,s.role,s.end,s.a,s.b); }
+  return {sig:g.sig, del:g.del, wid:g.wid, disp:g.disp, st:st};
+}
+function circ(v){ return ((v%256)+256)%256; }
+function clampi(v,lo,hi){ return v<lo?lo:(v>hi?hi:v); }
+
+function mutate(g){
+  if(chance(0.20)) g.sig = circ(g.sig + (chance(0.5)? pm(3) : -pm(3)));
+  if(chance(0.12)) g.del = circ(g.del + (chance(0.5)? pm(10): -pm(10)));
+  if(chance(0.10)) g.wid = clampi(g.wid + (chance(0.5)? pm(2) : -pm(2)), 0, 48);
+  if(chance(0.10)) g.disp= clampi(g.disp+ (chance(0.5)? pm(2) : -pm(2)), 1, 40);
+
+  var n=g.st.length;
+  for(var i=0;i<n;i++){
+    var s=g.st[i];
+    if(chance(0.10)) s.turn = clampi(s.turn + (chance(0.5)?1:-1), -3, 3);
+    if(chance(0.12)) s.len  = clampi(s.len  + (chance(0.5)?1:-1),  1, 12);
+    if(chance(0.05)){
+      var r = ri(3);
+      if(r===MOUTH && !CFG.mouths) r = LEAF;
+      s.role = r;
+    }
+    if(chance(0.06)){
+      s.end = ri(4);
+      s.a = ri(n); s.b = ri(n);
+    }
+  }
+  if(n < CFG.maxstroke && chance(0.04)){
+    var src=g.st[ri(n)];
+    g.st.push(stroke(src.turn,src.len,src.role,src.end,src.a,src.b));
+  }
+  if(g.st.length > 1 && chance(0.03)){
+    g.st.splice(ri(g.st.length),1);
+  }
+  var m=g.st.length;
+  for(var j=0;j<m;j++){ g.st[j].a=clampi(g.st[j].a,0,m-1); g.st[j].b=clampi(g.st[j].b,0,m-1); }
+  return g;
+}
+
+/* ---------------------------------------------------------------
+   6. cells
+   --------------------------------------------------------------- */
+function placeCell(i,slot,r,e){
+  kind[i]=LIVE; role[i]=r; owner[i]=slot; en[i]=e;
+  pCells[slot]++;
+  if(r===BLOOM) pBlooms[slot]++;
+}
+function killCell(i){
+  var s=owner[i];
+  if(s>=0){
+    pCells[s]--;
+    if(role[i]===BLOOM) pBlooms[s]--;
+  }
+  kind[i]=EMPTY; role[i]=LEAF; owner[i]=-1; en[i]=0;
+  deathsWin++;
+}
+
+/* ---------------------------------------------------------------
+   7. state + stats
+   --------------------------------------------------------------- */
+var tick=0, running=true, speed=8;
+var lightWin=0, drainWin=0, deathsWin=0, winTicks=0;
+var statFlux=0, statMouthTis=0, statLin=0, statDeaths=0, statDisp=0;
+var statMouthPl=0, statKeyOff=0;
+var sigHist = new Float64Array(32);
+var flashes = new Int32Array(6000), flashN=0;
+var pending = [];
+var history = [];   // {flux, lin, cells}
+var extinctAt = -1;
+
+function reset(){
+  seedRng(CFG.seed|0);
+  kind.fill(0); role.fill(0); owner.fill(-1); en.fill(0);
+  resetPlants();
+  liveN=0; tick=0; extinctAt=-1;
+  lightWin=drainWin=deathsWin=winTicks=0;
+  statFlux=statMouthTis=statLin=statDeaths=statDisp=0;
+  history.length=0; flashN=0;
+
+  var anc = ancestor();
+  for(var f=0; f<CFG.founders; f++){
+    for(var tries=0; tries<200; tries++){
+      var x=ri(W), y=ri(H), i=y*W+x;
+      if(kind[i]!==EMPTY) continue;
+      if(!clearAround(i, CFG.clear+2)) continue;
+      var s=newPlant(cloneGen(anc));
+      if(s<0) break;
+      placeCell(i,s,LEAF,CFG.seede*2);
+      pBuds[s].push({x:x,y:y,dir:ri(8),si:0,step:0,wait:0,depth:0});
+      break;
+    }
+  }
+}
+
+function clearAround(i,r){
+  var px=cellX[i], py=cellY[i];
+  for(var dy=-r;dy<=r;dy++){
+    var yy=wrapY[py+dy+H]*W;
+    for(var dx=-r;dx<=r;dx++){
+      if(kind[yy + wrapX[px+dx+W]]===LIVE) return false;
+    }
+  }
+  return true;
+}
+
+/* ---------------------------------------------------------------
+   8. one tick
+   --------------------------------------------------------------- */
+var mouthTisWin=0, tissueWin=0;
+
+function step(){
+  var i,k,d,n,s,r,open,t;
+  var photo=CFG.photo, upkeep=CFG.upkeep, drain=CFG.drain, cap=CFG.capacity;
+  var mouthsOn = CFG.mouths!==0;
+  var mouthTis=0, alive=0;
+
+  sigHist.fill(0);
+  flashN=0;
+
+  // rebuild the live list in grid order: neighbours then sit in cache instead of
+  // scattered across the whole world, which is most of the cost of a tick
+  liveN=0;
+  for(i=0;i<N;i++) if(kind[i]===LIVE) liveList[liveN++]=i;
+
+  /* --- metabolism, predation, death, seeds; compacts the live list --- */
+  for(k=0;k<liveN;k++){
+    i=liveList[k];
+    if(kind[i]!==LIVE) continue;
+    s=owner[i];
+    if(s<0){ killCell(i); continue; }
+    if(pDoomed[s]){ killCell(i); if(pCells[s]===0) freePlant(s); continue; }
+
+    r=role[i];
+
+    if(r===LEAF){
+      var o8=i*8; open=0;
+      if(kind[NB[o8  ]]===EMPTY)open++;
+      if(kind[NB[o8+1]]===EMPTY)open++;
+      if(kind[NB[o8+2]]===EMPTY)open++;
+      if(kind[NB[o8+3]]===EMPTY)open++;
+      if(kind[NB[o8+4]]===EMPTY)open++;
+      if(kind[NB[o8+5]]===EMPTY)open++;
+      if(kind[NB[o8+6]]===EMPTY)open++;
+      if(kind[NB[o8+7]]===EMPTY)open++;
+      t = photo*open;
+      en[i]+=t; lightWin+=t;
+    } else if(r===MOUTH && mouthsOn){
+      neighbours(i);
+      mouthTis++;
+      var key = (pSigma[s] + pDelta[s]) & 255;
+      var wid = pWidth[s];
+      var st  = ri(8);
+      for(d=0;d<8;d++){
+        n = nb[(d+st)&7];
+        if(kind[n]!==LIVE) continue;
+        var os = owner[n];
+        if(os===s || os<0) continue;
+        if(role[n]===RIND) continue;
+        if(en[n]<=0) continue;
+        var diff = pSigma[os] - key; diff = ((diff%256)+256)%256; if(diff>128) diff=256-diff;
+        if(diff>wid) continue;
+        t = drain; if(t>en[n]) t=en[n];
+        en[n]-=t; en[i]+=t; drainWin+=t;
+        if(flashN<flashes.length) flashes[flashN++]=i;
+        break;
+      }
+    } else if(r===MOUTH){
+      mouthTis++;
+    }
+
+    en[i]-=upkeep;
+    if(en[i]>cap) en[i]=cap;
+
+    if(en[i]<=0){
+      killCell(i);
+      if(pCells[s]===0 && pAlive[s]) freePlant(s);
+      continue;
+    }
+
+    if(r===BLOOM && en[i]>=CFG.seedcost){
+      en[i]-=CFG.seedcost;
+      pending.push(s, i);
+    }
+
+    sigHist[pSigma[s]>>3]++;
+    alive++;
+  }
+
+  for(k=0;k<pending.length;k+=2) sowSeed(pending[k], pending[k+1]);
+  pending.length=0;
+
+  /* --- sharing between connected cells of one plant --- */
+  var alpha=CFG.alpha, floor=CFG.floor;
+  for(k=0;k<liveN;k++){
+    i=liveList[k];
+    if(kind[i]!==LIVE) continue;
+    var m=0, j, ow=owner[i], od=i*8;
+    for(d=0;d<8;d++){
+      n=NB[od+d];
+      if(kind[n]===LIVE && owner[n]===ow) kin[m++]=n;
+    }
+    if(m===0) continue;
+
+    if(role[i]===BLOOM){
+      // a bloom is a sink: sap moves toward it, but no cell starves itself feeding it
+      for(j=0;j<m;j++){
+        n=kin[j]; if(role[n]===BLOOM) continue;
+        var avail=en[n]-floor;
+        if(avail>0){ var take=alpha*avail/m; en[n]-=take; en[i]+=take; }
+      }
+      continue;
+    }
+    var rate = alpha/(2*m);
+    for(j=0;j<m;j++){
+      n=kin[j]; if(role[n]===BLOOM) continue;   // the bloom does the taking, not the leaf
+      var give = rate*(en[i]-en[n]);
+      en[i]-=give; en[n]+=give;
+    }
+  }
+
+  /* --- growth --- */
+  for(var ap=0; ap<activeP.length; ap++){
+    s=activeP[ap];
+    if(!pAlive[s]) continue;
+    var buds=pBuds[s];
+    if(!buds || buds.length===0) continue;
+    for(var bi=buds.length-1; bi>=0; bi--){
+      if(!growBud(s,buds[bi],buds)) buds.splice(bi,1);
+    }
+  }
+
+  /* --- sterile collapse: no growth left and nothing to reproduce with --- */
+  var w=0;
+  for(var ap2=0; ap2<activeP.length; ap2++){
+    s=activeP[ap2];
+    if(!pAlive[s]){ pIn[s]=0; continue; }
+    if(pCells[s]===0){ freePlant(s); pIn[s]=0; continue; }
+    if(pBuds[s].length===0 && pBlooms[s]===0) pDoomed[s]=1;
+    activeP[w++]=s;
+  }
+  activeP.length=w;
+
+  tick++;
+  winTicks++;
+  liveN=alive;
+  mouthTisWin+=mouthTis; tissueWin+=(alive||1);
+
+  if(alive===0 && extinctAt<0) extinctAt=tick;
+
+  if(winTicks>=20) rollStats();
+}
+
+/* --- grow one bud; returns false if the bud is finished --- */
+function growBud(s,b,buds){
+  var g=pGen[s];
+  if(!g) return false;
+  if(pCells[s]>=CFG.maxcells) return false;
+
+  var si = b.si; if(si>=g.st.length) si = g.st.length-1;
+  var sk = g.st[si];
+  var src = b.y*W + b.x;
+  if(kind[src]!==LIVE || owner[src]!==s) return false;
+
+  if(b.step===0 && !b.turned){ b.dir = (b.dir + sk.turn + 8) & 7; b.turned=1; }
+
+  if(b.step < sk.len){
+    if(en[src] < CFG.cellcost) return true;            // wait, no penalty
+    var order=[b.dir,(b.dir+1)&7,(b.dir+7)&7], tgt=-1, ndir=b.dir;
+    for(var o=0;o<3;o++){
+      var nx=wrapX[b.x+DX[order[o]]+W], ny=wrapY[b.y+DY[order[o]]+H], ni=ny*W+nx;
+      if(kind[ni]===EMPTY){ tgt=ni; ndir=order[o]; break; }
+    }
+    if(tgt<0){ b.wait++; return b.wait<=CFG.patience; }
+    en[src]-=CFG.cellcost;
+    placeCell(tgt,s,sk.role,CFG.cellcost*CFG.birthkeep);
+    b.x=cellX[tgt]; b.y=cellY[tgt]; b.dir=ndir; b.step++; b.wait=0;
+    if(b.step < sk.len) return true;
+  }
+
+  // end of stroke
+  var here=b.y*W+b.x;
+  if(sk.end===END_BLOOM){
+    if(role[here]===BLOOM) return false;
+    if(en[here] < CFG.bloomcost){          // ripening: wait for the body to fund the flower
+      b.rip=(b.rip||0)+1;
+      return b.rip <= CFG.ripen;
+    }
+    role[here]=BLOOM; pBlooms[s]++;
+    return false;
+  }
+  if(sk.end===END_STOP) return false;
+  if(b.depth>=CFG.maxdepth) return false;
+
+  if(sk.end===END_NEXT){
+    b.si = clampi(sk.a,0,g.st.length-1); b.step=0; b.turned=0; b.depth++; b.wait=0;
+    return true;
+  }
+  // fork
+  if(buds.length < CFG.maxbuds){
+    buds.push({x:b.x,y:b.y,dir:b.dir,si:clampi(sk.b,0,g.st.length-1),step:0,wait:0,depth:b.depth+1,turned:0});
+  }
+  b.si=clampi(sk.a,0,g.st.length-1); b.step=0; b.turned=0; b.depth++; b.wait=0;
+  return true;
+}
+
+/* --- seeds --- */
+function sowSeed(s,from){
+  var ang = rf()*6.2831853, r = 1 + rf()*pDisp[s];
+  var tx = wrapX[cellX[from] + Math.round(Math.cos(ang)*r) + W];
+  var ty = wrapY[cellY[from] + Math.round(Math.sin(ang)*r) + H];
+  var i = ty*W + tx;
+  if(kind[i]!==EMPTY) return;
+  if(CFG.clear>0 && !clearAround(i,CFG.clear)) return;
+  var g = mutate(cloneGen(pGen[s]));
+  var ns = newPlant(g);
+  if(ns<0) return;
+  placeCell(i,ns,LEAF,CFG.seede);
+  pBuds[ns].push({x:tx,y:ty,dir:ri(8),si:0,step:0,wait:0,depth:0,turned:0});
+}
+
+/* ---------------------------------------------------------------
+   9. stats
+   --------------------------------------------------------------- */
+function rollStats(){
+  var tot = lightWin + drainWin;
+  statFlux = tot>0 ? drainWin/tot : 0;
+  statMouthTis = tissueWin>0 ? mouthTisWin/tissueWin : 0;
+  statDeaths = winTicks>0 ? deathsWin/winTicks : 0;
+
+  var sum=0,b;
+  for(b=0;b<32;b++) sum+=sigHist[b];
+  var sh=0;
+  if(sum>0){ for(b=0;b<32;b++){ var p=sigHist[b]/sum; if(p>0) sh-=p*Math.log(p); } }
+  statLin = sum>0 ? Math.exp(sh) : 0;
+
+  var ds=0,dn=0,mo=0,koff=0,kn=0;
+  for(var k=0;k<activeP.length;k++){
+    var s=activeP[k]; if(!pAlive[s]) continue;
+    ds+=pDisp[s]; dn++;
+    var g=pGen[s], has=false;
+    if(g) for(var q=0;q<g.st.length;q++) if(g.st[q].role===MOUTH){ has=true; break; }
+    if(has){
+      mo++;
+      var dd=pDelta[s]; if(dd>128) dd=256-dd;   // distance from targeting its own kind
+      koff+=dd; kn++;
+    }
+  }
+  statDisp = dn>0 ? ds/dn : 0;
+  statMouthPl = dn>0 ? mo/dn : 0;
+  statKeyOff = kn>0 ? koff/kn : 0;
+
+  history.push({f:statFlux, l:statLin/32, c:Math.min(1, liveN/(N*0.25))});
+  if(history.length>260) history.shift();
+
+  lightWin=drainWin=deathsWin=winTicks=mouthTisWin=tissueWin=0;
+}
+
+/* ---------------------------------------------------------------
+   10. palette + render
+   --------------------------------------------------------------- */
+var cv = document.getElementById("field");
+cv.width=W; cv.height=H;
+var ctx = cv.getContext("2d", {alpha:false});
+var img = ctx.createImageData(W,H);
+var px  = new Uint32Array(img.data.buffer);
+
+// [bin 0..31][role 0..3][level 0..3]
+var PAL = new Uint32Array(32*4*4);
+function hsl(h,s,l){
+  h/=360;
+  var q = l<0.5 ? l*(1+s) : l+s-l*s, p = 2*l-q;
+  function c(t){
+    if(t<0)t+=1; if(t>1)t-=1;
+    if(t<1/6) return p+(q-p)*6*t;
+    if(t<1/2) return q;
+    if(t<2/3) return p+(q-p)*(2/3-t)*6;
+    return p;
+  }
+  var R=Math.round(c(h+1/3)*255), G=Math.round(c(h)*255), B=Math.round(c(h-1/3)*255);
+  return (255<<24) | (B<<16) | (G<<8) | R;
+}
+(function buildPal(){
+  var LV=[0.55,0.72,0.88,1.0];
+  var spec=[ [0.34,0.42], [0.16,0.70], [0.10,0.26], [0.52,0.66] ]; // leaf, mouth, rind, bloom
+  for(var b=0;b<32;b++){
+    var hue = b/32*360;
+    for(var r=0;r<4;r++){
+      for(var v=0;v<4;v++){
+        PAL[(b*4+r)*4+v] = hsl(hue, spec[r][0], Math.min(0.95, spec[r][1]*LV[v]));
+      }
+    }
+  }
+})();
+var FLASH = (255<<24)|(220<<16)|(245<<8)|235;
+
+function render(){
+  px.fill(0xff000000);
+  var cap=CFG.capacity;
+  for(var i=0;i<N;i++){
+    if(kind[i]!==LIVE) continue;
+    var s=owner[i]; if(s<0) continue;
+    var bin=pSigma[s]>>3;
+    var lv=(en[i]/cap)*4; lv=lv<0?0:(lv>3.99?3:lv|0);
+    px[i]=PAL[(bin*4+role[i])*4+lv];
+  }
+  for(var f=0;f<flashN;f++) px[flashes[f]]=FLASH;
+  ctx.putImageData(img,0,0);
+}
+
+/* ---------------------------------------------------------------
+   11. hud
+   --------------------------------------------------------------- */
+var el = {};
+["s_t","s_p","s_c","s_f","s_m","s_l","s_d","s_r"].forEach(function(id){ el[id]=document.getElementById(id); });
+var sp = document.getElementById("spark"), spx = sp.getContext("2d");
+
+function drawHud(){
+  el.s_t.textContent = tick;
+  el.s_p.textContent = activeP.length;
+  el.s_c.textContent = liveN + (extinctAt>0 ? " (extinct)" : "");
+  el.s_f.textContent = (statFlux*100).toFixed(1)+"%";
+  el.s_m.textContent = (statMouthTis*100).toFixed(1)+"%";
+  el.s_l.textContent = statLin.toFixed(2);
+  el.s_d.textContent = statDeaths.toFixed(0);
+  el.s_r.textContent = statDisp.toFixed(1);
+
+  spx.clearRect(0,0,150,34);
+  spx.globalAlpha=1;
+  var n=history.length; if(n<2) return;
+  function line(key,color){
+    spx.strokeStyle=color; spx.lineWidth=1; spx.beginPath();
+    for(var i=0;i<n;i++){
+      var x=i/(n-1)*149+0.5, y=33.5-history[i][key]*32;
+      if(i===0) spx.moveTo(x,y); else spx.lineTo(x,y);
+    }
+    spx.stroke();
+  }
+  line("c","rgba(150,180,155,.45)");   // tissue
+  line("l","rgba(180,205,255,.75)");   // lineage spread
+  line("f","rgba(255,190,150,.95)");   // mouth flux
+}
+
+/* ---------------------------------------------------------------
+   12. inspector
+   --------------------------------------------------------------- */
+var card = document.getElementById("card");
+var ROLEN=["leaf","mouth","rind","bloom"];
+var ENDN=["stop","bloom","next","fork"];
+cv.addEventListener("pointerdown", function(ev){
+  var r=cv.getBoundingClientRect();
+  var sx=(ev.clientX-r.left)/r.width, sy=(ev.clientY-r.top)/r.height;
+  if(sx<0||sx>1||sy<0||sy>1) return;
+  var i=((sy*H)|0)*W + ((sx*W)|0);
+  if(kind[i]!==LIVE){ card.style.display="none"; return; }
+  var s=owner[i], g=pGen[s];
+  var lines=[];
+  lines.push("<b>"+ROLEN[role[i]]+"</b>  energy "+en[i].toFixed(2));
+  lines.push("signature "+pSigma[s]);
+  lines.push("key "+((pSigma[s]+pDelta[s])&255)+" ±"+pWidth[s]);
+  lines.push("spread "+pDisp[s]+"   tissue "+pCells[s]+"   blooms "+pBlooms[s]);
+  lines.push("age "+(tick-pBorn[s]));
+  lines.push("");
+  if(g) for(var k=0;k<g.st.length;k++){
+    var st=g.st[k];
+    lines.push(k+": turn "+(st.turn>0?"+":"")+st.turn+" len "+st.len+" "+ROLEN[st.role]+" → "+ENDN[st.end]+
+      (st.end===END_FORK?(" "+st.a+","+st.b):(st.end===END_NEXT?(" "+st.a):"")));
+  }
+  card.innerHTML = lines.join("\n");
+  card.style.display="block";
+});
+
+/* ---------------------------------------------------------------
+   13. controls
+   --------------------------------------------------------------- */
+var bPlay=document.getElementById("b_play");
+var bMouth=document.getElementById("b_mouth");
+var bReset=document.getElementById("b_reset");
+var bHelp=document.getElementById("b_help");
+var help=document.getElementById("help");
+
+bPlay.onclick=function(){ running=!running; bPlay.textContent = running?"pause":"play"; };
+bReset.onclick=function(){ CFG.seed=(CFG.seed+1)|0; reset(); card.style.display="none"; };
+bMouth.onclick=function(){
+  CFG.mouths = CFG.mouths?0:1;
+  bMouth.textContent = CFG.mouths?"mouths on":"mouths off";
+  bMouth.classList.toggle("on", !CFG.mouths);
+};
+bHelp.onclick=function(){ help.style.display = help.style.display==="block"?"none":"block"; };
+document.getElementById("b_close").onclick=function(){ help.style.display="none"; };
+
+var spBtns=[].slice.call(document.querySelectorAll("[data-sp]"));
+spBtns.forEach(function(b){
+  b.onclick=function(){
+    speed=parseInt(b.dataset.sp,10);
+    spBtns.forEach(function(o){ o.classList.toggle("on", o===b); });
+  };
+});
+spBtns.forEach(function(b){ if(parseInt(b.dataset.sp,10)===speed) b.classList.add("on"); });
+bMouth.textContent = CFG.mouths?"mouths on":"mouths off";
+bMouth.classList.toggle("on", !CFG.mouths);
+
+/* ---------------------------------------------------------------
+   14. loop
+   --------------------------------------------------------------- */
+function frame(){
+  if(running){
+    var t0=performance.now(), done=0;
+    while(done<speed){
+      step(); done++;
+      if(performance.now()-t0 > 13) break;
+    }
+  }
+  render();
+  drawHud();
+  requestAnimationFrame(frame);
+}
+
+reset();
+requestAnimationFrame(frame);
+
+/* headless / console access */
+window.thicket = {
+  cfg: CFG,
+  run: function(n){ for(var i=0;i<n;i++) step(); return this.stats(); },
+  reset: reset,
+  stats: function(){
+    return {
+      tick: tick, plants: activeP.length, tissue: liveN,
+      mouthFlux: statFlux, mouthTissue: statMouthTis,
+      lineages: statLin, deathsPerTick: statDeaths, meanSpread: statDisp,
+      mouthPlants: statMouthPl, keyOffset: statKeyOff,
+      extinctAt: extinctAt
+    };
+  },
+  ledger: function(){
+    var c=0, sum=0;
+    for(var i=0;i<N;i++) if(kind[i]===LIVE) c++;
+    for(var k=0;k<activeP.length;k++) sum+=pCells[activeP[k]];
+    return {cellsOnGrid:c, cellsClaimedByPlants:sum, liveListLength:liveN, ok:(c===sum && c===liveN)};
+  }
+};
+
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,867 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+</head>
+<body>
+<title>Sideplant</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans+Condensed:wght@400;500;600&display=swap">
+<style>
+  /* Single deliberate look: a night-side cutaway of the world. */
+  :root {
+    color-scheme: dark;
+    --sky: #0d1316;
+    --panel: #141c20;
+    --panel-2: #1b252a;
+    --line: #2a363c;
+    --ink: #dfe6da;
+    --ink-dim: #8a978f;
+    --sun: #e8c55a;
+    --ui: "IBM Plex Sans Condensed", "Arial Narrow", system-ui, sans-serif;
+    --mono: "IBM Plex Mono", ui-monospace, Menlo, Consolas, monospace;
+  }
+  html, body { height: 100%; }
+  body {
+    margin: 0; background: var(--sky); color: var(--ink);
+    font: 14px/1.35 var(--ui);
+    -webkit-font-smoothing: antialiased;
+  }
+  .top {
+    position: sticky; top: env(safe-area-inset-top, 0px); z-index: 5;
+    background: var(--sky); border-bottom: 1px solid var(--line);
+    padding: 10px 16px 8px;
+    display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 14px;
+  }
+  .top h1 { margin: 0; font-size: 15px; font-weight: 600; letter-spacing: .02em; }
+  .top h1 span { color: var(--sun); }
+  .stats {
+    display: flex; flex-wrap: wrap; gap: 2px 12px;
+    font: 12px/1.4 var(--mono); color: var(--ink-dim);
+    font-variant-numeric: tabular-nums;
+  }
+  .stats b { color: var(--ink); font-weight: 500; }
+  .world { padding: 10px 16px 150px; display: flex; justify-content: center; }
+  canvas#view {
+    display: block; image-rendering: pixelated; image-rendering: crisp-edges;
+    max-width: 100%; touch-action: pan-y;
+  }
+  .dock {
+    position: fixed; left: 0; right: 0; bottom: 0; z-index: 6;
+    padding: 8px 12px calc(8px + env(safe-area-inset-bottom, 0px));
+    background: color-mix(in srgb, var(--panel) 94%, transparent);
+    border-top: 1px solid var(--line);
+    backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+  }
+  .row { display: flex; flex-wrap: wrap; gap: 6px; max-width: 720px; margin: 0 auto; }
+  button {
+    font: 500 13px/1 var(--ui); color: var(--ink); background: var(--panel-2);
+    border: 1px solid var(--line); border-radius: 7px;
+    min-height: 40px; padding: 0 12px; cursor: pointer; flex: 1 1 auto;
+  }
+  button:active { background: var(--line); }
+  button:focus-visible, input:focus-visible { outline: 2px solid var(--sun); outline-offset: 2px; }
+  button[aria-pressed="true"] { border-color: var(--sun); color: var(--sun); }
+  .settings {
+    max-width: 720px; margin: 8px auto 0; padding-top: 8px; border-top: 1px solid var(--line);
+    display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 8px 16px;
+    max-height: 46vh; overflow-y: auto;
+  }
+  .settings label { display: grid; grid-template-columns: 1fr auto; gap: 2px 8px; font-size: 12.5px; color: var(--ink-dim); }
+  .settings label output { font: 12px var(--mono); color: var(--ink); font-variant-numeric: tabular-nums; }
+  .settings input[type=range] { grid-column: 1 / -1; width: 100%; accent-color: var(--sun); }
+  .settings input[type=text] {
+    grid-column: 1 / -1; font: 13px var(--mono); color: var(--ink); background: var(--sky);
+    border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px;
+  }
+  .settings[hidden] { display: none; }
+  .settings .note { grid-column: 1 / -1; font-size: 12px; color: var(--ink-dim); margin: 0; }
+  .legend { display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: 12px; color: var(--ink-dim); max-width: 720px; margin: 6px auto 0; }
+  .legend i { display: inline-block; width: 9px; height: 9px; margin-right: 5px; vertical-align: -1px; }
+  @media (prefers-reduced-motion: reduce) { * { scroll-behavior: auto !important; } }
+</style>
+
+<header class="top">
+  <h1>Side<span>plant</span></h1>
+  <div class="stats" id="stats" aria-live="off"></div>
+</header>
+
+<main class="world"><canvas id="view" aria-label="The whole world, folded into rows read left to right, top to bottom"></canvas></main>
+
+<nav class="dock" aria-label="Controls">
+  <div class="row">
+    <button id="play" type="button">Pause</button>
+    <button id="speed" type="button">Speed: max</button>
+    <button id="zoomOut" type="button" aria-label="Zoom out">−</button>
+    <button id="zoomIn" type="button" aria-label="Zoom in">+</button>
+    <button id="colorBy" type="button">Leaves: light</button>
+    <button id="more" type="button" aria-expanded="false">Settings</button>
+  </div>
+  <div class="legend" id="legend"></div>
+  <div class="settings" id="settings" hidden>
+    <label>Lifespan (ticks)<output id="o-LIFESPAN"></output><input id="LIFESPAN" type="range" min="50" max="2000" step="10"></label>
+    <label>Seed overhead (energy)<output id="o-SEED_OVERHEAD"></output><input id="SEED_OVERHEAD" type="range" min="0" max="4000" step="50"></label>
+    <label>Seed price × child build cost<output id="o-SEED_COST_MULT"></output><input id="SEED_COST_MULT" type="range" min="0" max="20" step="0.5"></label>
+    <label>Mutation rate<output id="o-MUTATION_RATE"></output><input id="MUTATION_RATE" type="range" min="0" max="1" step="0.01"></label>
+    <label>Stem build cost<output id="o-BUILD_STEM"></output><input id="BUILD_STEM" type="range" min="1" max="32" step="1"></label>
+    <label>Stem upkeep per tick<output id="o-UPKEEP_STEM"></output><input id="UPKEEP_STEM" type="range" min="0" max="4" step="1"></label>
+    <label>Leaf cost ÷ stem cost<output id="o-LEAF_RATIO"></output><input id="LEAF_RATIO" type="range" min="1" max="4" step="1"></label>
+    <label>Seed float steps<output id="o-SEED_FLOAT_STEPS"></output><input id="SEED_FLOAT_STEPS" type="range" min="0" max="400" step="4"></label>
+    <label>Sand run that clears<output id="o-CLEAR_RUN"></output><input id="CLEAR_RUN" type="range" min="2" max="64" step="1"></label>
+    <label>Light under 0, 1, 2, 3… cells<input id="LIGHT" type="text" inputmode="numeric" autocomplete="off"></label>
+    <p class="note">Changes apply to the running world. Restart starts one founder again with these settings.</p>
+    <button id="restart" type="button">Restart</button>
+  </div>
+</nav>
+
+<script id="core">
+/* ==== SIM CORE START ==== */
+function makeSim(opts) {
+  "use strict";
+  const C = Object.assign({
+    W: 10000,            // world width in cells (wraps left-right)
+    H0: 16,              // starting height; doubles when a plant grows past the top
+    H_MAX: 1024,
+    LIGHT: [8, 4, 2, 1], // light reaching a cell under 0,1,2,3 plant cells; deeper = 0; sand blocks fully
+    BUILD_STEM: 8,
+    UPKEEP_STEM: 1,
+    LEAF_RATIO: 2,       // a leaf costs this many stems, to build and to keep
+    LIFESPAN: 300,
+    SEED_COST_MULT: 1,   // seed price = this x the child's build cost + SEED_OVERHEAD
+    SEED_OVERHEAD: 800,  // flat part of the price; sets the founder at about 3 seeds a life
+    SEED_PROVISION_MULT: 1, // energy the seed carries = this x the child's build cost
+    MUTATION_RATE: 1 / 3,
+    SEED_FLOAT_STEPS: 64,
+    SEED_MAX_STUCK: 32,
+    CLEAR_RUN: 8,
+    RETRY_EVERY: 32,
+    RNG_SEED: 12345,
+  }, opts || {});
+
+  const EMPTY = 0, SAND = 1, ROOT = 2, STEM = 3, LEAF = 4, FLY = 5;
+  const FDX = [0, 1, 0, -1], FDY = [1, 0, -1, 0]; // N E S W, y points up
+  const FOUNDER = [2, 5, 8, 8]; // seed 010 -> stem 101 -> leaf, leaf
+
+  const W = C.W;
+  let H = C.H0;
+  let type, own, leafInc, activeFlag, stamp;
+  const dirtyFlag = new Uint8Array(W);
+  let dirtyList = [];
+  let active = [];
+  let rng = (C.RNG_SEED >>> 0) || 1;
+  let tick = 0;
+  let plants = [];
+  const plantById = new Map();
+  let seeds = [];
+  const hung = new Set();
+  let bottomDirty = false;
+  let nextId = 1;
+  const stats = { births: 0, deaths: 0, starved: 0, aged: 0, seedsMade: 0, mutants: 0,
+    seedsLost: 0, germFail: 0, clears: 0, clearedCells: 0, sand: 0, restarts: 0, drops: 0 };
+
+  function alloc(h) {
+    const n = W * h;
+    const t = new Uint8Array(n), o = new Int32Array(n), l = new Uint8Array(n);
+    const a = new Uint8Array(n), s = new Int32Array(n);
+    if (type) { t.set(type); o.set(own); l.set(leafInc); a.set(activeFlag); s.set(stamp); }
+    type = t; own = o; leafInc = l; activeFlag = a; stamp = s; H = h;
+  }
+  alloc(H);
+
+  function rand() { rng ^= rng << 13; rng ^= rng >>> 17; rng ^= rng << 5; return (rng >>> 0) / 4294967296; }
+  function randInt(n) { return (rand() * n) | 0; }
+  function wx(x) { return x < 0 ? x + W : x >= W ? x - W : x; }
+  function isPlant(t) { return t >= ROOT && t <= LEAF; }
+  function buildLeaf() { return C.BUILD_STEM * C.LEAF_RATIO; }
+  function upkeepLeaf() { return C.UPKEEP_STEM * C.LEAF_RATIO; }
+
+  /* ---------- genome ---------- */
+  function node(leaf, parent, slot) {
+    return { leaf, kids: [null, null, null], parent, slot, cell: -1, facing: 0 };
+  }
+  function decodeTree(g) {
+    let k = 0;
+    function build(parent, slot) {
+      if (k >= g.length) return null;
+      const v = g[k++];
+      const n = node((v & 8) !== 0, parent, slot);
+      for (let s = 0; s < 3; s++) if ((v >> s) & 1) n.kids[s] = build(n, s);
+      return n;
+    }
+    return build(null, -1);
+  }
+  function encodeTree(root) {
+    const out = [];
+    (function walk(n) {
+      let v = n.leaf ? 8 : 0;
+      for (let s = 0; s < 3; s++) if (n.kids[s]) v |= 1 << s;
+      out.push(v);
+      for (let s = 0; s < 3; s++) if (n.kids[s]) walk(n.kids[s]);
+    })(root);
+    return Uint8Array.from(out);
+  }
+  function mutate(g) {
+    const root = decodeTree(g);
+    const all = [];
+    (function walk(n) { all.push(n); for (let s = 0; s < 3; s++) if (n.kids[s]) walk(n.kids[s]); })(root);
+    const nonRoot = all.slice(1);
+    if (!nonRoot.length) return Uint8Array.from(g);
+    const op = randInt(3);
+    if (op === 0) {
+      const n = nonRoot[randInt(nonRoot.length)];
+      n.leaf = !n.leaf;
+    } else if (op === 1) {
+      const n = nonRoot[randInt(nonRoot.length)], s = randInt(3);
+      if (n.kids[s]) n.kids[s] = null;
+      else n.kids[s] = node(rand() < 0.5, n, s);
+    } else if (rand() < 0.5) {
+      const n = nonRoot[randInt(nonRoot.length)], p = n.parent, s = n.slot;
+      const m = node(false, p, s);
+      m.kids[1] = n; p.kids[s] = m; n.parent = m; n.slot = 1;
+    } else {
+      const c = nonRoot.filter(m => !m.leaf && m.kids[1] && !m.kids[0] && !m.kids[2]);
+      if (c.length) {
+        const m = c[randInt(c.length)], k = m.kids[1];
+        m.parent.kids[m.slot] = k; k.parent = m.parent; k.slot = m.slot;
+      }
+    }
+    return encodeTree(root);
+  }
+  function buildCost(g) {
+    let c = 0;
+    for (let i = 0; i < g.length; i++) c += (g[i] & 8) ? buildLeaf() : C.BUILD_STEM;
+    return c;
+  }
+  function hueOf(g) {
+    let h = 2166136261;
+    for (let i = 0; i < g.length; i++) { h ^= g[i]; h = Math.imul(h, 16777619); }
+    return ((h >>> 0) % 251) + 1;
+  }
+
+  /* ---------- light ---------- */
+  function markCol(x) { if (!dirtyFlag[x]) { dirtyFlag[x] = 1; dirtyList.push(x); } }
+  function relight(x) {
+    const L = C.LIGHT, LN = L.length;
+    let k = 0, dark = false;
+    for (let y = H - 1; y >= 0; y--) {
+      const i = y * W + x, t = type[i];
+      if (t === SAND) { dark = true; continue; }
+      if (t >= ROOT && t <= LEAF) {
+        if (t === LEAF) {
+          const v = dark ? 0 : (k < LN ? L[k] : 0), old = leafInc[i];
+          if (v !== old) {
+            leafInc[i] = v;
+            const p = plantById.get(own[i]);
+            if (p) p.income += v - old;
+          }
+        }
+        k++;
+      }
+    }
+  }
+  function relightDirty() {
+    for (let k = 0; k < dirtyList.length; k++) { const x = dirtyList[k]; dirtyFlag[x] = 0; relight(x); }
+    dirtyList = [];
+  }
+
+  /* ---------- sand ---------- */
+  function activate(i) { if (!activeFlag[i]) { activeFlag[i] = 1; active.push(i); } }
+  function vacated(i) {
+    const y = (i / W) | 0, x = i - y * W;
+    if (y + 1 < H) {
+      const r = (y + 1) * W;
+      for (let dx = -1; dx <= 1; dx++) { const j = r + wx(x + dx); if (type[j] === SAND) activate(j); }
+      const a = r + x;
+      if (type[a] === ROOT) { const p = plantById.get(own[a]); if (p) hung.add(p); }
+    }
+  }
+  function moveSand(i, j) {
+    type[j] = SAND; type[i] = EMPTY; stamp[j] = tick;
+    activate(j); vacated(i);
+    markCol(i % W); markCol(j % W);
+    if (j < W) bottomDirty = true;
+  }
+  function sandStep() {
+    const list = active; active = [];
+    for (let k = 0; k < list.length; k++) activeFlag[list[k]] = 0;
+    for (let k = 0; k < list.length; k++) {
+      const i = list[k];
+      if (type[i] !== SAND || stamp[i] === tick) continue;
+      if (i < W) { bottomDirty = true; continue; }
+      const b = i - W;
+      if (type[b] === EMPTY) { moveSand(i, b); continue; }
+      const y = (i / W) | 0, x = i - y * W;
+      let d = rand() < 0.5 ? -1 : 1;
+      for (let t = 0; t < 2; t++, d = -d) {
+        const j = (y - 1) * W + wx(x + d);
+        if (type[j] === EMPTY) { moveSand(i, j); break; }
+      }
+    }
+  }
+  function clearStep() {
+    if (!bottomDirty) return;
+    bottomDirty = false;
+    let x0 = -1;
+    for (let x = 0; x < W; x++) if (type[x] !== SAND) { x0 = x; break; }
+    const runs = [];
+    if (x0 < 0) runs.push([0, W]);
+    else {
+      let start = -1, len = 0;
+      for (let k = 1; k <= W; k++) {
+        const x = (x0 + k) % W;
+        if (type[x] === SAND) { if (len === 0) start = x; len++; }
+        else { if (len >= C.CLEAR_RUN) runs.push([start, len]); len = 0; }
+      }
+    }
+    for (const [s, len] of runs) {
+      for (let k = 0; k < len; k++) {
+        const i = (s + k) % W;
+        type[i] = EMPTY; vacated(i); markCol(i);
+      }
+      stats.clears++; stats.clearedCells += len; stats.sand -= len;
+    }
+  }
+
+  /* ---------- plants ---------- */
+  function placeCell(p, n, i, t, facing) {
+    type[i] = t; own[i] = p.id; leafInc[i] = 0;
+    n.cell = i; n.facing = facing;
+    p.cells.push(i); p.nodes.push(n);
+    if (t === LEAF) p.nLeaf++; else p.nStem++;
+    markCol(i % W);
+    for (let s = 0; s < 3; s++) if (n.kids[s]) p.queue.push(n.kids[s]);
+  }
+  function grow() {
+    if (H >= C.H_MAX) return false;
+    alloc(Math.min(H * 2, C.H_MAX));
+    return true;
+  }
+  /* tbt-7 clearance: the target, its two sides, and the three cells ahead of it
+     (in the new cell's facing) must hold no plant cell other than the parent.
+     Returns the target's [x, y], or null when blocked. */
+  function clearance(pc, f) {
+    const py = (pc / W) | 0, px = pc - py * W;
+    const tx = wx(px + FDX[f]), ty = py + FDY[f];
+    if (ty < 0) return null;
+    if (ty < H && type[ty * W + tx] !== EMPTY) return null;
+    const L = (f + 3) & 3, R = (f + 1) & 3;
+    const ax = tx + FDX[f], ay = ty + FDY[f];
+    const cx = [tx + FDX[L], tx + FDX[R], ax, ax + FDX[L], ax + FDX[R]];
+    const cy = [ty + FDY[L], ty + FDY[R], ay, ay + FDY[L], ay + FDY[R]];
+    for (let k = 0; k < 5; k++) {
+      const y = cy[k];
+      if (y < 0 || y >= H) continue;
+      const j = y * W + wx(cx[k]);
+      if (j !== pc && isPlant(type[j])) return null;
+    }
+    return [tx, ty];
+  }
+  function tryPlace(p, n) {
+    const par = n.parent, pf = par.facing;
+    const f = n.slot === 0 ? (pf + 3) & 3 : n.slot === 1 ? pf : (pf + 1) & 3;
+    const t = clearance(par.cell, f);
+    if (!t) return false;
+    if (t[1] >= H && !grow()) return false;
+    placeCell(p, n, t[1] * W + t[0], n.leaf ? LEAF : STEM, f);
+    return true;
+  }
+  /* A seed may germinate on floor or sand when the cells left and right of it
+     hold no living plant, and its first stem cell would pass clearance. */
+  function canGerminate(i) {
+    const y = (i / W) | 0, x = i - y * W;
+    if (type[i] !== EMPTY && type[i] !== FLY) return false;
+    if (y > 0 && type[i - W] !== SAND) return false;
+    if (isPlant(type[y * W + wx(x - 1)]) || isPlant(type[y * W + wx(x + 1)])) return false;
+    return clearance(i, 0) !== null;
+  }
+  function createPlant(g, i, energy, gen) {
+    const p = {
+      id: nextId++, genome: g, root: decodeTree(g), cells: [], nodes: [],
+      energy, income: 0, nStem: 0, nLeaf: 0, age: 0, queue: [], blocked: [],
+      child: null, price: 0, gen, hue: hueOf(g), seedsMade: 0, dead: false, idx: plants.length,
+    };
+    plants.push(p); plantById.set(p.id, p);
+    placeCell(p, p.root, i, ROOT, 0);
+    stats.births++;
+    return p;
+  }
+  function kill(p, why) {
+    p.dead = true;
+    for (let k = 0; k < p.cells.length; k++) {
+      const i = p.cells[k];
+      type[i] = SAND; own[i] = 0; leafInc[i] = 0;
+      activate(i); markCol(i % W);
+      if (i < W) bottomDirty = true;
+    }
+    stats.sand += p.cells.length;
+    plantById.delete(p.id); hung.delete(p);
+    const last = plants.pop();
+    if (last !== p) { plants[p.idx] = last; last.idx = p.idx; }
+    stats.deaths++;
+    if (why === 0) stats.aged++; else stats.starved++;
+    onDeath(p);
+  }
+  let onDeath = () => {};
+  function dropStep() {
+    for (const p of hung) {
+      if (p.dead) { hung.delete(p); continue; }
+      const r = p.cells[0];
+      if (r < W || type[r - W] !== EMPTY) { hung.delete(p); continue; }
+      let ok = true;
+      for (let k = 0; k < p.cells.length; k++) {
+        const d = p.cells[k] - W;
+        if (d < 0) { ok = false; break; }
+        const td = type[d];
+        if (td !== EMPTY && !(own[d] === p.id && isPlant(td))) { ok = false; break; }
+      }
+      if (!ok) continue;
+      const ts = p.cells.map(c => type[c]);
+      for (const c of p.cells) { p.income -= leafInc[c]; type[c] = EMPTY; own[c] = 0; leafInc[c] = 0; }
+      for (let k = 0; k < p.cells.length; k++) {
+        const nc = p.cells[k] - W;
+        type[nc] = ts[k]; own[nc] = p.id; leafInc[nc] = 0;
+        p.cells[k] = nc; p.nodes[k].cell = nc;
+        markCol(nc % W);
+      }
+      for (const c of p.cells) { const up = c + W; if (up < W * H && type[up] === EMPTY) vacated(up); }
+      stats.drops++;
+    }
+  }
+  function plantStep() {
+    const US = C.UPKEEP_STEM, UL = upkeepLeaf(), BS = C.BUILD_STEM, BL = buildLeaf();
+    for (let k = plants.length - 1; k >= 0; k--) {
+      const p = plants[k];
+      p.age++;
+      p.energy += p.income - (p.nStem * US + p.nLeaf * UL);
+      if (p.age >= C.LIFESPAN) { kill(p, 0); continue; }
+      if (p.energy < 0) { kill(p, 1); continue; }
+      if (p.blocked.length && (tick + p.id) % C.RETRY_EVERY === 0) {
+        for (const n of p.blocked) p.queue.push(n);
+        p.blocked.length = 0;
+      }
+      if (p.queue.length) {
+        for (let q = 0; q < p.queue.length; q++) {
+          const n = p.queue[q], cost = n.leaf ? BL : BS;
+          if (p.energy < cost) break;
+          if (tryPlace(p, n)) { p.energy -= cost; p.queue.splice(q, 1); break; }
+          p.blocked.push(n); p.queue.splice(q, 1); q--;
+        }
+        continue;
+      }
+      if (!p.child) {
+        const mutated = rand() < C.MUTATION_RATE;
+        p.child = mutated ? mutate(p.genome) : p.genome;
+        p.childMutated = mutated;
+        p.price = Math.round(C.SEED_COST_MULT * buildCost(p.child) + C.SEED_OVERHEAD);
+      }
+      if (p.energy >= p.price) {
+        p.energy -= p.price;
+        seeds.push({ g: p.child, prov: Math.round(C.SEED_PROVISION_MULT * buildCost(p.child)),
+          gen: p.gen + 1, plant: p, node: p.root, state: 0, i: -1, steps: 0, stuck: 0, age: 0 });
+        if (p.childMutated) stats.mutants++;
+        p.child = null; p.seedsMade++; stats.seedsMade++;
+      }
+    }
+  }
+
+  /* ---------- seeds ---------- */
+  function removeSeed(s) { if (s.i >= 0) { type[s.i] = EMPTY; vacated(s.i); s.i = -1; } }
+  function moveSeed(s, j) { type[j] = FLY; type[s.i] = EMPTY; vacated(s.i); s.i = j; }
+  function seedStep() {
+    const next = [];
+    for (let k = 0; k < seeds.length; k++) {
+      const s = seeds[k];
+      let alive = true;
+      s.age++;
+      if (s.state === 0) {
+        if (s.plant.dead) { alive = false; stats.seedsLost++; }
+        else {
+          const kids = s.node.kids;
+          let cnt = 0;
+          for (let t = 0; t < 3; t++) if (kids[t] && kids[t].cell >= 0) cnt++;
+          if (cnt) {
+            let pick = randInt(cnt);
+            for (let t = 0; t < 3; t++) if (kids[t] && kids[t].cell >= 0 && pick-- === 0) { s.node = kids[t]; break; }
+          } else {
+            const c = s.node.cell, y = (c / W) | 0, x = c - y * W;
+            const d0 = randInt(4);
+            let placed = false;
+            for (let t = 0; t < 4 && !placed; t++) {
+              const d = (d0 + t) & 3, ny = y + FDY[d];
+              if (ny < 0 || ny >= H) continue;
+              const j = ny * W + wx(x + FDX[d]);
+              if (type[j] === EMPTY) { type[j] = FLY; s.i = j; s.state = 1; placed = true; }
+            }
+            if (!placed) { alive = false; stats.seedsLost++; }
+          }
+        }
+      } else {
+        const i = s.i, y = (i / W) | 0, x = i - y * W;
+        if (s.state === 1) {
+          const d = randInt(4), ny = y + FDY[d];
+          if (ny >= 0 && ny < H) { const j = ny * W + wx(x + FDX[d]); if (type[j] === EMPTY) moveSeed(s, j); }
+          if (++s.steps >= C.SEED_FLOAT_STEPS) s.state = 2;
+        } else {
+          const tb = y === 0 ? SAND : type[i - W];
+          if (tb === SAND) {
+            const ok = canGerminate(i);
+            removeSeed(s);
+            if (ok) createPlant(s.g, i, s.prov, s.gen);
+            else stats.germFail++;
+            alive = false;
+          } else if (tb === EMPTY) moveSeed(s, i - W);
+          else {
+            let d = rand() < 0.5 ? -1 : 1, moved = false;
+            for (let t = 0; t < 2 && !moved; t++, d = -d) {
+              const j = y * W + wx(x + d);
+              if (type[j] === EMPTY) { moveSeed(s, j); moved = true; }
+            }
+            if (!moved && ++s.stuck > C.SEED_MAX_STUCK) { removeSeed(s); alive = false; stats.seedsLost++; }
+          }
+        }
+        if (alive && s.age > 4000) { removeSeed(s); alive = false; stats.seedsLost++; }
+      }
+      if (alive) next.push(s);
+    }
+    seeds = next;
+  }
+
+  /* ---------- driver ---------- */
+  function founder() {
+    const g = Uint8Array.from(FOUNDER);
+    for (let tries = 0; tries < 2000; tries++) {
+      const x = tries === 0 ? (W / 2) | 0 : randInt(W);
+      let y = 0;
+      while (y < H - 2 && type[y * W + x] === SAND) y++;
+      const i = y * W + x;
+      if (canGerminate(i)) { createPlant(g, i, Math.round(C.SEED_PROVISION_MULT * buildCost(g)), 0); return; }
+    }
+  }
+  founder();
+
+  function step() {
+    tick++;
+    sandStep();
+    clearStep();
+    if (hung.size) dropStep();
+    relightDirty();
+    plantStep();
+    seedStep();
+    if (plants.length === 0 && seeds.length === 0) { stats.restarts++; founder(); }
+  }
+  function run(n) { for (let k = 0; k < n; k++) step(); }
+  function settle() { relightDirty(); }
+
+  function summary() {
+    let cells = 0, leaves = 0, glen = 0, gmax = 0, genMax = 0, genSum = 0, hMax = 0, hSum = 0;
+    for (const p of plants) {
+      cells += p.cells.length; leaves += p.nLeaf; glen += p.genome.length;
+      if (p.genome.length > gmax) gmax = p.genome.length;
+      genSum += p.gen; if (p.gen > genMax) genMax = p.gen;
+      const ry = (p.cells[0] / W) | 0;
+      let top = ry;
+      for (const c of p.cells) { const y = (c / W) | 0; if (y > top) top = y; }
+      hSum += top - ry; if (top - ry > hMax) hMax = top - ry;
+    }
+    const n = plants.length || 1;
+    let fly = 0; for (const s of seeds) if (s.state > 0) fly++;
+    return Object.assign({}, stats, {
+      tick, H, plants: plants.length, cells, leaves, stems: cells - leaves, seedsInFlight: fly,
+      seedsInBody: seeds.length - fly,
+      meanGenome: +(glen / n).toFixed(2), maxGenome: gmax, meanGen: +(genSum / n).toFixed(1), maxGen: genMax,
+      meanHeight: +(hSum / n).toFixed(2), maxHeight: hMax, meanLeaves: +(leaves / n).toFixed(2),
+    });
+  }
+  function hues(out) {
+    out.fill(0);
+    for (const p of plants) for (const c of p.cells) out[c] = p.hue;
+    return out;
+  }
+
+  return {
+    C, step, run, settle, summary, hues, mutate, buildCost, decodeTree, encodeTree,
+    get W() { return W; }, get H() { return H; }, get type() { return type; }, get tick() { return tick; },
+    get plants() { return plants; }, get own() { return own; }, get leafInc() { return leafInc; },
+    set onDeath(f) { onDeath = f; },
+    set(k, v) { C[k] = v; },
+    FOUNDER, EMPTY, SAND, ROOT, STEM, LEAF, FLY,
+  };
+}
+/* ==== SIM CORE END ==== */
+</script>
+
+<script id="glue" type="text/x-sim-glue">
+let sim = null, running = true, fast = true, perFrame = 1, aux = "light", started = false;
+let tps = 0, markT = 0, markTick = 0;
+function snap() {
+  const n = sim.W * sim.H;
+  const t = sim.type.slice(0, n);
+  let a;
+  if (aux === "light") a = sim.leafInc.slice(0, n);
+  else { a = new Uint8Array(n); sim.hues(a); }
+  postMessage({ W: sim.W, H: sim.H, t, a, aux, s: sim.summary(), tps, running }, [t.buffer, a.buffer]);
+}
+function measure() {
+  const now = performance.now();
+  if (now - markT > 500) { tps = (sim.tick - markTick) * 1000 / (now - markT); markT = now; markTick = sim.tick; }
+}
+const ch = new MessageChannel();
+ch.port1.onmessage = loop;
+function loop() {
+  if (sim && running && fast) {
+    const t0 = performance.now();
+    while (performance.now() - t0 < 14) sim.run(10);
+  }
+  if (sim) measure();
+  if (sim && running && fast) ch.port2.postMessage(0); else setTimeout(loop, 30);
+}
+onmessage = (e) => {
+  const m = e.data;
+  if (m.cmd === "init") { sim = makeSim(m.opts); if (m.warm) sim.run(m.warm); markTick = sim.tick; markT = performance.now(); if (!started) { started = true; loop(); } }
+  else if (!sim) return;
+  else if (m.cmd === "frame") { if (running && !fast) sim.run(perFrame); snap(); }
+  else if (m.cmd === "speed") { fast = m.fast; perFrame = m.perFrame; }
+  else if (m.cmd === "run") running = m.running;
+  else if (m.cmd === "set") sim.set(m.k, m.v);
+  else if (m.cmd === "aux") aux = m.aux;
+};
+</script>
+
+<script>
+(() => {
+  "use strict";
+  const glueSrc = document.getElementById("glue").textContent;
+  window.addEventListener("error", (e) => {
+    const el = document.getElementById("stats");
+    if (el) el.textContent = "Error: " + (e.message || "unknown") + (e.lineno ? " (line " + e.lineno + ")" : "");
+  });
+  const params = new URLSearchParams(location.search);
+
+  const DEFAULTS = {
+    LIFESPAN: 300, SEED_OVERHEAD: 800, SEED_COST_MULT: 1, MUTATION_RATE: 1 / 3,
+    BUILD_STEM: 8, UPKEEP_STEM: 1, LEAF_RATIO: 2, SEED_FLOAT_STEPS: 64, CLEAR_RUN: 8, LIGHT: [8, 4, 2, 1],
+  };
+  const settings = Object.assign({}, DEFAULTS);
+  const SLIDERS = ["LIFESPAN", "SEED_OVERHEAD", "SEED_COST_MULT", "MUTATION_RATE", "BUILD_STEM", "UPKEEP_STEM", "LEAF_RATIO", "SEED_FLOAT_STEPS", "CLEAR_RUN"];
+
+  /* ---- sim transport ----
+     The sim runs in a background worker when the browser allows one (smoother,
+     faster). If workers are blocked, it runs on the page itself. Until the
+     worker answers, messages are held and replayed to whichever side wins. */
+  let worker = null, local = null, decided = false;
+  const held = [];
+  let latest = null, awaiting = false;
+  function useLocal() {
+    if (decided && local) return;
+    decided = true;
+    if (worker) { try { worker.terminate(); } catch (e) {} worker = null; }
+    local = { sim: null, running: true, fast: true, perFrame: 1, aux: "light", tps: 0, markT: 0, markTick: 0 };
+    for (const m of held) send(m);
+    held.length = 0;
+  }
+  try {
+    const src = "const makeSim = " + makeSim.toString() + ";\n" + glueSrc + "\npostMessage({ ready: true });";
+    const url = URL.createObjectURL(new Blob([src], { type: "text/javascript" }));
+    worker = new Worker(url);
+    worker.onmessage = (e) => {
+      if (e.data && e.data.ready) {
+        if (decided) return;
+        decided = true;
+        for (const m of held) worker.postMessage(m);
+        held.length = 0;
+        return;
+      }
+      latest = e.data; awaiting = false;
+    };
+    worker.onerror = (e) => { if (e && e.preventDefault) e.preventDefault(); if (!decided || worker) { decided = false; useLocal(); } };
+    setTimeout(() => { if (!decided) useLocal(); }, 1500);
+  } catch (err) { useLocal(); }
+
+  function send(m) {
+    if (!decided) { held.push(m); return; }
+    if (worker) { worker.postMessage(m); return; }
+    const L = local;
+    if (m.cmd === "init") { L.sim = makeSim(m.opts); if (m.warm) L.sim.run(m.warm); L.markTick = L.sim.tick; L.markT = performance.now(); }
+    else if (m.cmd === "speed") { L.fast = m.fast; L.perFrame = m.perFrame; }
+    else if (m.cmd === "run") L.running = m.running;
+    else if (m.cmd === "set") L.sim.set(m.k, m.v);
+    else if (m.cmd === "aux") L.aux = m.aux;
+  }
+  function localFrame() {
+    const L = local, sim = L.sim;
+    if (L.running) {
+      if (L.fast) { const t0 = performance.now(); while (performance.now() - t0 < 10) sim.run(10); }
+      else sim.run(L.perFrame);
+    }
+    const now = performance.now();
+    if (now - L.markT > 500) { L.tps = (sim.tick - L.markTick) * 1000 / (now - L.markT); L.markT = now; L.markTick = sim.tick; }
+    const n = sim.W * sim.H;
+    let a;
+    if (L.aux === "light") a = sim.leafInc.subarray(0, n);
+    else { a = new Uint8Array(n); sim.hues(a); }
+    latest = { W: sim.W, H: sim.H, t: sim.type.subarray(0, n), a, aux: L.aux, s: sim.summary(), tps: L.tps, running: L.running };
+  }
+
+  function start(seed) {
+    const opts = Object.assign({}, settings, { RNG_SEED: seed >>> 0 || 1 });
+    send({ cmd: "init", opts, warm: +params.get("warm") || 0 });
+    send({ cmd: "speed", fast: speedIdx === SPEEDS.length - 1, perFrame: SPEEDS[speedIdx] });
+    send({ cmd: "aux", aux: colorMode });
+  }
+
+  /* ---- palette ---- */
+  const hex = (h) => [parseInt(h.slice(1, 3), 16), parseInt(h.slice(3, 5), 16), parseInt(h.slice(5, 7), 16)];
+  const pack = ([r, g, b]) => (255 << 24) | (b << 16) | (g << 8) | r;
+  const COL = {
+    sky: "#0d1316", gap: "#151d21", soil: "#3a2b1d", sand: "#c4ab82",
+    root: "#9a6436", stem: "#3f7f3a", fly: "#f2e8cf",
+    leaf8: "#c6e85c", leaf4: "#83bf45", leaf2: "#4f8b35", leaf1: "#2f5a2a", leaf0: "#223a22",
+  };
+  const P = {}; for (const k in COL) P[k] = pack(hex(COL[k]));
+  function hsl(h, s, l) {
+    const a = s * Math.min(l, 1 - l), f = (n) => { const k = (n + h * 12) % 12; return l - a * Math.max(-1, Math.min(k - 3, 9 - k, 1)); };
+    return [Math.round(f(0) * 255), Math.round(f(8) * 255), Math.round(f(4) * 255)];
+  }
+  const HUE_LEAF = new Uint32Array(256), HUE_STEM = new Uint32Array(256);
+  for (let h = 0; h < 256; h++) { HUE_LEAF[h] = pack(hsl(h / 256, 0.62, 0.6)); HUE_STEM[h] = pack(hsl(h / 256, 0.45, 0.33)); }
+
+  function legend() {
+    const items = colorMode === "light"
+      ? [["sand", "sand"], ["root", "seed (rooted)"], ["stem", "stem"], ["leaf8", "leaf in sun: 8"], ["leaf4", "4"], ["leaf2", "2"], ["leaf1", "1"], ["leaf0", "0"], ["fly", "seed in flight"]]
+      : [["sand", "sand"], ["root", "seed (rooted)"], ["fly", "seed in flight"]];
+    document.getElementById("legend").innerHTML = items.map(([k, t]) => `<span><i style="background:${COL[k]}"></i>${t}</span>`).join("") +
+      (colorMode === "lineage" ? "<span>plants tinted by genome</span>" : "");
+  }
+
+  /* ---- layout: the world folded into bands ---- */
+  const canvas = document.getElementById("view");
+  const ctx = canvas.getContext("2d", { alpha: false });
+  const GAP = 2;
+  let zoom = 1, layout = null, img = null, buf = null;
+  function computeLayout(W, H) {
+    const dpr = Math.min(window.devicePixelRatio || 1, 3);
+    const availW = Math.max(200, document.documentElement.clientWidth - 32);
+    const top = document.querySelector(".top").getBoundingClientRect().height;
+    const dock = document.querySelector(".dock").getBoundingClientRect().height;
+    const availH = Math.max(200, window.innerHeight - top - dock - 30);
+    const rowH = H + GAP;
+    const fitB = Math.ceil(Math.sqrt((W * rowH * availW) / availH));
+    const B = Math.max(16, Math.ceil(fitB / zoom));
+    const bands = Math.ceil(W / B);
+    const rows = bands * rowH;
+    let s = Math.floor((availW * dpr) / B);
+    const cssW = s >= 1 ? (B * s) / dpr : availW;
+    layout = { W, H, B, bands, rowH, rows, cssW, dpr };
+    canvas.width = B; canvas.height = rows;
+    canvas.style.width = cssW + "px";
+    canvas.style.height = (cssW * rows) / B + "px";
+    img = ctx.createImageData(B, rows);
+    buf = new Uint32Array(img.data.buffer);
+  }
+
+  /* Show only up to the tallest occupied row (plus headroom), so bands stay short. */
+  let shownH = 0;
+  function occupiedTop(t, W, H) {
+    for (let y = H - 1; y > 0; y--) {
+      const r = y * W;
+      for (let x = 0; x < W; x++) { const v = t[r + x]; if (v && v !== 5) return y; }
+    }
+    return 0;
+  }
+  function draw(f) {
+    const top = occupiedTop(f.t, f.W, f.H);
+    let want = Math.min(f.H, Math.max(12, Math.ceil((top + 4) / 4) * 4));
+    if (want > shownH || want < shownH - 8 || !layout || layout.W !== f.W) { shownH = want; layout = null; }
+    if (!layout) computeLayout(f.W, shownH);
+    const { W, B, rowH } = layout, H = shownH;
+    const t = f.t, a = f.a, lightMode = f.aux === "light";
+    buf.fill(P.sky);
+    const leafBy = [P.leaf0, P.leaf1, P.leaf2, P.leaf2, P.leaf4, P.leaf4, P.leaf4, P.leaf4, P.leaf8];
+    for (let b = 0; b < layout.bands; b++) {
+      const x0 = b * B, x1 = Math.min(W, x0 + B), base = b * rowH;
+      const soilRow = (base + H) * B, gapRow = (base + H + 1) * B;
+      for (let c = 0; c < B; c++) { buf[soilRow + c] = c < x1 - x0 ? P.soil : P.gap; buf[gapRow + c] = P.gap; }
+      for (let y = 0; y < H; y++) {
+        const src = y * W, dst = (base + H - 1 - y) * B - x0;
+        for (let x = x0; x < x1; x++) {
+          const v = t[src + x];
+          if (v === 0) continue;
+          let col;
+          if (v === 1) col = P.sand;
+          else if (v === 2) col = P.root;
+          else if (v === 5) col = P.fly;
+          else if (lightMode) col = v === 4 ? leafBy[Math.min(8, a[src + x])] : P.stem;
+          else { const h = a[src + x]; col = v === 4 ? HUE_LEAF[h] : HUE_STEM[h]; }
+          buf[dst + x] = col;
+        }
+      }
+    }
+    ctx.putImageData(img, 0, 0);
+    const s = f.s;
+    const fmt = (n) => n >= 1e6 ? (n / 1e6).toFixed(2) + "M" : n >= 1e4 ? (n / 1e3).toFixed(1) + "k" : String(n);
+    document.getElementById("stats").innerHTML =
+      `<span>tick <b>${fmt(s.tick)}</b></span><span><b>${fmt(Math.round(f.tps))}</b>/s</span>` +
+      `<span>plants <b>${s.plants}</b></span><span>height <b>${s.meanHeight}</b> (max ${s.maxHeight})</span>` +
+      `<span>leaves/plant <b>${s.meanLeaves}</b></span><span>genes <b>${s.meanGenome}</b></span>` +
+      `<span>generation <b>${Math.round(s.meanGen)}</b></span><span>world <b>${W}×${f.H}</b></span>` +
+      (s.restarts ? `<span>restarts <b>${s.restarts}</b></span>` : "");
+  }
+
+  function frame() {
+    if (!decided) { requestAnimationFrame(frame); return; }
+    if (local) { if (local.sim) { localFrame(); draw(latest); } }
+    else {
+      if (latest) { draw(latest); latest = null; }
+      if (!awaiting) { awaiting = true; worker.postMessage({ cmd: "frame" }); }
+    }
+    requestAnimationFrame(frame);
+  }
+
+  /* ---- controls ---- */
+  const SPEEDS = [1, 10, 100, 0];
+  let speedIdx = SPEEDS.length - 1, colorMode = "light", running = true;
+  const $ = (id) => document.getElementById(id);
+  $("play").onclick = () => { running = !running; $("play").textContent = running ? "Pause" : "Play"; send({ cmd: "run", running }); };
+  $("speed").onclick = () => {
+    speedIdx = (speedIdx + 1) % SPEEDS.length;
+    const fast = speedIdx === SPEEDS.length - 1;
+    $("speed").textContent = "Speed: " + (fast ? "max" : SPEEDS[speedIdx] + "/frame");
+    send({ cmd: "speed", fast, perFrame: SPEEDS[speedIdx] });
+  };
+  $("zoomIn").onclick = () => { zoom = Math.min(64, zoom * 2); layout = null; };
+  $("zoomOut").onclick = () => { zoom = Math.max(1, zoom / 2); layout = null; };
+  $("colorBy").onclick = () => {
+    colorMode = colorMode === "light" ? "lineage" : "light";
+    $("colorBy").textContent = "Leaves: " + colorMode;
+    send({ cmd: "aux", aux: colorMode }); legend();
+  };
+  $("more").onclick = () => {
+    const open = $("settings").hidden;
+    $("settings").hidden = !open; $("more").setAttribute("aria-expanded", String(open));
+    layout = null;
+  };
+  for (const k of SLIDERS) {
+    const el = $(k), out = $("o-" + k);
+    el.value = settings[k];
+    const show = () => { out.textContent = k === "MUTATION_RATE" ? (+el.value).toFixed(2) : el.value; };
+    show();
+    el.oninput = () => { settings[k] = +el.value; show(); send({ cmd: "set", k, v: +el.value }); };
+  }
+  $("LIGHT").value = settings.LIGHT.join(" ");
+  $("LIGHT").onchange = () => {
+    const v = $("LIGHT").value.split(/[\s,]+/).filter(Boolean).map((x) => Math.max(0, Math.min(255, Math.round(+x) || 0)));
+    if (v.length) { settings.LIGHT = v; send({ cmd: "set", k: "LIGHT", v }); }
+    $("LIGHT").value = settings.LIGHT.join(" ");
+  };
+  $("restart").onclick = () => { start((Math.random() * 4294967295) >>> 0); layout = null; };
+  window.addEventListener("resize", () => { layout = null; });
+
+  legend();
+  start(+params.get("seed") || 12345);
+  requestAnimationFrame(frame);
+})();
+</script>
+
+</body>
+</html>

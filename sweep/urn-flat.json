@@ -1,0 +1,1465 @@
+{
+ "overrides": {
+  "urnMode": "flat"
+ },
+ "worldSeed": 1,
+ "dims": {
+  "C": 97,
+  "S": 42,
+  "G": 169
+ },
+ "series": [
+  {
+   "t": 250,
+   "plants": 4,
+   "cells": 8,
+   "seeds": 4,
+   "genomes": 1,
+   "domShare": 1,
+   "meanPlan": 2,
+   "maxPlan": 2,
+   "meanH": 1,
+   "births": 4,
+   "deaths": {},
+   "litter": 0
+  },
+  {
+   "t": 500,
+   "plants": 19,
+   "cells": 126,
+   "seeds": 41,
+   "genomes": 9,
+   "domShare": 0.316,
+   "meanPlan": 8.4,
+   "maxPlan": 25,
+   "meanH": 2.2,
+   "births": 28,
+   "deaths": {
+    "expired": 4,
+    "shaded": 5
+   },
+   "litter": 56
+  },
+  {
+   "t": 750,
+   "plants": 70,
+   "cells": 551,
+   "seeds": 244,
+   "genomes": 14,
+   "domShare": 0.186,
+   "meanPlan": 10.4,
+   "maxPlan": 25,
+   "meanH": 2.5,
+   "births": 137,
+   "deaths": {
+    "expired": 11,
+    "shaded": 51,
+    "immature": 5
+   },
+   "litter": 762
+  },
+  {
+   "t": 1000,
+   "plants": 157,
+   "cells": 1398,
+   "seeds": 542,
+   "genomes": 47,
+   "domShare": 0.108,
+   "meanPlan": 12.9,
+   "maxPlan": 32,
+   "meanH": 3.2,
+   "births": 446,
+   "deaths": {
+    "expired": 31,
+    "shaded": 232,
+    "immature": 26
+   },
+   "litter": 3461
+  },
+  {
+   "t": 1250,
+   "plants": 233,
+   "cells": 2523,
+   "seeds": 999,
+   "genomes": 80,
+   "domShare": 0.124,
+   "meanPlan": 15.2,
+   "maxPlan": 38,
+   "meanH": 4.1,
+   "births": 1003,
+   "deaths": {
+    "expired": 60,
+    "shaded": 619,
+    "immature": 91
+   },
+   "litter": 9682
+  },
+  {
+   "t": 1500,
+   "plants": 302,
+   "cells": 3464,
+   "seeds": 1402,
+   "genomes": 132,
+   "domShare": 0.083,
+   "meanPlan": 17.4,
+   "maxPlan": 47,
+   "meanH": 4.4,
+   "births": 1905,
+   "deaths": {
+    "expired": 90,
+    "shaded": 1327,
+    "immature": 186
+   },
+   "litter": 21403
+  },
+  {
+   "t": 1750,
+   "plants": 321,
+   "cells": 3627,
+   "seeds": 1550,
+   "genomes": 146,
+   "domShare": 0.062,
+   "meanPlan": 17.9,
+   "maxPlan": 39,
+   "meanH": 4.4,
+   "births": 2912,
+   "deaths": {
+    "expired": 109,
+    "shaded": 2166,
+    "immature": 316
+   },
+   "litter": 35807
+  },
+  {
+   "t": 2000,
+   "plants": 296,
+   "cells": 3511,
+   "seeds": 1585,
+   "genomes": 157,
+   "domShare": 0.047,
+   "meanPlan": 19.3,
+   "maxPlan": 39,
+   "meanH": 4.8,
+   "births": 3946,
+   "deaths": {
+    "expired": 131,
+    "shaded": 3034,
+    "immature": 485
+   },
+   "litter": 51111
+  },
+  {
+   "t": 2250,
+   "plants": 314,
+   "cells": 3714,
+   "seeds": 1546,
+   "genomes": 172,
+   "domShare": 0.029,
+   "meanPlan": 20.2,
+   "maxPlan": 40,
+   "meanH": 4.7,
+   "births": 4965,
+   "deaths": {
+    "expired": 154,
+    "shaded": 3852,
+    "immature": 645
+   },
+   "litter": 66166
+  },
+  {
+   "t": 2500,
+   "plants": 287,
+   "cells": 3745,
+   "seeds": 1611,
+   "genomes": 161,
+   "domShare": 0.028,
+   "meanPlan": 19.9,
+   "maxPlan": 42,
+   "meanH": 5,
+   "births": 5961,
+   "deaths": {
+    "expired": 175,
+    "shaded": 4701,
+    "immature": 798
+   },
+   "litter": 81565
+  },
+  {
+   "t": 2750,
+   "plants": 289,
+   "cells": 3784,
+   "seeds": 1594,
+   "genomes": 159,
+   "domShare": 0.038,
+   "meanPlan": 21,
+   "maxPlan": 41,
+   "meanH": 5,
+   "births": 7004,
+   "deaths": {
+    "expired": 195,
+    "shaded": 5563,
+    "immature": 957
+   },
+   "litter": 97523
+  },
+  {
+   "t": 3000,
+   "plants": 289,
+   "cells": 3708,
+   "seeds": 1646,
+   "genomes": 172,
+   "domShare": 0.045,
+   "meanPlan": 21.2,
+   "maxPlan": 45,
+   "meanH": 4.9,
+   "births": 7985,
+   "deaths": {
+    "expired": 218,
+    "shaded": 6366,
+    "immature": 1112
+   },
+   "litter": 113402
+  },
+  {
+   "t": 3250,
+   "plants": 269,
+   "cells": 3609,
+   "seeds": 1538,
+   "genomes": 158,
+   "domShare": 0.03,
+   "meanPlan": 22.9,
+   "maxPlan": 41,
+   "meanH": 5,
+   "births": 9033,
+   "deaths": {
+    "expired": 239,
+    "shaded": 7244,
+    "immature": 1281
+   },
+   "litter": 131085
+  },
+  {
+   "t": 3500,
+   "plants": 284,
+   "cells": 3781,
+   "seeds": 1554,
+   "genomes": 174,
+   "domShare": 0.032,
+   "meanPlan": 23.4,
+   "maxPlan": 42,
+   "meanH": 5,
+   "births": 10118,
+   "deaths": {
+    "expired": 259,
+    "shaded": 8124,
+    "immature": 1451
+   },
+   "litter": 149337
+  },
+  {
+   "t": 3750,
+   "plants": 265,
+   "cells": 3852,
+   "seeds": 1718,
+   "genomes": 167,
+   "domShare": 0.023,
+   "meanPlan": 24.2,
+   "maxPlan": 59,
+   "meanH": 5.4,
+   "births": 11125,
+   "deaths": {
+    "expired": 277,
+    "shaded": 8966,
+    "immature": 1617
+   },
+   "litter": 166867
+  },
+  {
+   "t": 4000,
+   "plants": 277,
+   "cells": 3757,
+   "seeds": 1624,
+   "genomes": 185,
+   "domShare": 0.025,
+   "meanPlan": 24.9,
+   "maxPlan": 49,
+   "meanH": 5.1,
+   "births": 12152,
+   "deaths": {
+    "expired": 289,
+    "shaded": 9805,
+    "immature": 1781
+   },
+   "litter": 184893
+  },
+  {
+   "t": 4250,
+   "plants": 263,
+   "cells": 3838,
+   "seeds": 1555,
+   "genomes": 172,
+   "domShare": 0.038,
+   "meanPlan": 24.3,
+   "maxPlan": 50,
+   "meanH": 5.5,
+   "births": 13212,
+   "deaths": {
+    "expired": 305,
+    "shaded": 10681,
+    "immature": 1963
+   },
+   "litter": 203735
+  },
+  {
+   "t": 4500,
+   "plants": 255,
+   "cells": 3797,
+   "seeds": 1565,
+   "genomes": 161,
+   "domShare": 0.024,
+   "meanPlan": 24.9,
+   "maxPlan": 50,
+   "meanH": 5.6,
+   "births": 14271,
+   "deaths": {
+    "expired": 319,
+    "shaded": 11564,
+    "immature": 2133
+   },
+   "litter": 222746
+  },
+  {
+   "t": 4750,
+   "plants": 273,
+   "cells": 3701,
+   "seeds": 1566,
+   "genomes": 169,
+   "domShare": 0.033,
+   "meanPlan": 25.9,
+   "maxPlan": 54,
+   "meanH": 5,
+   "births": 15280,
+   "deaths": {
+    "expired": 336,
+    "shaded": 12385,
+    "immature": 2286
+   },
+   "litter": 240543
+  },
+  {
+   "t": 5000,
+   "plants": 252,
+   "cells": 3915,
+   "seeds": 1628,
+   "genomes": 148,
+   "domShare": 0.036,
+   "meanPlan": 26.9,
+   "maxPlan": 54,
+   "meanH": 5.5,
+   "births": 16315,
+   "deaths": {
+    "expired": 344,
+    "shaded": 13247,
+    "immature": 2472
+   },
+   "litter": 260079
+  },
+  {
+   "t": 5250,
+   "plants": 262,
+   "cells": 4026,
+   "seeds": 1624,
+   "genomes": 154,
+   "domShare": 0.031,
+   "meanPlan": 27.1,
+   "maxPlan": 54,
+   "meanH": 5.5,
+   "births": 17381,
+   "deaths": {
+    "expired": 361,
+    "shaded": 14108,
+    "immature": 2650
+   },
+   "litter": 279443
+  },
+  {
+   "t": 5500,
+   "plants": 265,
+   "cells": 4083,
+   "seeds": 1506,
+   "genomes": 161,
+   "domShare": 0.03,
+   "meanPlan": 29,
+   "maxPlan": 54,
+   "meanH": 5.5,
+   "births": 18464,
+   "deaths": {
+    "expired": 371,
+    "shaded": 14977,
+    "immature": 2851
+   },
+   "litter": 299260
+  },
+  {
+   "t": 5750,
+   "plants": 280,
+   "cells": 3963,
+   "seeds": 1583,
+   "genomes": 167,
+   "domShare": 0.032,
+   "meanPlan": 27.6,
+   "maxPlan": 44,
+   "meanH": 5.1,
+   "births": 19558,
+   "deaths": {
+    "expired": 382,
+    "shaded": 15858,
+    "immature": 3038
+   },
+   "litter": 320022
+  },
+  {
+   "t": 6000,
+   "plants": 261,
+   "cells": 3788,
+   "seeds": 1458,
+   "genomes": 169,
+   "domShare": 0.023,
+   "meanPlan": 27.4,
+   "maxPlan": 46,
+   "meanH": 5.2,
+   "births": 20668,
+   "deaths": {
+    "expired": 395,
+    "shaded": 16754,
+    "immature": 3258
+   },
+   "litter": 340887
+  },
+  {
+   "t": 6250,
+   "plants": 274,
+   "cells": 3802,
+   "seeds": 1612,
+   "genomes": 169,
+   "domShare": 0.033,
+   "meanPlan": 27.7,
+   "maxPlan": 60,
+   "meanH": 5.1,
+   "births": 21751,
+   "deaths": {
+    "expired": 408,
+    "shaded": 17605,
+    "immature": 3464
+   },
+   "litter": 361328
+  },
+  {
+   "t": 6500,
+   "plants": 253,
+   "cells": 3832,
+   "seeds": 1607,
+   "genomes": 143,
+   "domShare": 0.024,
+   "meanPlan": 26.6,
+   "maxPlan": 46,
+   "meanH": 5.5,
+   "births": 22813,
+   "deaths": {
+    "expired": 417,
+    "shaded": 18476,
+    "immature": 3667
+   },
+   "litter": 381693
+  },
+  {
+   "t": 6750,
+   "plants": 253,
+   "cells": 3757,
+   "seeds": 1543,
+   "genomes": 161,
+   "domShare": 0.036,
+   "meanPlan": 28.3,
+   "maxPlan": 55,
+   "meanH": 5.4,
+   "births": 23938,
+   "deaths": {
+    "expired": 431,
+    "shaded": 19371,
+    "immature": 3883
+   },
+   "litter": 402845
+  },
+  {
+   "t": 7000,
+   "plants": 246,
+   "cells": 3889,
+   "seeds": 1661,
+   "genomes": 161,
+   "domShare": 0.033,
+   "meanPlan": 28.4,
+   "maxPlan": 76,
+   "meanH": 5.7,
+   "births": 24977,
+   "deaths": {
+    "expired": 442,
+    "shaded": 20220,
+    "immature": 4069
+   },
+   "litter": 423098
+  },
+  {
+   "t": 7250,
+   "plants": 245,
+   "cells": 3536,
+   "seeds": 1575,
+   "genomes": 153,
+   "domShare": 0.041,
+   "meanPlan": 27.6,
+   "maxPlan": 44,
+   "meanH": 5.3,
+   "births": 26046,
+   "deaths": {
+    "expired": 455,
+    "shaded": 21088,
+    "immature": 4258
+   },
+   "litter": 443409
+  },
+  {
+   "t": 7500,
+   "plants": 274,
+   "cells": 3999,
+   "seeds": 1523,
+   "genomes": 173,
+   "domShare": 0.036,
+   "meanPlan": 27.1,
+   "maxPlan": 43,
+   "meanH": 5.5,
+   "births": 27175,
+   "deaths": {
+    "expired": 463,
+    "shaded": 21953,
+    "immature": 4485
+   },
+   "litter": 463420
+  },
+  {
+   "t": 7750,
+   "plants": 263,
+   "cells": 3875,
+   "seeds": 1603,
+   "genomes": 142,
+   "domShare": 0.03,
+   "meanPlan": 28,
+   "maxPlan": 55,
+   "meanH": 5.4,
+   "births": 28265,
+   "deaths": {
+    "expired": 475,
+    "shaded": 22821,
+    "immature": 4706
+   },
+   "litter": 483537
+  },
+  {
+   "t": 8000,
+   "plants": 244,
+   "cells": 3697,
+   "seeds": 1571,
+   "genomes": 138,
+   "domShare": 0.045,
+   "meanPlan": 28.3,
+   "maxPlan": 44,
+   "meanH": 5.6,
+   "births": 29341,
+   "deaths": {
+    "expired": 490,
+    "shaded": 23684,
+    "immature": 4923
+   },
+   "litter": 504276
+  },
+  {
+   "t": 8250,
+   "plants": 262,
+   "cells": 4038,
+   "seeds": 1569,
+   "genomes": 147,
+   "domShare": 0.069,
+   "meanPlan": 27.6,
+   "maxPlan": 45,
+   "meanH": 5.8,
+   "births": 30429,
+   "deaths": {
+    "expired": 499,
+    "shaded": 24555,
+    "immature": 5113
+   },
+   "litter": 524584
+  },
+  {
+   "t": 8500,
+   "plants": 263,
+   "cells": 3788,
+   "seeds": 1559,
+   "genomes": 152,
+   "domShare": 0.034,
+   "meanPlan": 26.8,
+   "maxPlan": 47,
+   "meanH": 5.6,
+   "births": 31473,
+   "deaths": {
+    "expired": 513,
+    "shaded": 25412,
+    "immature": 5285
+   },
+   "litter": 544247
+  },
+  {
+   "t": 8750,
+   "plants": 247,
+   "cells": 4062,
+   "seeds": 1691,
+   "genomes": 144,
+   "domShare": 0.032,
+   "meanPlan": 26.8,
+   "maxPlan": 46,
+   "meanH": 6.2,
+   "births": 32502,
+   "deaths": {
+    "expired": 527,
+    "shaded": 26241,
+    "immature": 5487
+   },
+   "litter": 563468
+  },
+  {
+   "t": 9000,
+   "plants": 256,
+   "cells": 3660,
+   "seeds": 1667,
+   "genomes": 149,
+   "domShare": 0.039,
+   "meanPlan": 27.1,
+   "maxPlan": 45,
+   "meanH": 5.5,
+   "births": 33590,
+   "deaths": {
+    "expired": 540,
+    "shaded": 27101,
+    "immature": 5693
+   },
+   "litter": 583395
+  },
+  {
+   "t": 9250,
+   "plants": 262,
+   "cells": 3632,
+   "seeds": 1516,
+   "genomes": 156,
+   "domShare": 0.027,
+   "meanPlan": 26.2,
+   "maxPlan": 47,
+   "meanH": 5.2,
+   "births": 34672,
+   "deaths": {
+    "expired": 561,
+    "shaded": 27968,
+    "immature": 5881
+   },
+   "litter": 603632
+  },
+  {
+   "t": 9500,
+   "plants": 260,
+   "cells": 4029,
+   "seeds": 1696,
+   "genomes": 161,
+   "domShare": 0.05,
+   "meanPlan": 28,
+   "maxPlan": 55,
+   "meanH": 5.8,
+   "births": 35690,
+   "deaths": {
+    "expired": 575,
+    "shaded": 28788,
+    "immature": 6067
+   },
+   "litter": 622469
+  },
+  {
+   "t": 9750,
+   "plants": 252,
+   "cells": 3778,
+   "seeds": 1562,
+   "genomes": 160,
+   "domShare": 0.032,
+   "meanPlan": 28.1,
+   "maxPlan": 50,
+   "meanH": 5.7,
+   "births": 36771,
+   "deaths": {
+    "expired": 594,
+    "shaded": 29636,
+    "immature": 6289
+   },
+   "litter": 643163
+  },
+  {
+   "t": 10000,
+   "plants": 263,
+   "cells": 3975,
+   "seeds": 1537,
+   "genomes": 159,
+   "domShare": 0.038,
+   "meanPlan": 28.2,
+   "maxPlan": 49,
+   "meanH": 5.6,
+   "births": 37838,
+   "deaths": {
+    "expired": 606,
+    "shaded": 30502,
+    "immature": 6467
+   },
+   "litter": 663713
+  },
+  {
+   "t": 10250,
+   "plants": 259,
+   "cells": 4110,
+   "seeds": 1659,
+   "genomes": 156,
+   "domShare": 0.031,
+   "meanPlan": 29.2,
+   "maxPlan": 47,
+   "meanH": 5.9,
+   "births": 38879,
+   "deaths": {
+    "expired": 617,
+    "shaded": 31362,
+    "immature": 6641
+   },
+   "litter": 684055
+  },
+  {
+   "t": 10500,
+   "plants": 259,
+   "cells": 4020,
+   "seeds": 1651,
+   "genomes": 142,
+   "domShare": 0.023,
+   "meanPlan": 28.9,
+   "maxPlan": 49,
+   "meanH": 5.7,
+   "births": 39909,
+   "deaths": {
+    "expired": 634,
+    "shaded": 32193,
+    "immature": 6823
+   },
+   "litter": 704268
+  },
+  {
+   "t": 10750,
+   "plants": 240,
+   "cells": 4008,
+   "seeds": 1531,
+   "genomes": 153,
+   "domShare": 0.029,
+   "meanPlan": 29.4,
+   "maxPlan": 49,
+   "meanH": 5.9,
+   "births": 41007,
+   "deaths": {
+    "expired": 649,
+    "shaded": 33079,
+    "immature": 7039
+   },
+   "litter": 725793
+  },
+  {
+   "t": 11000,
+   "plants": 259,
+   "cells": 3976,
+   "seeds": 1515,
+   "genomes": 155,
+   "domShare": 0.031,
+   "meanPlan": 29.8,
+   "maxPlan": 51,
+   "meanH": 5.5,
+   "births": 42045,
+   "deaths": {
+    "expired": 665,
+    "shaded": 33892,
+    "immature": 7229
+   },
+   "litter": 746021
+  },
+  {
+   "t": 11250,
+   "plants": 250,
+   "cells": 3913,
+   "seeds": 1696,
+   "genomes": 147,
+   "domShare": 0.032,
+   "meanPlan": 29.8,
+   "maxPlan": 53,
+   "meanH": 5.8,
+   "births": 43044,
+   "deaths": {
+    "expired": 675,
+    "shaded": 34695,
+    "immature": 7424
+   },
+   "litter": 766424
+  },
+  {
+   "t": 11500,
+   "plants": 248,
+   "cells": 3876,
+   "seeds": 1619,
+   "genomes": 145,
+   "domShare": 0.04,
+   "meanPlan": 31.3,
+   "maxPlan": 53,
+   "meanH": 5.6,
+   "births": 44110,
+   "deaths": {
+    "expired": 686,
+    "shaded": 35556,
+    "immature": 7620
+   },
+   "litter": 787437
+  },
+  {
+   "t": 11750,
+   "plants": 258,
+   "cells": 3834,
+   "seeds": 1494,
+   "genomes": 150,
+   "domShare": 0.054,
+   "meanPlan": 30.6,
+   "maxPlan": 58,
+   "meanH": 5.4,
+   "births": 45189,
+   "deaths": {
+    "expired": 701,
+    "shaded": 36429,
+    "immature": 7801
+   },
+   "litter": 809778
+  },
+  {
+   "t": 12000,
+   "plants": 264,
+   "cells": 4042,
+   "seeds": 1487,
+   "genomes": 158,
+   "domShare": 0.027,
+   "meanPlan": 30.9,
+   "maxPlan": 55,
+   "meanH": 5.8,
+   "births": 46233,
+   "deaths": {
+    "expired": 716,
+    "shaded": 37262,
+    "immature": 7991
+   },
+   "litter": 831313
+  },
+  {
+   "t": 12250,
+   "plants": 275,
+   "cells": 3881,
+   "seeds": 1511,
+   "genomes": 153,
+   "domShare": 0.051,
+   "meanPlan": 31.7,
+   "maxPlan": 60,
+   "meanH": 5.4,
+   "births": 47273,
+   "deaths": {
+    "expired": 727,
+    "shaded": 38108,
+    "immature": 8163
+   },
+   "litter": 853162
+  },
+  {
+   "t": 12500,
+   "plants": 237,
+   "cells": 3752,
+   "seeds": 1561,
+   "genomes": 134,
+   "domShare": 0.03,
+   "meanPlan": 31.7,
+   "maxPlan": 58,
+   "meanH": 5.9,
+   "births": 48269,
+   "deaths": {
+    "expired": 741,
+    "shaded": 38950,
+    "immature": 8341
+   },
+   "litter": 875488
+  },
+  {
+   "t": 12750,
+   "plants": 222,
+   "cells": 3905,
+   "seeds": 1563,
+   "genomes": 132,
+   "domShare": 0.023,
+   "meanPlan": 32.6,
+   "maxPlan": 66,
+   "meanH": 6.7,
+   "births": 49260,
+   "deaths": {
+    "expired": 754,
+    "shaded": 39775,
+    "immature": 8509
+   },
+   "litter": 897389
+  },
+  {
+   "t": 13000,
+   "plants": 235,
+   "cells": 4164,
+   "seeds": 1544,
+   "genomes": 132,
+   "domShare": 0.034,
+   "meanPlan": 35.6,
+   "maxPlan": 71,
+   "meanH": 7,
+   "births": 50335,
+   "deaths": {
+    "expired": 766,
+    "shaded": 40630,
+    "immature": 8704
+   },
+   "litter": 920282
+  },
+  {
+   "t": 13250,
+   "plants": 245,
+   "cells": 4042,
+   "seeds": 1534,
+   "genomes": 133,
+   "domShare": 0.037,
+   "meanPlan": 34.1,
+   "maxPlan": 59,
+   "meanH": 6.9,
+   "births": 51306,
+   "deaths": {
+    "expired": 780,
+    "shaded": 41374,
+    "immature": 8907
+   },
+   "litter": 941890
+  },
+  {
+   "t": 13500,
+   "plants": 219,
+   "cells": 3911,
+   "seeds": 1556,
+   "genomes": 131,
+   "domShare": 0.046,
+   "meanPlan": 35.5,
+   "maxPlan": 58,
+   "meanH": 7.5,
+   "births": 52307,
+   "deaths": {
+    "expired": 795,
+    "shaded": 42156,
+    "immature": 9137
+   },
+   "litter": 964275
+  },
+  {
+   "t": 13750,
+   "plants": 225,
+   "cells": 4067,
+   "seeds": 1525,
+   "genomes": 125,
+   "domShare": 0.036,
+   "meanPlan": 37.8,
+   "maxPlan": 58,
+   "meanH": 7.6,
+   "births": 53264,
+   "deaths": {
+    "expired": 810,
+    "shaded": 42890,
+    "immature": 9339
+   },
+   "litter": 985908
+  },
+  {
+   "t": 14000,
+   "plants": 220,
+   "cells": 4136,
+   "seeds": 1587,
+   "genomes": 129,
+   "domShare": 0.041,
+   "meanPlan": 39.7,
+   "maxPlan": 58,
+   "meanH": 8,
+   "births": 54264,
+   "deaths": {
+    "expired": 820,
+    "shaded": 43678,
+    "immature": 9546
+   },
+   "litter": 1009907
+  },
+  {
+   "t": 14250,
+   "plants": 205,
+   "cells": 3947,
+   "seeds": 1554,
+   "genomes": 129,
+   "domShare": 0.034,
+   "meanPlan": 40.2,
+   "maxPlan": 60,
+   "meanH": 8,
+   "births": 55263,
+   "deaths": {
+    "expired": 831,
+    "shaded": 44460,
+    "immature": 9767
+   },
+   "litter": 1034577
+  },
+  {
+   "t": 14500,
+   "plants": 203,
+   "cells": 3817,
+   "seeds": 1575,
+   "genomes": 111,
+   "domShare": 0.049,
+   "meanPlan": 43.6,
+   "maxPlan": 60,
+   "meanH": 7.9,
+   "births": 56224,
+   "deaths": {
+    "expired": 848,
+    "shaded": 45185,
+    "immature": 9988
+   },
+   "litter": 1058346
+  },
+  {
+   "t": 14750,
+   "plants": 207,
+   "cells": 4008,
+   "seeds": 1484,
+   "genomes": 111,
+   "domShare": 0.048,
+   "meanPlan": 44.1,
+   "maxPlan": 72,
+   "meanH": 8,
+   "births": 57217,
+   "deaths": {
+    "expired": 858,
+    "shaded": 45925,
+    "immature": 10227
+   },
+   "litter": 1082688
+  },
+  {
+   "t": 15000,
+   "plants": 214,
+   "cells": 4284,
+   "seeds": 1479,
+   "genomes": 119,
+   "domShare": 0.051,
+   "meanPlan": 44.4,
+   "maxPlan": 72,
+   "meanH": 8.3,
+   "births": 58224,
+   "deaths": {
+    "expired": 870,
+    "shaded": 46689,
+    "immature": 10451
+   },
+   "litter": 1107257
+  },
+  {
+   "t": 15250,
+   "plants": 204,
+   "cells": 4156,
+   "seeds": 1566,
+   "genomes": 134,
+   "domShare": 0.054,
+   "meanPlan": 45.7,
+   "maxPlan": 77,
+   "meanH": 8.3,
+   "births": 59184,
+   "deaths": {
+    "expired": 880,
+    "shaded": 47435,
+    "immature": 10665
+   },
+   "litter": 1132225
+  },
+  {
+   "t": 15500,
+   "plants": 192,
+   "cells": 4026,
+   "seeds": 1526,
+   "genomes": 106,
+   "domShare": 0.052,
+   "meanPlan": 45.2,
+   "maxPlan": 71,
+   "meanH": 8.6,
+   "births": 60174,
+   "deaths": {
+    "expired": 890,
+    "shaded": 48183,
+    "immature": 10909
+   },
+   "litter": 1157438
+  },
+  {
+   "t": 15750,
+   "plants": 175,
+   "cells": 4009,
+   "seeds": 1599,
+   "genomes": 97,
+   "domShare": 0.046,
+   "meanPlan": 43.8,
+   "maxPlan": 68,
+   "meanH": 9.6,
+   "births": 61137,
+   "deaths": {
+    "expired": 898,
+    "shaded": 48938,
+    "immature": 11126
+   },
+   "litter": 1182207
+  },
+  {
+   "t": 16000,
+   "plants": 207,
+   "cells": 3896,
+   "seeds": 1542,
+   "genomes": 123,
+   "domShare": 0.039,
+   "meanPlan": 44.6,
+   "maxPlan": 79,
+   "meanH": 7.8,
+   "births": 62123,
+   "deaths": {
+    "expired": 912,
+    "shaded": 49661,
+    "immature": 11343
+   },
+   "litter": 1206032
+  },
+  {
+   "t": 16250,
+   "plants": 201,
+   "cells": 3810,
+   "seeds": 1552,
+   "genomes": 102,
+   "domShare": 0.045,
+   "meanPlan": 46.4,
+   "maxPlan": 78,
+   "meanH": 7.9,
+   "births": 63123,
+   "deaths": {
+    "expired": 921,
+    "shaded": 50421,
+    "immature": 11580
+   },
+   "litter": 1231548
+  },
+  {
+   "t": 16500,
+   "plants": 187,
+   "cells": 3999,
+   "seeds": 1703,
+   "genomes": 115,
+   "domShare": 0.032,
+   "meanPlan": 45.9,
+   "maxPlan": 78,
+   "meanH": 8.8,
+   "births": 64035,
+   "deaths": {
+    "expired": 931,
+    "shaded": 51110,
+    "immature": 11807
+   },
+   "litter": 1255052
+  },
+  {
+   "t": 16750,
+   "plants": 195,
+   "cells": 4113,
+   "seeds": 1579,
+   "genomes": 115,
+   "domShare": 0.031,
+   "meanPlan": 47.2,
+   "maxPlan": 78,
+   "meanH": 8.8,
+   "births": 65018,
+   "deaths": {
+    "expired": 940,
+    "shaded": 51849,
+    "immature": 12034
+   },
+   "litter": 1280143
+  },
+  {
+   "t": 17000,
+   "plants": 201,
+   "cells": 4063,
+   "seeds": 1554,
+   "genomes": 115,
+   "domShare": 0.03,
+   "meanPlan": 48,
+   "maxPlan": 79,
+   "meanH": 8.4,
+   "births": 65999,
+   "deaths": {
+    "expired": 952,
+    "shaded": 52580,
+    "immature": 12266
+   },
+   "litter": 1305831
+  },
+  {
+   "t": 17250,
+   "plants": 205,
+   "cells": 3993,
+   "seeds": 1516,
+   "genomes": 121,
+   "domShare": 0.039,
+   "meanPlan": 48.1,
+   "maxPlan": 68,
+   "meanH": 8.1,
+   "births": 66976,
+   "deaths": {
+    "expired": 962,
+    "shaded": 53265,
+    "immature": 12544
+   },
+   "litter": 1330659
+  },
+  {
+   "t": 17500,
+   "plants": 207,
+   "cells": 4351,
+   "seeds": 1397,
+   "genomes": 113,
+   "domShare": 0.053,
+   "meanPlan": 47.3,
+   "maxPlan": 68,
+   "meanH": 8.8,
+   "births": 67952,
+   "deaths": {
+    "expired": 972,
+    "shaded": 53978,
+    "immature": 12795
+   },
+   "litter": 1355863
+  },
+  {
+   "t": 17750,
+   "plants": 199,
+   "cells": 4094,
+   "seeds": 1608,
+   "genomes": 116,
+   "domShare": 0.03,
+   "meanPlan": 45.3,
+   "maxPlan": 64,
+   "meanH": 8.8,
+   "births": 68897,
+   "deaths": {
+    "expired": 979,
+    "shaded": 54687,
+    "immature": 13032
+   },
+   "litter": 1380412
+  },
+  {
+   "t": 18000,
+   "plants": 200,
+   "cells": 4106,
+   "seeds": 1505,
+   "genomes": 115,
+   "domShare": 0.035,
+   "meanPlan": 45.5,
+   "maxPlan": 64,
+   "meanH": 8.7,
+   "births": 69891,
+   "deaths": {
+    "expired": 991,
+    "shaded": 55427,
+    "immature": 13273
+   },
+   "litter": 1405572
+  },
+  {
+   "t": 18250,
+   "plants": 191,
+   "cells": 4106,
+   "seeds": 1485,
+   "genomes": 112,
+   "domShare": 0.047,
+   "meanPlan": 46.1,
+   "maxPlan": 66,
+   "meanH": 9.1,
+   "births": 70892,
+   "deaths": {
+    "expired": 1002,
+    "shaded": 56188,
+    "immature": 13511
+   },
+   "litter": 1431273
+  },
+  {
+   "t": 18500,
+   "plants": 200,
+   "cells": 4112,
+   "seeds": 1528,
+   "genomes": 121,
+   "domShare": 0.03,
+   "meanPlan": 44.7,
+   "maxPlan": 66,
+   "meanH": 8.7,
+   "births": 71897,
+   "deaths": {
+    "expired": 1015,
+    "shaded": 56927,
+    "immature": 13755
+   },
+   "litter": 1455778
+  },
+  {
+   "t": 18750,
+   "plants": 198,
+   "cells": 4204,
+   "seeds": 1543,
+   "genomes": 103,
+   "domShare": 0.061,
+   "meanPlan": 45.7,
+   "maxPlan": 64,
+   "meanH": 9,
+   "births": 72888,
+   "deaths": {
+    "expired": 1022,
+    "shaded": 57676,
+    "immature": 13992
+   },
+   "litter": 1481604
+  },
+  {
+   "t": 19000,
+   "plants": 192,
+   "cells": 4341,
+   "seeds": 1533,
+   "genomes": 101,
+   "domShare": 0.047,
+   "meanPlan": 46.5,
+   "maxPlan": 66,
+   "meanH": 9.4,
+   "births": 73877,
+   "deaths": {
+    "expired": 1032,
+    "shaded": 58411,
+    "immature": 14242
+   },
+   "litter": 1506612
+  },
+  {
+   "t": 19250,
+   "plants": 179,
+   "cells": 4071,
+   "seeds": 1426,
+   "genomes": 106,
+   "domShare": 0.045,
+   "meanPlan": 47.3,
+   "maxPlan": 76,
+   "meanH": 9.5,
+   "births": 74852,
+   "deaths": {
+    "expired": 1044,
+    "shaded": 59158,
+    "immature": 14471
+   },
+   "litter": 1532839
+  },
+  {
+   "t": 19500,
+   "plants": 215,
+   "cells": 4203,
+   "seeds": 1452,
+   "genomes": 115,
+   "domShare": 0.037,
+   "meanPlan": 48.5,
+   "maxPlan": 67,
+   "meanH": 8.3,
+   "births": 75807,
+   "deaths": {
+    "expired": 1058,
+    "shaded": 59846,
+    "immature": 14688
+   },
+   "litter": 1556948
+  },
+  {
+   "t": 19750,
+   "plants": 195,
+   "cells": 3718,
+   "seeds": 1563,
+   "genomes": 104,
+   "domShare": 0.046,
+   "meanPlan": 48.6,
+   "maxPlan": 67,
+   "meanH": 8.2,
+   "births": 76756,
+   "deaths": {
+    "expired": 1069,
+    "shaded": 60591,
+    "immature": 14901
+   },
+   "litter": 1583216
+  },
+  {
+   "t": 20000,
+   "plants": 197,
+   "cells": 4345,
+   "seeds": 1502,
+   "genomes": 109,
+   "domShare": 0.041,
+   "meanPlan": 46.7,
+   "maxPlan": 67,
+   "meanH": 9.2,
+   "births": 77734,
+   "deaths": {
+    "expired": 1075,
+    "shaded": 61331,
+    "immature": 15131
+   },
+   "litter": 1609124
+  }
+ ],
+ "deathHist": {
+  "0": 1189,
+  "1": 1544,
+  "2": 2844,
+  "3": 3487,
+  "4": 3642,
+  "5": 2875,
+  "6": 2036,
+  "7": 1215,
+  "8": 660,
+  "9": 288,
+  "10": 146,
+  "11": 47,
+  "12": 21,
+  "13": 5,
+  "14": 1
+ }
+}

@@ -1,0 +1,1631 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0a1518">
+  <title>Palimpsest Garden II</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --night: #071113;
+      --bar: rgba(7, 15, 16, .94);
+      --ink: #e8eddd;
+      --muted: #9ca99d;
+      --line: rgba(228, 236, 216, .17);
+      --gold: #e6c16f;
+      --green: #a8c877;
+    }
+
+    * { box-sizing: border-box; }
+
+    html, body {
+      width: 100%;
+      height: 100%;
+      margin: 0;
+      overflow: hidden;
+      overscroll-behavior: none;
+      background: var(--night);
+      color: var(--ink);
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    button, input, select { font: inherit; }
+
+    #app {
+      width: 100%;
+      height: 100vh;
+      height: 100svh;
+      height: 100dvh;
+      display: grid;
+      grid-template-rows: 44px minmax(0, 1fr);
+      overflow: hidden;
+    }
+
+    header {
+      min-width: 0;
+      height: 44px;
+      padding: 6px max(8px, env(safe-area-inset-left));
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      border-bottom: 1px solid var(--line);
+      background: var(--bar);
+      backdrop-filter: blur(14px);
+      z-index: 3;
+      white-space: nowrap;
+      overflow: hidden;
+    }
+
+    .mark {
+      width: 22px;
+      height: 22px;
+      flex: 0 0 auto;
+      position: relative;
+    }
+
+    .mark::before,
+    .mark::after {
+      content: "";
+      position: absolute;
+      left: 10px;
+      bottom: 1px;
+      width: 2px;
+      height: 19px;
+      border-radius: 999px;
+      background: linear-gradient(to top, #8b7652 0 37%, #aaca70 38% 100%);
+      transform-origin: bottom;
+    }
+
+    .mark::after { transform: rotate(47deg); height: 12px; }
+
+    .brand {
+      flex: 0 0 auto;
+      margin-right: 5px;
+      color: #eff3e6;
+      font: 600 13px/1 Georgia, "Times New Roman", serif;
+      letter-spacing: .015em;
+    }
+
+    .readout {
+      min-width: 0;
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      color: var(--muted);
+      font: 600 10px/1.1 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      letter-spacing: .035em;
+      text-transform: uppercase;
+    }
+
+    .readout b { color: var(--ink); font-weight: 700; }
+    .spacer { flex: 1 1 auto; min-width: 4px; }
+
+    .seed-box {
+      height: 30px;
+      display: flex;
+      align-items: center;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      overflow: hidden;
+      background: rgba(236, 241, 224, .045);
+    }
+
+    .seed-box label {
+      padding-left: 8px;
+      color: var(--muted);
+      font: 700 9px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+    }
+
+    #seedInput {
+      width: 104px;
+      height: 28px;
+      padding: 0 7px 0 5px;
+      border: 0;
+      outline: 0;
+      color: var(--gold);
+      background: transparent;
+      font: 700 11px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
+    }
+
+    button, select {
+      height: 30px;
+      flex: 0 0 auto;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      color: var(--ink);
+      background: rgba(236, 241, 224, .055);
+      cursor: pointer;
+      touch-action: manipulation;
+    }
+
+    button {
+      padding: 0 10px;
+      font-size: 11px;
+      font-weight: 750;
+    }
+
+    button:hover, select:hover { background: rgba(236, 241, 224, .11); }
+    button:active { transform: translateY(1px); }
+    button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px solid var(--gold); outline-offset: 1px; }
+
+    #pauseBtn { width: 34px; padding: 0; font-size: 13px; }
+    #speedSelect { width: 52px; padding: 0 5px; font-size: 11px; font-weight: 750; }
+
+    #stage {
+      position: relative;
+      width: 100%;
+      height: 100%;
+      min-width: 0;
+      min-height: 0;
+      overflow: hidden;
+      background: #0a1518;
+    }
+
+    #world {
+      display: block;
+      width: 100%;
+      height: 100%;
+      touch-action: none;
+    }
+
+    .fatal {
+      position: absolute;
+      inset: 0;
+      display: none;
+      place-items: center;
+      padding: 30px;
+      color: #f0e3ce;
+      background: #111817;
+      text-align: center;
+      font: 15px/1.5 ui-monospace, monospace;
+    }
+
+    @media (max-width: 760px) {
+      .brand { display: none; }
+      .readout .word { display: none; }
+      .seed-box label { display: none; }
+      #seedInput { width: 93px; padding-left: 7px; }
+      button { padding-inline: 8px; }
+    }
+
+    @media (max-width: 520px) {
+      header { gap: 5px; }
+      .mark { display: none; }
+      .readout { gap: 4px; font-size: 9px; }
+      .readout .dimensions { display: none; }
+      #seedInput { width: 86px; }
+      button { padding-inline: 7px; font-size: 10px; }
+      #speedSelect { width: 47px; }
+    }
+  </style>
+</head>
+<body>
+  <div id="app">
+    <header>
+      <div class="mark" aria-hidden="true"></div>
+      <div class="brand">Palimpsest Garden II</div>
+      <div class="readout" aria-live="polite">
+        <span><span class="word">tick </span><b id="tickReadout">0</b></span>
+        <span>·</span>
+        <span class="dimensions"><b id="dimensionsReadout">144×80</b></span>
+      </div>
+      <div class="spacer"></div>
+      <div class="seed-box">
+        <label for="seedInput">seed</label>
+        <input id="seedInput" inputmode="numeric" autocomplete="off" spellcheck="false" aria-label="World seed">
+      </div>
+      <button id="replayBtn" type="button" title="Run the entered seed">Replay</button>
+      <button id="newBtn" type="button" title="Create a genuinely random new world">New</button>
+      <button id="pauseBtn" type="button" title="Pause (Space)" aria-label="Pause">Ⅱ</button>
+      <select id="speedSelect" title="Simulation speed" aria-label="Simulation speed">
+        <option value="1">1×</option>
+        <option value="4" selected>4×</option>
+        <option value="12">12×</option>
+        <option value="32">32×</option>
+      </select>
+    </header>
+    <main id="stage">
+      <canvas id="world" aria-label="A zero-player evolving garden"></canvas>
+      <div class="fatal" id="fatal"></div>
+    </main>
+  </div>
+
+  <script id="garden-core">
+  (() => {
+    "use strict";
+
+    const TAU = Math.PI * 2;
+    const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+    const lerp = (a, b, t) => a + (b - a) * t;
+    const angleWrap = a => Math.atan2(Math.sin(a), Math.cos(a));
+
+    class RNG {
+      constructor(seed) {
+        this.state = (seed >>> 0) || 0x6d2b79f5;
+        this._spare = null;
+      }
+      next() {
+        let t = this.state += 0x6d2b79f5;
+        t = Math.imul(t ^ t >>> 15, t | 1);
+        t ^= t + Math.imul(t ^ t >>> 7, t | 61);
+        return ((t ^ t >>> 14) >>> 0) / 4294967296;
+      }
+      range(a, b) { return a + (b - a) * this.next(); }
+      int(a, b) { return Math.floor(this.range(a, b + 1)); }
+      chance(p) { return this.next() < p; }
+      pick(xs) { return xs[Math.floor(this.next() * xs.length)]; }
+      normal() {
+        if (this._spare !== null) {
+          const v = this._spare;
+          this._spare = null;
+          return v;
+        }
+        const u = Math.max(1e-9, this.next());
+        const v = this.next();
+        const mag = Math.sqrt(-2 * Math.log(u));
+        this._spare = mag * Math.sin(TAU * v);
+        return mag * Math.cos(TAU * v);
+      }
+    }
+
+    function hash01(x, y, seed) {
+      let h = Math.imul((x | 0) ^ (seed | 0), 0x45d9f3b);
+      h = Math.imul(h ^ (y | 0), 0x45d9f3b);
+      h ^= h >>> 16;
+      return (h >>> 0) / 4294967295;
+    }
+
+    function baseGenome() {
+      return {
+        hue: 104,
+        axisBudget: 18,
+        rootBudget: 15,
+        pace: 14,
+        branchPeriod: 4,
+        branchFraction: 0.28,
+        branchAngle: 0.74,
+        leafPeriod: 2,
+        leafSize: 1.28,
+        leafAngle: 1.02,
+        turnBias: 0.018,
+        phototropism: 0.72,
+        rootSpread: 0.64,
+        rootMoisture: 0.82,
+        dormancy: 48,
+        seedMass: 1,
+        dispersal: 0.72,
+        woodiness: 0.5,
+        flowerCost: 1.42,
+        graftTag: 0,
+        graftIntent: 0.16,
+        exchangeBias: 0.5,
+      };
+    }
+
+    const TRAITS = [
+      ["hue", 4.5, 70, 145],
+      ["axisBudget", 1.2, 9, 27],
+      ["rootBudget", 1.0, 8, 24],
+      ["pace", 1.0, 8, 23],
+      ["branchPeriod", 0.65, 3, 7],
+      ["branchFraction", 0.035, 0.18, 0.42],
+      ["branchAngle", 0.07, 0.38, 1.18],
+      ["leafPeriod", 0.5, 1, 4],
+      ["leafSize", 0.09, 0.65, 1.85],
+      ["leafAngle", 0.08, 0.55, 1.42],
+      ["turnBias", 0.025, -0.16, 0.16],
+      ["phototropism", 0.05, 0.3, 1],
+      ["rootSpread", 0.05, 0.25, 1.05],
+      ["rootMoisture", 0.05, 0.3, 1],
+      ["dormancy", 5, 18, 115],
+      ["seedMass", 0.075, 0.62, 1.65],
+      ["dispersal", 0.07, 0.2, 1.45],
+      ["woodiness", 0.045, 0.12, 0.9],
+      ["flowerCost", 0.11, 1.1, 2.7],
+      ["graftIntent", 0.035, 0, 0.6],
+      ["exchangeBias", 0.05, 0.1, 0.9],
+    ];
+
+    function mutateGenome(parent, rng) {
+      const child = { ...parent };
+      const edits = 1 + (rng.chance(0.22) ? 1 : 0) + (rng.chance(0.04) ? 1 : 0);
+      for (let i = 0; i < edits; i++) {
+        const [key, sigma, lo, hi] = rng.pick(TRAITS);
+        let value = child[key] + rng.normal() * sigma;
+        if (["axisBudget", "rootBudget", "pace", "branchPeriod", "leafPeriod", "dormancy"].includes(key)) value = Math.round(value);
+        child[key] = clamp(value, lo, hi);
+      }
+      if (rng.chance(0.05)) child.graftTag = (child.graftTag + (rng.chance(.5) ? 1 : 3)) & 3;
+      return child;
+    }
+
+    class World {
+      constructor(seed, options = {}) {
+        this.seed = seed >>> 0;
+        this.w = options.width || 144;
+        this.h = options.height || 80;
+        this.rng = new RNG(this.seed);
+        this.tick = 0;
+        this.nextNodeId = 1;
+        this.nextPlantId = 1;
+        this.nextGenomeId = 2;
+        this.nodes = [];
+        this.nodeById = new Map();
+        this.plants = new Map();
+        this.buds = [];
+        this.leaves = [];
+        this.flowers = [];
+        this.seeds = [];
+        this.grafts = [];
+        this.packets = [];
+        this.litter = [];
+        this.rainDrops = [];
+        this.spatial = new Map();
+        this.stats = {
+          founders: 0,
+          germinations: 0,
+          propagules: 0,
+          mutations: 0,
+          nodeBirths: 0,
+          nodeDeaths: 0,
+          grafts: 0,
+          lastPropagule: 0,
+          lastGermination: 0,
+          maxGeneration: 0,
+        };
+        this.surface = new Float32Array(this.w);
+        this.moisture = new Float32Array(this.w * this.h);
+        this.humus = new Float32Array(this.w * this.h);
+        this.rock = new Float32Array(this.w * this.h);
+        this.memoryTag = new Uint8Array(this.w * this.h);
+        this.shade = new Float32Array(this.w * this.h);
+        this.light = new Float32Array(this.w * this.h);
+        this.visualEvents = [];
+        this.ancestor = baseGenome();
+        this._makeLandscape();
+        this._seedFounders(options.founders || 12);
+        this._rebuildLight();
+      }
+
+      idx(x, y) { return clamp(y | 0, 0, this.h - 1) * this.w + clamp(x | 0, 0, this.w - 1); }
+      sx(x) { return clamp(x | 0, 0, this.w - 1); }
+
+      surfaceAt(x) {
+        const xx = clamp(x, 0, this.w - 1.001);
+        const a = Math.floor(xx);
+        const b = Math.min(this.w - 1, a + 1);
+        return lerp(this.surface[a], this.surface[b], xx - a);
+      }
+
+      daylight() {
+        const phase = (this.tick / 260 + 0.18) * TAU;
+        return 0.06 + 0.94 * Math.max(0, Math.sin(phase));
+      }
+
+      climate() {
+        const wet = 0.5
+          + 0.24 * Math.sin(this.tick / 610 + this.seed * 0.0000013)
+          + 0.21 * Math.sin(this.tick / 1737 + 1.7)
+          + 0.12 * Math.sin(this.tick / 137 + 4.1);
+        const rain = clamp((wet - 0.44) * 2.3, 0, 1);
+        const wind = clamp(
+          0.42 * Math.sin(this.tick / 211 + this.seed * 0.000003)
+          + 0.28 * Math.sin(this.tick / 61 + 2.3)
+          + 0.19 * Math.sin(this.tick / 997),
+          -1, 1
+        );
+        const gust = Math.max(0, Math.sin(this.tick / 1901 + 2.6)) ** 18;
+        const season = 0.5 + 0.5 * Math.sin(this.tick / 5100 + 0.7);
+        return { rain, wind: wind + gust * 0.85, gust, season };
+      }
+
+      _makeLandscape() {
+        const p1 = this.rng.range(0, TAU);
+        const p2 = this.rng.range(0, TAU);
+        for (let x = 0; x < this.w; x++) {
+          const ridgeA = 3.7 * Math.exp(-Math.pow((x - this.w * .34) / 7.5, 2));
+          const ridgeB = 3.2 * Math.exp(-Math.pow((x - this.w * .69) / 8.5, 2));
+          const y = this.h * .59
+            + 2.5 * Math.sin(x / 17 + p1)
+            + 1.35 * Math.sin(x / 6.8 + p2)
+            - ridgeA - ridgeB;
+          this.surface[x] = clamp(y, this.h * .48, this.h * .68);
+        }
+        for (let y = 0; y < this.h; y++) {
+          for (let x = 0; x < this.w; x++) {
+            const i = this.idx(x, y);
+            if (y < this.surface[x]) continue;
+            const depth = y - this.surface[x];
+            const n = hash01(x * 3, y * 5, this.seed);
+            const ridge = Math.max(
+              Math.exp(-Math.pow((x - this.w * .34) / 5.5, 2)),
+              Math.exp(-Math.pow((x - this.w * .69) / 6.2, 2))
+            );
+            this.rock[i] = clamp(.08 + n * .34 + ridge * .45 - depth * .006, 0, .94);
+            const basin = .18 + .17 * Math.sin(x / 22 + p2) + depth * .012;
+            this.moisture[i] = clamp(basin + (1 - this.rock[i]) * .2 + hash01(x, y, this.seed ^ 0xa51f) * .08, .04, .72);
+            this.humus[i] = depth < 2 ? hash01(x, y, this.seed ^ 0x77aa) * .08 : 0;
+          }
+        }
+      }
+
+      _seedFounders(count) {
+        for (let i = 0; i < count; i++) {
+          const x = ((i + .5) / count) * this.w + this.rng.range(-2.6, 2.6);
+          this._germinate({
+            x: clamp(x, 2, this.w - 3),
+            y: this.surfaceAt(x) - .12,
+            genome: { ...this.ancestor },
+            genomeId: 1,
+            generation: 0,
+            parentGenomeId: 0,
+            mass: 1.28,
+          }, true);
+        }
+      }
+
+      _spatialKey(x, y) { return `${Math.floor(x)}:${Math.floor(y)}`; }
+
+      _indexNode(node) {
+        const key = this._spatialKey(node.x, node.y);
+        let bucket = this.spatial.get(key);
+        if (!bucket) this.spatial.set(key, bucket = []);
+        bucket.push(node.id);
+      }
+
+      nearbyNodes(x, y, radius = 1.1) {
+        const out = [];
+        const r = Math.ceil(radius);
+        const cx = Math.floor(x), cy = Math.floor(y);
+        for (let yy = cy - r; yy <= cy + r; yy++) {
+          for (let xx = cx - r; xx <= cx + r; xx++) {
+            const bucket = this.spatial.get(`${xx}:${yy}`);
+            if (!bucket) continue;
+            for (const id of bucket) {
+              const n = this.nodeById.get(id);
+              if (!n || (!n.alive && this.tick - n.deadAt > 240)) continue;
+              const d = Math.hypot(n.x - x, n.y - y);
+              if (d <= radius) out.push({ node: n, distance: d });
+            }
+          }
+        }
+        return out;
+      }
+
+      _createNode(plant, x, y, kind, parentId = 0, sugar = .08, water = .08) {
+        const parent = parentId ? this.nodeById.get(parentId) : null;
+        const node = {
+          id: this.nextNodeId++,
+          plantId: plant.id,
+          genomeId: plant.genomeId,
+          generation: plant.generation,
+          tag: plant.genome.graftTag,
+          x, y, kind, parentId,
+          children: [],
+          alive: true,
+          born: this.tick,
+          deadAt: 0,
+          sugar,
+          water,
+          integrity: 1,
+          radius: kind === "crown" ? .19 : .105,
+          flow: 0,
+          rootHair: kind === "root" ? .45 : 0,
+        };
+        this.nodes.push(node);
+        this.nodeById.set(node.id, node);
+        this._indexNode(node);
+        plant.nodeIds.push(node.id);
+        if (parent) parent.children.push(node.id);
+        this.stats.nodeBirths++;
+        return node;
+      }
+
+      _createLeaf(node, plant, side, scale = 1) {
+        if (!node || !node.alive || node.y >= this.surfaceAt(node.x)) return null;
+        const g = plant.genome;
+        const leaf = {
+          nodeId: node.id,
+          plantId: plant.id,
+          genomeId: plant.genomeId,
+          x: node.x,
+          y: node.y,
+          side,
+          angle: -Math.PI / 2 + side * g.leafAngle + this.rng.range(-.1, .1),
+          length: g.leafSize * scale * this.rng.range(.88, 1.12),
+          width: g.leafSize * scale * this.rng.range(.28, .4),
+          hue: g.hue + this.rng.range(-3, 3),
+          born: this.tick,
+          lifespan: Math.round(820 + g.woodiness * 680 + this.rng.range(-120, 150)),
+          alive: true,
+          light: 1,
+        };
+        this.leaves.push(leaf);
+        return leaf;
+      }
+
+      _createBud(node, plant, type, heading, potential, options = {}) {
+        const bud = {
+          nodeId: node.id,
+          plantId: plant.id,
+          type,
+          heading,
+          potential: Math.max(1, Math.round(potential)),
+          step: options.step || 0,
+          side: options.side || (this.rng.chance(.5) ? 1 : -1),
+          dormantUntil: options.dormantUntil || 0,
+          starved: 0,
+          alive: true,
+          born: this.tick,
+        };
+        this.buds.push(bud);
+        return bud;
+      }
+
+      _germinate(seed, founder = false) {
+        const x = clamp(seed.x, 1, this.w - 2);
+        const y = this.surfaceAt(x) - .1;
+        if (!founder && this.nearbyNodes(x, y, .72).some(q => q.node.alive)) return false;
+        const plant = {
+          id: this.nextPlantId++,
+          genome: seed.genome,
+          genomeId: seed.genomeId,
+          parentGenomeId: seed.parentGenomeId || 0,
+          generation: seed.generation || 0,
+          born: this.tick,
+          nodeIds: [],
+          alive: true,
+        };
+        this.plants.set(plant.id, plant);
+        const crown = this._createNode(plant, x, y, "crown", 0, 1.55 * seed.mass, 1.05 * seed.mass);
+        this._createLeaf(crown, plant, -1, .64);
+        this._createLeaf(crown, plant, 1, .64);
+        this._createBud(crown, plant, "shoot", -Math.PI / 2 + this.rng.range(-.06, .06), plant.genome.axisBudget);
+        this._createBud(crown, plant, "root", Math.PI / 2 + this.rng.range(-.15, .15), plant.genome.rootBudget);
+        if (founder) this.stats.founders++;
+        else {
+          this.stats.germinations++;
+          this.stats.lastGermination = this.tick;
+          this.stats.maxGeneration = Math.max(this.stats.maxGeneration, plant.generation);
+        }
+        return true;
+      }
+
+      lightAt(x, y) {
+        const xx = clamp(Math.floor(x), 0, this.w - 1);
+        const yy = clamp(Math.floor(y), 0, this.h - 1);
+        return this.light[this.idx(xx, yy)] || this.daylight();
+      }
+
+      moistureAt(x, y) {
+        if (y < this.surfaceAt(x)) return 0;
+        return this.moisture[this.idx(x, y)];
+      }
+
+      _rebuildLight() {
+        this.shade.fill(0);
+        for (const leaf of this.leaves) {
+          if (!leaf.alive) continue;
+          const x0 = Math.floor(leaf.x - leaf.length * .8);
+          const x1 = Math.ceil(leaf.x + leaf.length * .8);
+          const yy = clamp(Math.floor(leaf.y), 0, this.h - 1);
+          for (let x = x0; x <= x1; x++) {
+            if (x < 0 || x >= this.w) continue;
+            const dx = Math.abs(x - leaf.x) / Math.max(.5, leaf.length);
+            if (dx <= 1) this.shade[this.idx(x, yy)] += (1 - dx * .6) * leaf.width * .48;
+          }
+        }
+        const sun = this.daylight();
+        for (let x = 0; x < this.w; x++) {
+          let trans = 1;
+          for (let y = 0; y < this.h; y++) {
+            trans *= Math.exp(-this.shade[this.idx(x, y)] * .34);
+            this.light[this.idx(x, y)] = sun * trans;
+          }
+        }
+        for (const leaf of this.leaves) {
+          if (leaf.alive) leaf.light = this.lightAt(leaf.x, leaf.y - .35);
+        }
+      }
+
+      _canPlace(x, y, parentId, plantId, type) {
+        if (x < .7 || x > this.w - .7 || y < 1 || y > this.h - 1) return false;
+        const surface = this.surfaceAt(x);
+        if (type === "shoot" && y >= surface - .18) return false;
+        if (type === "root" && y <= surface + .08) return false;
+        if (type === "root" && this.rock[this.idx(x, y)] > .91) return false;
+        for (const q of this.nearbyNodes(x, y, .52)) {
+          if (q.node.id === parentId) continue;
+          if (q.node.alive) return false;
+        }
+        return true;
+      }
+
+      _candidateHeading(bud, node, plant) {
+        const g = plant.genome;
+        const offsets = [0, -.18, .18, -.36, .36, -.57, .57, -.82, .82];
+        let best = null;
+        for (const off of offsets) {
+          let a = angleWrap(bud.heading + off);
+          const step = bud.type === "root" ? .78 : .88;
+          const x = node.x + Math.cos(a) * step;
+          const y = node.y + Math.sin(a) * step;
+          if (!this._canPlace(x, y, node.id, plant.id, bud.type)) continue;
+          let score = -Math.abs(off) * .7 + this.rng.range(-.025, .025);
+          if (bud.type === "shoot") {
+            const upward = -Math.sin(a);
+            score += upward * g.phototropism * .44;
+            score += this.lightAt(x, y) * .5;
+            score += Math.cos(a) * g.turnBias * bud.side;
+          } else {
+            const down = Math.sin(a);
+            const horizontal = Math.abs(Math.cos(a));
+            const wet = this.moistureAt(x, y);
+            const rock = this.rock[this.idx(x, y)];
+            score += down * (1 - g.rootSpread) * .25;
+            score += horizontal * g.rootSpread * .23;
+            score += wet * g.rootMoisture * .7 - rock * .48;
+          }
+          if (!best || score > best.score) best = { a, x, y, score };
+        }
+        return best;
+      }
+
+      _finishBud(bud, node, plant) {
+        bud.alive = false;
+        if (bud.type === "shoot" && node.y < this.surfaceAt(node.x)) {
+          if (!this.flowers.some(f => f.alive && f.nodeId === node.id)) {
+            this.flowers.push({
+              nodeId: node.id,
+              plantId: plant.id,
+              genomeId: plant.genomeId,
+              born: this.tick,
+              store: 0,
+              water: 0,
+              stage: 0,
+              released: false,
+              alive: true,
+              hue: plant.genome.hue,
+            });
+          }
+        } else if (bud.type === "root") {
+          node.kind = "rootTip";
+          node.rootHair = 1;
+          this._tryGraft(node, plant);
+        }
+      }
+
+      _growBud(bud) {
+        if (!bud.alive) return;
+        const node = this.nodeById.get(bud.nodeId);
+        const plant = this.plants.get(bud.plantId);
+        if (!node || !node.alive || !plant || !plant.alive) { bud.alive = false; return; }
+        const g = plant.genome;
+        if (bud.dormantUntil > this.tick) return;
+        if (bud.dormantUntil && bud.type === "shoot" && this.lightAt(node.x, node.y) < .08) return;
+        if (bud.potential <= 0) { this._finishBud(bud, node, plant); return; }
+
+        const pace = Math.max(5, Math.round(g.pace));
+        if ((this.tick + bud.nodeId * 7) % pace !== 0) return;
+        const sugarCost = bud.type === "shoot" ? .255 + g.leafSize * .024 : .19;
+        const waterCost = bud.type === "shoot" ? .112 : .062;
+        if (node.sugar < sugarCost || node.water < waterCost) {
+          bud.starved++;
+          return;
+        }
+
+        const target = this._candidateHeading(bud, node, plant);
+        if (!target) {
+          bud.starved++;
+          bud.heading += bud.side * .17;
+          if (bud.starved > 38) this._finishBud(bud, node, plant);
+          return;
+        }
+
+        node.sugar -= sugarCost;
+        node.water -= waterCost;
+        const child = this._createNode(plant, target.x, target.y, bud.type === "shoot" ? "stem" : "root", node.id, .035, .035);
+        bud.nodeId = child.id;
+        bud.heading = angleWrap(target.a + g.turnBias * bud.side + this.rng.range(-.025, .025));
+        bud.potential--;
+        bud.step++;
+        bud.starved = 0;
+
+        if (bud.type === "shoot" && bud.step % Math.max(1, Math.round(g.leafPeriod)) === 0) {
+          this._createLeaf(child, plant, bud.side);
+          bud.side *= -1;
+        }
+
+        const period = Math.max(3, Math.round(g.branchPeriod));
+        if (bud.step % period === 0 && bud.potential >= 5) {
+          const lateral = Math.max(2, Math.floor(bud.potential * g.branchFraction));
+          if (bud.potential - lateral >= 2) {
+            bud.potential -= lateral;
+            const side = bud.side;
+            const branchHeading = angleWrap(target.a + side * g.branchAngle);
+            this._createBud(node, plant, bud.type, branchHeading, lateral, {
+              side: -side,
+              dormantUntil: this.tick + Math.round(g.dormancy),
+            });
+          }
+        }
+      }
+
+      _tryGraft(node, plant) {
+        const g = plant.genome;
+        if (g.graftIntent <= 0 || node.sugar < .15) return;
+        if (this.grafts.filter(e => e.alive && (e.a === node.id || e.b === node.id)).length >= 2) return;
+        for (const q of this.nearbyNodes(node.x, node.y, 1.9)) {
+          const other = q.node;
+          if (!other.alive || other.plantId === plant.id || (other.kind !== "root" && other.kind !== "rootTip")) continue;
+          const otherPlant = this.plants.get(other.plantId);
+          if (!otherPlant) continue;
+          const delta = (g.graftTag - otherPlant.genome.graftTag + 4) & 3;
+          const complementary = delta === 1 || delta === 3;
+          if (!complementary) continue;
+          if (!this.rng.chance(Math.min(.8, g.graftIntent + otherPlant.genome.graftIntent))) continue;
+          if (this.grafts.some(e => e.alive && ((e.a === node.id && e.b === other.id) || (e.a === other.id && e.b === node.id)))) continue;
+          node.sugar -= .12;
+          this.grafts.push({ a: node.id, b: other.id, born: this.tick, alive: true, tagA: g.graftTag, tagB: otherPlant.genome.graftTag });
+          this.stats.grafts++;
+          return;
+        }
+      }
+
+      _releaseSeeds(flower, node, plant) {
+        const g = plant.genome;
+        const count = clamp(Math.round(5.3 / g.seedMass), 3, 8);
+        const climate = this.climate();
+        for (let i = 0; i < count; i++) {
+          const mutated = mutateGenome(g, this.rng);
+          const changed = TRAITS.some(([k]) => mutated[k] !== g[k]) || mutated.graftTag !== g.graftTag;
+          const genomeId = changed ? this.nextGenomeId++ : plant.genomeId;
+          if (changed) this.stats.mutations++;
+          this.seeds.push({
+            x: node.x + this.rng.range(-.18, .18),
+            y: node.y - .18,
+            vx: climate.wind * .035 * g.dispersal + this.rng.range(-.045, .045) * g.dispersal,
+            vy: this.rng.range(-.13, -.035),
+            genome: mutated,
+            genomeId,
+            parentGenomeId: plant.genomeId,
+            generation: plant.generation + 1,
+            mass: g.seedMass,
+            dispersal: g.dispersal,
+            tag: mutated.graftTag,
+            age: 0,
+            landed: false,
+            alive: true,
+            rest: 0,
+          });
+        }
+        this.stats.propagules += count;
+        this.stats.lastPropagule = this.tick;
+        flower.released = true;
+      }
+
+      _updateFlowers() {
+        for (const flower of this.flowers) {
+          if (!flower.alive) continue;
+          const node = this.nodeById.get(flower.nodeId);
+          const plant = this.plants.get(flower.plantId);
+          if (!node || !node.alive || !plant) { flower.alive = false; continue; }
+          if (!flower.released) {
+            const takeS = Math.min(.022, Math.max(0, node.sugar - .12));
+            const takeW = Math.min(.007, Math.max(0, node.water - .05));
+            node.sugar -= takeS;
+            node.water -= takeW;
+            flower.store += takeS;
+            flower.water += takeW;
+            flower.stage = clamp(flower.store / plant.genome.flowerCost, 0, 1);
+            if (flower.store >= plant.genome.flowerCost && flower.water >= .23) this._releaseSeeds(flower, node, plant);
+          } else if (this.tick - flower.born > 520) {
+            flower.alive = false;
+          }
+        }
+      }
+
+      _updateSeeds() {
+        const climate = this.climate();
+        for (const seed of this.seeds) {
+          if (!seed.alive) continue;
+          seed.age++;
+          if (!seed.landed) {
+            seed.vx += climate.wind * .00042 * seed.dispersal;
+            seed.vx *= .997;
+            seed.vy += .0048 / Math.max(.6, seed.mass);
+            seed.x += seed.vx;
+            seed.y += seed.vy;
+            if (seed.x < .2) { seed.x = .2; seed.vx = Math.abs(seed.vx) * .45; }
+            if (seed.x > this.w - .2) { seed.x = this.w - .2; seed.vx = -Math.abs(seed.vx) * .45; }
+            const sy = this.surfaceAt(seed.x) - .08;
+            if (seed.y >= sy) {
+              seed.y = sy;
+              seed.vx = 0;
+              seed.vy = 0;
+              seed.landed = true;
+              seed.rest = 0;
+            }
+          } else {
+            seed.rest++;
+            const wet = this.moistureAt(seed.x, this.surfaceAt(seed.x) + .4);
+            const light = this.lightAt(seed.x, this.surfaceAt(seed.x) - .2);
+            const clear = !this.nearbyNodes(seed.x, seed.y, .7).some(q => q.node.alive);
+            const readiness = clamp((wet - .06) * 3.2, 0, 1) * clamp((light - .035) * 2.2, 0, 1);
+            if (clear && seed.rest > 24 && this.rng.chance(.004 + readiness * .018)) {
+              if (this._germinate(seed, false)) seed.alive = false;
+            }
+            if (seed.age > 5600) {
+              seed.alive = false;
+              const i = this.idx(seed.x, this.surfaceAt(seed.x) + .3);
+              this.humus[i] = clamp(this.humus[i] + .06 * seed.mass, 0, 1);
+              this.memoryTag[i] = seed.tag;
+            }
+          }
+        }
+        if (this.seeds.length > 1800) this.seeds = this.seeds.filter(s => s.alive).slice(-1200);
+      }
+
+      _moveResource(a, b, key, amount, kind) {
+        const diff = a[key] - b[key];
+        if (diff <= .025) return;
+        const moved = Math.min(amount, diff * .42, a[key]);
+        if (moved <= .002) return;
+        a[key] -= moved;
+        b[key] += moved;
+        a.flow += moved;
+        b.flow += moved;
+        if (moved > .012 && this.packets.length < 520 && this.rng.chance(.095)) {
+          this.packets.push({ a: a.id, b: b.id, t: 0, kind, born: this.tick });
+        }
+      }
+
+      _resources() {
+        for (const leaf of this.leaves) {
+          if (!leaf.alive) continue;
+          const node = this.nodeById.get(leaf.nodeId);
+          if (!node || !node.alive) continue;
+          const ageFactor = clamp((leaf.lifespan - (this.tick - leaf.born)) / 120, 0, 1);
+          const made = .0175 * leaf.length * leaf.width * leaf.light * ageFactor;
+          node.sugar = clamp(node.sugar + made, 0, 3);
+        }
+
+        for (const node of this.nodes) {
+          if (!node.alive || (node.kind !== "root" && node.kind !== "rootTip" && node.kind !== "crown")) continue;
+          const y = Math.max(node.y, this.surfaceAt(node.x) + .18);
+          const i = this.idx(node.x, y);
+          const available = this.moisture[i];
+          if (available <= .015 || node.water >= 2.7) continue;
+          const rate = Math.min(available, .0065 + node.rootHair * .0085);
+          this.moisture[i] -= rate;
+          node.water += rate;
+          this.rock[i] = Math.max(0, this.rock[i] - .000012);
+          if (node.kind === "rootTip" && (this.tick + node.id) % 83 === 0) {
+            const plant = this.plants.get(node.plantId);
+            if (plant) this._tryGraft(node, plant);
+          }
+        }
+
+        for (const node of this.nodes) {
+          if (!node.alive || !node.parentId) continue;
+          const parent = this.nodeById.get(node.parentId);
+          if (!parent || !parent.alive) continue;
+          if (node.water > parent.water) this._moveResource(node, parent, "water", .058, "water");
+          else this._moveResource(parent, node, "water", .058, "water");
+          if (node.sugar > parent.sugar) this._moveResource(node, parent, "sugar", .052, "sugar");
+          else this._moveResource(parent, node, "sugar", .052, "sugar");
+          const targetRadius = clamp(.085 + Math.sqrt(node.flow + .01) * .035 + node.children.length * .012, .085, .33);
+          node.radius = lerp(node.radius, targetRadius, .004);
+          node.flow *= .9975;
+        }
+
+        for (const edge of this.grafts) {
+          if (!edge.alive) continue;
+          const a = this.nodeById.get(edge.a), b = this.nodeById.get(edge.b);
+          if (!a?.alive || !b?.alive) { edge.alive = false; continue; }
+          const pa = this.plants.get(a.plantId), pb = this.plants.get(b.plantId);
+          if (!pa || !pb) continue;
+          const bias = (pa.genome.exchangeBias + pb.genome.exchangeBias) * .5;
+          if (a.water > b.water) this._moveResource(a, b, "water", .018 * bias, "graft");
+          else this._moveResource(b, a, "water", .018 * (1 - bias + .2), "graft");
+          if (a.sugar > b.sugar) this._moveResource(a, b, "sugar", .014 * bias, "graft");
+          else this._moveResource(b, a, "sugar", .014 * (1 - bias + .2), "graft");
+        }
+      }
+
+      _dropLeaf(leaf) {
+        if (!leaf.alive) return;
+        leaf.alive = false;
+        const plant = this.plants.get(leaf.plantId);
+        this.litter.push({
+          x: leaf.x,
+          y: leaf.y,
+          vx: this.climate().wind * .008 + this.rng.range(-.012, .012),
+          vy: .01,
+          angle: leaf.angle,
+          spin: this.rng.range(-.03, .03),
+          length: leaf.length,
+          width: leaf.width,
+          hue: plant ? plant.genome.hue : leaf.hue,
+          tag: plant ? plant.genome.graftTag : 0,
+          age: 0,
+          landed: false,
+          alive: true,
+        });
+      }
+
+      _killNode(node) {
+        if (!node.alive) return;
+        node.alive = false;
+        node.deadAt = this.tick;
+        this.stats.nodeDeaths++;
+        for (const bud of this.buds) if (bud.alive && bud.nodeId === node.id) bud.alive = false;
+        for (const leaf of this.leaves) if (leaf.alive && leaf.nodeId === node.id) this._dropLeaf(leaf);
+        for (const flower of this.flowers) if (flower.alive && flower.nodeId === node.id) flower.alive = false;
+      }
+
+      _senescence() {
+        const climate = this.climate();
+        for (const leaf of this.leaves) {
+          if (!leaf.alive) continue;
+          const age = this.tick - leaf.born;
+          const dryStress = climate.rain < .08 ? .25 : 0;
+          if (age > leaf.lifespan * (1 - dryStress)) this._dropLeaf(leaf);
+        }
+        for (const node of this.nodes) {
+          if (!node.alive) continue;
+          const plant = this.plants.get(node.plantId);
+          if (!plant) continue;
+          const age = this.tick - node.born;
+          const maxAge = 2500 + plant.genome.woodiness * 5200;
+          const parentDead = node.parentId && !this.nodeById.get(node.parentId)?.alive;
+          if (age > maxAge) node.integrity -= .0032;
+          if (parentDead) node.integrity -= .012;
+          if (climate.gust > .82 && node.kind === "stem") {
+            const height = Math.max(0, this.surfaceAt(node.x) - node.y);
+            const risk = climate.gust * height / 60 * (1 - plant.genome.woodiness) * (0.23 / Math.max(.08, node.radius));
+            if (this.rng.chance(risk * .0024)) node.integrity -= .45;
+          }
+          if (node.integrity <= 0) this._killNode(node);
+        }
+        for (const plant of this.plants.values()) {
+          if (!plant.alive) continue;
+          plant.alive = plant.nodeIds.some(id => this.nodeById.get(id)?.alive);
+        }
+      }
+
+      _environment() {
+        const c = this.climate();
+        const drops = Math.floor(c.rain * this.w * .045);
+        for (let d = 0; d < drops; d++) {
+          const x = this.rng.int(0, this.w - 1);
+          const i = this.idx(x, Math.ceil(this.surface[x] + .1));
+          const capacity = .65 + this.humus[i] * .3 - this.rock[i] * .18;
+          this.moisture[i] = Math.min(capacity, this.moisture[i] + .035);
+          if (this.rainDrops.length < 170 && this.rng.chance(.45)) {
+            this.rainDrops.push({ x: x + this.rng.next(), y: this.rng.range(-4, 2), speed: this.rng.range(.42, .7) });
+          }
+        }
+
+        const trials = this.w * 2;
+        for (let k = 0; k < trials; k++) {
+          const x = this.rng.int(0, this.w - 1);
+          const y0 = Math.ceil(this.surface[x]);
+          if (y0 >= this.h - 1) continue;
+          const y = this.rng.int(y0, this.h - 2);
+          const i = this.idx(x, y);
+          let m = this.moisture[i];
+          if (m <= .002) continue;
+          const hum = this.humus[i];
+          if (y <= y0 + 1) {
+            const evap = (.00034 + .00055 * this.lightAt(x, y0 - .1)) * (1 - hum * .72) * (1 - c.rain * .7);
+            this.moisture[i] = Math.max(0, this.moisture[i] - evap);
+            m = this.moisture[i];
+          }
+          const downI = this.idx(x, y + 1);
+          const permeability = (1 - this.rock[downI]) * (1 - hum * .32);
+          if (m > this.moisture[downI] + .035 && this.rng.chance(.36 * permeability)) {
+            const flow = Math.min(.012, (m - this.moisture[downI]) * .16);
+            this.moisture[i] -= flow;
+            this.moisture[downI] = clamp(this.moisture[downI] + flow, 0, .95);
+          } else {
+            const nx = clamp(x + (this.rng.chance(.5) ? -1 : 1), 0, this.w - 1);
+            const ni = this.idx(nx, y);
+            if (y >= this.surface[nx] && this.moisture[i] > this.moisture[ni] + .06) {
+              const flow = Math.min(.005, (this.moisture[i] - this.moisture[ni]) * .07);
+              this.moisture[i] -= flow;
+              this.moisture[ni] += flow;
+            }
+          }
+        }
+
+        for (const drop of this.rainDrops) drop.y += drop.speed;
+        this.rainDrops = this.rainDrops.filter(d => d.y < this.surfaceAt(d.x));
+
+        for (const piece of this.litter) {
+          if (!piece.alive) continue;
+          piece.age++;
+          if (!piece.landed) {
+            piece.vx += c.wind * .00012;
+            piece.vy += .0027;
+            piece.x = clamp(piece.x + piece.vx, .1, this.w - .1);
+            piece.y += piece.vy;
+            piece.angle += piece.spin;
+            const sy = this.surfaceAt(piece.x) - .04;
+            if (piece.y >= sy) { piece.y = sy; piece.landed = true; piece.vx = piece.vy = 0; }
+          } else if (piece.age > 420) {
+            const i = this.idx(piece.x, this.surfaceAt(piece.x) + .3);
+            this.humus[i] = clamp(this.humus[i] + .0008 * piece.length, 0, 1);
+            this.memoryTag[i] = piece.tag;
+            if (piece.age > 1200) piece.alive = false;
+          }
+        }
+        if (this.litter.length > 2200) this.litter = this.litter.filter(p => p.alive).slice(-1500);
+      }
+
+      _updatePackets() {
+        for (const p of this.packets) p.t += .075;
+        this.packets = this.packets.filter(p => p.t < 1 && this.nodeById.get(p.a) && this.nodeById.get(p.b));
+      }
+
+      step() {
+        this.tick++;
+        if (this.tick % 3 === 0) this._environment();
+        if (this.tick % 11 === 0) this._rebuildLight();
+        this._resources();
+        for (const bud of this.buds) this._growBud(bud);
+        this._updateFlowers();
+        this._updateSeeds();
+        if (this.tick % 7 === 0) this._senescence();
+        this._updatePackets();
+        if (this.tick % 300 === 0) {
+          this.buds = this.buds.filter(b => b.alive);
+          this.leaves = this.leaves.filter(l => l.alive || this.tick - l.born < 20);
+          this.flowers = this.flowers.filter(f => f.alive);
+          this.grafts = this.grafts.filter(g => g.alive);
+        }
+        return this;
+      }
+
+      run(ticks) { for (let i = 0; i < ticks; i++) this.step(); return this; }
+
+      report() {
+        const livingNodes = this.nodes.filter(n => n.alive);
+        const livingPlants = [...this.plants.values()].filter(p => p.alive);
+        const activeBuds = this.buds.filter(b => b.alive);
+        const livingLeaves = this.leaves.filter(l => l.alive);
+        const liveSeeds = this.seeds.filter(s => s.alive);
+        const reproductiveGenomes = new Set(livingPlants.map(p => p.genomeId));
+        const generations = livingPlants.map(p => p.generation);
+        const budNodes = activeBuds.map(b => this.nodeById.get(b.nodeId)).filter(Boolean);
+        const endpoints = livingNodes.filter(n => n.children.filter(id => this.nodeById.get(id)?.alive).length === 0).length;
+        let closePairs = 0;
+        for (const n of livingNodes) {
+          const near = this.nearbyNodes(n.x, n.y, .72).filter(q => q.node.alive && q.node.id !== n.id).length;
+          if (near >= 4) closePairs++;
+        }
+        return {
+          seed: this.seed,
+          tick: this.tick,
+          dimensions: `${this.w}×${this.h}`,
+          plants: livingPlants.length,
+          nodes: livingNodes.length,
+          leaves: livingLeaves.length,
+          activeBuds: activeBuds.length,
+          meanBudPotential: activeBuds.length ? activeBuds.reduce((sum, b) => sum + b.potential, 0) / activeBuds.length : 0,
+          meanBudSteps: activeBuds.length ? activeBuds.reduce((sum, b) => sum + b.step, 0) / activeBuds.length : 0,
+          meanBudStarvation: activeBuds.length ? activeBuds.reduce((sum, b) => sum + b.starved, 0) / activeBuds.length : 0,
+          airborneOrBankedSeeds: liveSeeds.length,
+          genomeVariantsPresent: reproductiveGenomes.size,
+          maxGeneration: generations.length ? Math.max(...generations) : 0,
+          flowers: this.flowers.filter(f => f.alive).length,
+          storedSugar: livingNodes.reduce((sum, n) => sum + n.sugar, 0),
+          storedWater: livingNodes.reduce((sum, n) => sum + n.water, 0),
+          meanBudSugar: budNodes.length ? budNodes.reduce((sum, n) => sum + n.sugar, 0) / budNodes.length : 0,
+          meanBudWater: budNodes.length ? budNodes.reduce((sum, n) => sum + n.water, 0) / budNodes.length : 0,
+          propagulesReleased: this.stats.propagules,
+          germinations: this.stats.germinations,
+          lastPropaguleTick: this.stats.lastPropagule,
+          lastGerminationTick: this.stats.lastGermination,
+          graftsFormed: this.stats.grafts,
+          endpointFraction: livingNodes.length ? endpoints / livingNodes.length : 0,
+          denseNodeFraction: livingNodes.length ? closePairs / livingNodes.length : 0,
+          history: { ...this.stats },
+        };
+      }
+    }
+
+    globalThis.PalimpsestCore = { World, RNG, baseGenome, mutateGenome, clamp, lerp, TAU };
+  })();
+  </script>
+
+  <script>
+  (() => {
+    "use strict";
+    const { World, clamp, lerp, TAU } = globalThis.PalimpsestCore;
+    const canvas = document.getElementById("world");
+    const ctx = canvas.getContext("2d", { alpha: false });
+    const stage = document.getElementById("stage");
+    const tickReadout = document.getElementById("tickReadout");
+    const dimensionsReadout = document.getElementById("dimensionsReadout");
+    const seedInput = document.getElementById("seedInput");
+    const replayBtn = document.getElementById("replayBtn");
+    const newBtn = document.getElementById("newBtn");
+    const pauseBtn = document.getElementById("pauseBtn");
+    const speedSelect = document.getElementById("speedSelect");
+    const fatal = document.getElementById("fatal");
+    let world;
+    let paused = false;
+    let lastTime = performance.now();
+    let accumulator = 0;
+    let viewport = { width: 1, height: 1, dpr: 1, sx: 1, sy: 1 };
+    let lastSeed = null;
+
+    function secureSeed() {
+      const a = new Uint32Array(1);
+      if (globalThis.crypto?.getRandomValues) crypto.getRandomValues(a);
+      else a[0] = (Date.now() ^ Math.floor(performance.now() * 1000000)) >>> 0;
+      if (a[0] === lastSeed) a[0] = (a[0] + 0x9e3779b9) >>> 0;
+      return a[0] >>> 0;
+    }
+
+    function parseSeed(value) {
+      const text = String(value ?? "").trim();
+      if (!text) return secureSeed();
+      if (/^0x[0-9a-f]+$/i.test(text)) return Number.parseInt(text, 16) >>> 0;
+      const numeric = Number(text.replace(/[^0-9-]/g, ""));
+      if (Number.isFinite(numeric)) return numeric >>> 0;
+      let h = 2166136261;
+      for (let i = 0; i < text.length; i++) h = Math.imul(h ^ text.charCodeAt(i), 16777619);
+      return h >>> 0;
+    }
+
+    function reset(seed) {
+      const normalized = seed >>> 0;
+      lastSeed = normalized;
+      world = new World(normalized, { width: 144, height: 80, founders: 12 });
+      seedInput.value = String(normalized);
+      tickReadout.textContent = "0";
+      dimensionsReadout.textContent = `${world.w}×${world.h}`;
+      paused = false;
+      pauseBtn.textContent = "Ⅱ";
+      pauseBtn.setAttribute("aria-label", "Pause");
+      try {
+        const url = new URL(location.href);
+        url.searchParams.set("seed", String(normalized));
+        history.replaceState(null, "", url);
+      } catch (_) {}
+      globalThis.palimpsestWorld = world;
+    }
+
+    function resize() {
+      const rect = stage.getBoundingClientRect();
+      const dpr = Math.min(2, globalThis.devicePixelRatio || 1);
+      const width = Math.max(1, Math.round(rect.width));
+      const height = Math.max(1, Math.round(rect.height));
+      canvas.width = Math.round(width * dpr);
+      canvas.height = Math.round(height * dpr);
+      canvas.style.width = `${width}px`;
+      canvas.style.height = `${height}px`;
+      viewport = { width, height, dpr, sx: width / 144, sy: height / 80 };
+    }
+
+    const X = x => x * viewport.sx;
+    const Y = y => y * viewport.sy;
+
+    function nodeSway(node, climate) {
+      if (node.y >= world.surfaceAt(node.x) || node.kind === "root" || node.kind === "rootTip") return 0;
+      const height = world.surfaceAt(node.x) - node.y;
+      return climate.wind * Math.pow(height / 20, 1.45) * .33 + Math.sin(world.tick * .035 + node.x) * .025 * height;
+    }
+
+    function plantColor(node, lightness = 45, alpha = 1) {
+      const plant = world.plants.get(node.plantId);
+      const hue = plant?.genome.hue ?? 103;
+      return `hsla(${hue}, 37%, ${lightness}%, ${alpha})`;
+    }
+
+    function drawSky(climate) {
+      const sun = world.daylight();
+      const top = sun > .2 ? [18, 42, 52] : [5, 15, 23];
+      const bottom = sun > .2 ? [84, 111, 105] : [19, 32, 37];
+      const mix = clamp(sun, 0, 1);
+      const grad = ctx.createLinearGradient(0, 0, 0, viewport.height * .7);
+      grad.addColorStop(0, `rgb(${lerp(5, top[0], mix)},${lerp(14, top[1], mix)},${lerp(20, top[2], mix)})`);
+      grad.addColorStop(1, `rgb(${lerp(14, bottom[0], mix)},${lerp(27, bottom[1], mix)},${lerp(32, bottom[2], mix)})`);
+      ctx.fillStyle = grad;
+      ctx.fillRect(0, 0, viewport.width, viewport.height);
+
+      const dayPhase = ((world.tick / 260 + .18) % 1 + 1) % 1;
+      const sunX = viewport.width * dayPhase;
+      const sunY = viewport.height * (.27 - .2 * Math.sin(dayPhase * Math.PI));
+      ctx.save();
+      ctx.globalAlpha = .22 + sun * .2;
+      ctx.fillStyle = sun > .15 ? "#f5df9a" : "#d8e3dd";
+      ctx.beginPath();
+      ctx.arc(sunX, sunY, 4 + sun * 5, 0, TAU);
+      ctx.fill();
+      ctx.restore();
+
+      if (sun > .12) {
+        ctx.save();
+        ctx.globalAlpha = .025 + sun * .03;
+        ctx.fillStyle = "#fff1b8";
+        for (let i = 0; i < 9; i++) {
+          const x = ((i * 47 + world.seed % 83) % 151) / 151 * viewport.width;
+          ctx.fillRect(x, 0, viewport.sx * (1.8 + (i % 3)), viewport.height * .68);
+        }
+        ctx.restore();
+      }
+    }
+
+    function drawSoil() {
+      ctx.save();
+      ctx.beginPath();
+      ctx.moveTo(0, viewport.height);
+      ctx.lineTo(0, Y(world.surface[0]));
+      for (let x = 0; x < world.w; x++) ctx.lineTo(X(x), Y(world.surface[x]));
+      ctx.lineTo(viewport.width, viewport.height);
+      ctx.closePath();
+      const grad = ctx.createLinearGradient(0, viewport.height * .45, 0, viewport.height);
+      grad.addColorStop(0, "#403b2b");
+      grad.addColorStop(.18, "#302f25");
+      grad.addColorStop(1, "#171e1c");
+      ctx.fillStyle = grad;
+      ctx.fill();
+
+      const stepX = Math.max(2, Math.ceil(2 / viewport.sx));
+      const stepY = 2;
+      for (let y = Math.floor(world.h * .48); y < world.h; y += stepY) {
+        for (let x = 0; x < world.w; x += stepX) {
+          if (y < world.surface[x]) continue;
+          const i = world.idx(x, y);
+          const wet = world.moisture[i];
+          const hum = world.humus[i];
+          const rock = world.rock[i];
+          if (wet > .12) {
+            ctx.fillStyle = `rgba(65, 144, 160, ${clamp((wet - .1) * .38, .015, .22)})`;
+            ctx.beginPath();
+            ctx.arc(X(x + .3), Y(y + .35), Math.max(.55, viewport.sx * .16 + wet), 0, TAU);
+            ctx.fill();
+          }
+          if (hum > .08) {
+            const tagHue = [37, 319, 205, 65][world.memoryTag[i] & 3];
+            ctx.fillStyle = `hsla(${tagHue}, 27%, 27%, ${clamp(hum * .24, .025, .18)})`;
+            ctx.fillRect(X(x), Y(y), Math.max(1, viewport.sx * .75), Math.max(1, viewport.sy * .72));
+          } else if (rock > .67 && ((x + y) & 1) === 0) {
+            ctx.fillStyle = `rgba(142, 137, 112, ${(rock - .6) * .16})`;
+            ctx.fillRect(X(x + .2), Y(y + .25), Math.max(.8, viewport.sx * .3), Math.max(.7, viewport.sy * .22));
+          }
+        }
+      }
+      ctx.strokeStyle = "rgba(181, 169, 123, .34)";
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      for (let x = 0; x < world.w; x++) {
+        if (x === 0) ctx.moveTo(X(x), Y(world.surface[x]));
+        else ctx.lineTo(X(x), Y(world.surface[x]));
+      }
+      ctx.stroke();
+      ctx.restore();
+    }
+
+    function drawLitter() {
+      ctx.save();
+      ctx.lineCap = "round";
+      for (const p of world.litter) {
+        if (!p.alive) continue;
+        const fade = p.landed ? clamp(1 - (p.age - 350) / 1000, .12, .75) : .72;
+        ctx.save();
+        ctx.translate(X(p.x), Y(p.y));
+        ctx.rotate(p.angle);
+        ctx.strokeStyle = `hsla(${lerp(p.hue, 38, .76)}, 36%, 43%, ${fade})`;
+        ctx.lineWidth = Math.max(1, p.width * viewport.sy * .8);
+        ctx.beginPath();
+        ctx.moveTo(-X(p.length * .45), 0);
+        ctx.quadraticCurveTo(0, -Y(p.width * .3), X(p.length * .45), 0);
+        ctx.stroke();
+        ctx.restore();
+      }
+      ctx.restore();
+    }
+
+    function drawStructures(climate, roots) {
+      ctx.save();
+      ctx.lineCap = "round";
+      ctx.lineJoin = "round";
+      for (const node of world.nodes) {
+        if (!node.parentId) continue;
+        const parent = world.nodeById.get(node.parentId);
+        if (!parent) continue;
+        const isRoot = node.kind === "root" || node.kind === "rootTip" || node.y >= world.surfaceAt(node.x);
+        if (isRoot !== roots) continue;
+        const dead = !node.alive || !parent.alive;
+        if (dead && world.tick - Math.max(node.deadAt, parent.deadAt) > 850) continue;
+        const ax = parent.x + nodeSway(parent, climate);
+        const bx = node.x + nodeSway(node, climate);
+        const alpha = dead ? clamp(1 - (world.tick - Math.max(node.deadAt, parent.deadAt)) / 900, .08, .55) : (roots ? .67 : .96);
+        const avgRadius = (node.radius + parent.radius) * .5;
+        ctx.strokeStyle = dead
+          ? `rgba(112, 87, 58, ${alpha})`
+          : roots
+            ? plantColor(node, 65, alpha)
+            : plantColor(node, 38 + avgRadius * 25, alpha);
+        ctx.lineWidth = Math.max(1, avgRadius * viewport.sy * 2.1);
+        ctx.beginPath();
+        ctx.moveTo(X(ax), Y(parent.y));
+        const mx = (ax + bx) * .5 + Math.sin(node.id * 2.13) * .08;
+        const my = (parent.y + node.y) * .5;
+        ctx.quadraticCurveTo(X(mx), Y(my), X(bx), Y(node.y));
+        ctx.stroke();
+      }
+
+      if (roots) {
+        for (const edge of world.grafts) {
+          if (!edge.alive) continue;
+          const a = world.nodeById.get(edge.a), b = world.nodeById.get(edge.b);
+          if (!a || !b) continue;
+          ctx.setLineDash([2, 2]);
+          ctx.strokeStyle = "rgba(191, 130, 213, .85)";
+          ctx.lineWidth = 1.6;
+          ctx.beginPath();
+          ctx.moveTo(X(a.x), Y(a.y));
+          ctx.lineTo(X(b.x), Y(b.y));
+          ctx.stroke();
+          ctx.setLineDash([]);
+          ctx.fillStyle = "#d39ce4";
+          ctx.beginPath();
+          ctx.arc(X((a.x + b.x) / 2), Y((a.y + b.y) / 2), 2.2, 0, TAU);
+          ctx.fill();
+        }
+      }
+      ctx.restore();
+    }
+
+    function drawLeaves(climate) {
+      ctx.save();
+      for (const leaf of world.leaves) {
+        if (!leaf.alive) continue;
+        const node = world.nodeById.get(leaf.nodeId);
+        if (!node?.alive) continue;
+        const sway = nodeSway(node, climate);
+        const angle = leaf.angle + climate.wind * .06 + Math.sin(world.tick * .025 + leaf.nodeId) * .025;
+        const age = world.tick - leaf.born;
+        const senesce = clamp((age - leaf.lifespan * .78) / (leaf.lifespan * .22), 0, 1);
+        const lightness = lerp(39 + leaf.light * 9, 48, senesce);
+        const hue = lerp(leaf.hue, 48, senesce);
+        const len = X(leaf.length);
+        const wid = Math.max(1.2, Y(leaf.width));
+        ctx.save();
+        ctx.translate(X(node.x + sway), Y(node.y));
+        ctx.rotate(angle);
+        const grad = ctx.createLinearGradient(0, 0, len, 0);
+        grad.addColorStop(0, `hsla(${hue - 4}, 39%, ${lightness - 6}%, .96)`);
+        grad.addColorStop(.7, `hsla(${hue}, 52%, ${lightness}%, .98)`);
+        grad.addColorStop(1, `hsla(${hue + 5}, 48%, ${lightness + 5}%, .92)`);
+        ctx.fillStyle = grad;
+        ctx.beginPath();
+        ctx.moveTo(0, 0);
+        ctx.bezierCurveTo(len * .28, -wid, len * .78, -wid * .72, len, 0);
+        ctx.bezierCurveTo(len * .74, wid * .72, len * .28, wid, 0, 0);
+        ctx.fill();
+        ctx.strokeStyle = `hsla(${hue - 10}, 42%, ${lightness - 13}%, .7)`;
+        ctx.lineWidth = .65;
+        ctx.beginPath();
+        ctx.moveTo(0, 0);
+        ctx.lineTo(len * .9, 0);
+        ctx.stroke();
+        ctx.restore();
+      }
+      ctx.restore();
+    }
+
+    function drawBudsAndFlowers(climate) {
+      for (const bud of world.buds) {
+        if (!bud.alive) continue;
+        const node = world.nodeById.get(bud.nodeId);
+        if (!node?.alive) continue;
+        const plant = world.plants.get(bud.plantId);
+        const dormant = bud.dormantUntil > world.tick;
+        const sway = nodeSway(node, climate);
+        const size = clamp(1.4 + bud.potential * .08, 1.7, 3.5);
+        ctx.save();
+        ctx.translate(X(node.x + sway), Y(node.y));
+        ctx.rotate(bud.heading);
+        ctx.fillStyle = bud.type === "root"
+          ? (dormant ? "rgba(132, 164, 151, .58)" : "#a7d6c3")
+          : (dormant ? "rgba(120, 139, 83, .62)" : `hsl(${plant?.genome.hue ?? 103}, 68%, 67%)`);
+        ctx.shadowColor = ctx.fillStyle;
+        ctx.shadowBlur = dormant ? 0 : 5;
+        ctx.beginPath();
+        ctx.moveTo(0, 0);
+        ctx.quadraticCurveTo(size * 1.45, -size * .65, size * 2.15, 0);
+        ctx.quadraticCurveTo(size * 1.4, size * .65, 0, 0);
+        ctx.fill();
+        ctx.restore();
+      }
+
+      for (const flower of world.flowers) {
+        if (!flower.alive) continue;
+        const node = world.nodeById.get(flower.nodeId);
+        if (!node?.alive) continue;
+        const sway = nodeSway(node, climate);
+        const stage = flower.released ? 1 : flower.stage;
+        const x = X(node.x + sway), y = Y(node.y);
+        ctx.save();
+        ctx.translate(x, y);
+        ctx.rotate(climate.wind * .06);
+        if (stage < .28) {
+          ctx.fillStyle = `hsl(${flower.hue + 12}, 55%, 61%)`;
+          ctx.beginPath();
+          ctx.ellipse(0, -2, 2.1, 3.4, 0, 0, TAU);
+          ctx.fill();
+        } else if (!flower.released) {
+          const rays = 5 + Math.floor(stage * 4);
+          for (let i = 0; i < rays; i++) {
+            const a = i / rays * TAU;
+            ctx.save();
+            ctx.rotate(a);
+            ctx.fillStyle = `hsla(${lerp(flower.hue + 18, 53, stage)}, 63%, 66%, .9)`;
+            ctx.beginPath();
+            ctx.ellipse(0, -3.2 - stage * 2, 1.2 + stage, 3.1 + stage * 2.2, 0, 0, TAU);
+            ctx.fill();
+            ctx.restore();
+          }
+          ctx.fillStyle = "#e2bc63";
+          ctx.beginPath();
+          ctx.arc(0, 0, 1.8 + stage * 1.5, 0, TAU);
+          ctx.fill();
+        } else {
+          ctx.strokeStyle = "rgba(224, 208, 151, .86)";
+          ctx.fillStyle = "#a47d43";
+          ctx.lineWidth = .8;
+          for (let i = 0; i < 9; i++) {
+            const a = i / 9 * TAU + .2;
+            ctx.beginPath();
+            ctx.moveTo(0, 0);
+            ctx.lineTo(Math.cos(a) * 5.4, Math.sin(a) * 5.4);
+            ctx.stroke();
+          }
+          ctx.beginPath();
+          ctx.arc(0, 0, 2.2, 0, TAU);
+          ctx.fill();
+        }
+        ctx.restore();
+      }
+    }
+
+    function drawSeedsAndRain(climate) {
+      ctx.save();
+      ctx.strokeStyle = `rgba(111, 190, 211, ${.24 + world.climate().rain * .46})`;
+      ctx.lineWidth = 1;
+      for (const d of world.rainDrops) {
+        ctx.beginPath();
+        ctx.moveTo(X(d.x), Y(d.y));
+        ctx.lineTo(X(d.x - climate.wind * .05), Y(d.y - .55));
+        ctx.stroke();
+      }
+
+      for (const seed of world.seeds) {
+        if (!seed.alive) continue;
+        const x = X(seed.x), y = Y(seed.y);
+        const alpha = seed.landed ? .72 : .96;
+        if (!seed.landed && seed.dispersal > .55) {
+          ctx.strokeStyle = `rgba(237, 225, 184, ${alpha * .62})`;
+          ctx.lineWidth = .6;
+          for (let i = 0; i < 4; i++) {
+            const a = i / 4 * TAU + seed.age * .03;
+            ctx.beginPath();
+            ctx.moveTo(x, y);
+            ctx.lineTo(x + Math.cos(a) * (2.5 + seed.dispersal), y + Math.sin(a) * (2.5 + seed.dispersal));
+            ctx.stroke();
+          }
+        }
+        ctx.fillStyle = `rgba(198, 151, 73, ${alpha})`;
+        ctx.beginPath();
+        ctx.ellipse(x, y, 1.2 + seed.mass * .45, .8 + seed.mass * .25, seed.age * .02, 0, TAU);
+        ctx.fill();
+      }
+      ctx.restore();
+    }
+
+    function drawPackets(climate) {
+      for (const p of world.packets) {
+        const a = world.nodeById.get(p.a), b = world.nodeById.get(p.b);
+        if (!a || !b) continue;
+        const ax = a.x + nodeSway(a, climate), bx = b.x + nodeSway(b, climate);
+        const x = X(lerp(ax, bx, p.t));
+        const y = Y(lerp(a.y, b.y, p.t));
+        const color = p.kind === "water" ? "#65c7e2" : p.kind === "sugar" ? "#f0bf55" : "#d293e7";
+        ctx.save();
+        ctx.fillStyle = color;
+        ctx.shadowColor = color;
+        ctx.shadowBlur = 5;
+        ctx.beginPath();
+        ctx.arc(x, y, 1.35, 0, TAU);
+        ctx.fill();
+        ctx.restore();
+      }
+    }
+
+    function draw() {
+      const c = world.climate();
+      ctx.setTransform(viewport.dpr, 0, 0, viewport.dpr, 0, 0);
+      ctx.clearRect(0, 0, viewport.width, viewport.height);
+      drawSky(c);
+      drawSoil();
+      drawLitter();
+      drawStructures(c, true);
+      drawStructures(c, false);
+      drawLeaves(c);
+      drawBudsAndFlowers(c);
+      drawSeedsAndRain(c);
+      drawPackets(c);
+    }
+
+    function togglePause() {
+      paused = !paused;
+      pauseBtn.textContent = paused ? "▶" : "Ⅱ";
+      pauseBtn.setAttribute("aria-label", paused ? "Resume" : "Pause");
+      lastTime = performance.now();
+      accumulator = 0;
+    }
+
+    function frame(now) {
+      try {
+        const dt = Math.min(80, now - lastTime);
+        lastTime = now;
+        if (!paused) {
+          const speed = Number(speedSelect.value) || 4;
+          accumulator += dt * speed * .055;
+          const steps = Math.min(80, Math.floor(accumulator));
+          accumulator -= steps;
+          for (let i = 0; i < steps; i++) world.step();
+        }
+        tickReadout.textContent = world.tick.toLocaleString("en-US");
+        draw();
+        requestAnimationFrame(frame);
+      } catch (error) {
+        console.error(error);
+        fatal.style.display = "grid";
+        fatal.textContent = `The garden stopped: ${error?.message || error}`;
+      }
+    }
+
+    replayBtn.addEventListener("click", () => reset(parseSeed(seedInput.value)));
+    newBtn.addEventListener("click", () => reset(secureSeed()));
+    pauseBtn.addEventListener("click", togglePause);
+    seedInput.addEventListener("keydown", event => {
+      if (event.key === "Enter") { event.preventDefault(); reset(parseSeed(seedInput.value)); seedInput.blur(); }
+    });
+    addEventListener("keydown", event => {
+      if (event.target === seedInput || event.target?.matches?.("input, select, textarea")) return;
+      if (event.key === " ") { event.preventDefault(); togglePause(); }
+      else if (event.key.toLowerCase() === "n") reset(secureSeed());
+      else if (event.key.toLowerCase() === "r") {
+        const report = world.report();
+        console.group(`Palimpsest Garden report · seed ${world.seed} · tick ${world.tick}`);
+        console.log(report);
+        console.groupEnd();
+      }
+    });
+    addEventListener("resize", resize, { passive: true });
+
+    const initial = (() => {
+      try {
+        const value = new URL(location.href).searchParams.get("seed");
+        return value === null ? secureSeed() : parseSeed(value);
+      } catch (_) { return secureSeed(); }
+    })();
+    resize();
+    reset(initial);
+    console.info("Palimpsest Garden II: Space pauses · N creates a new world · R prints a headless-style report · enter a seed and press Replay to reproduce it exactly.");
+    requestAnimationFrame(frame);
+  })();
+  </script>
+</body>
+</html>

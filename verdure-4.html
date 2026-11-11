@@ -1,0 +1,548 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no" />
+    <title>verdure 4 — a bud is a walker that lays stem behind it</title>
+    <style>
+      :root { color-scheme: dark; }
+      * { box-sizing: border-box; }
+      html, body { margin: 0; height: 100%; background: #05070a; color: #cfd8d2;
+        font: 11px ui-monospace, SFMono-Regular, Menlo, monospace; overflow: hidden; }
+      body { display: flex; flex-direction: column; padding: env(safe-area-inset-top) 0 env(safe-area-inset-bottom); }
+      #bar { flex: 0 0 auto; display: flex; gap: 5px; align-items: center; padding: 6px 8px;
+        border-bottom: 1px solid #1b2620; overflow-x: auto; white-space: nowrap; }
+      button { font: inherit; color: #cfd8d2; background: #131d18; border: 1px solid #2b3a31;
+        border-radius: 6px; padding: 6px 8px; min-height: 32px; }
+      button:active { background: #1d2c24; }
+      #wrap { flex: 1 1 auto; position: relative; min-height: 0; }
+      canvas { position: absolute; inset: 0; width: 100%; height: 100%; image-rendering: pixelated; }
+      #hud { flex: 0 0 auto; padding: 5px 8px; border-top: 1px solid #1b2620; line-height: 1.45; color: #8fa396; }
+      #hud b { color: #e3ece5; font-weight: 600; }
+      #kinds { padding: 3px 8px; color: #b6c6ba; line-height: 1.5; }
+      #keys { padding: 3px 8px 7px; color: #64766b; line-height: 1.5; max-height: 30%; overflow-y: auto; }
+    </style>
+  </head>
+  <body>
+    <div id="bar"></div>
+    <div id="wrap"><canvas id="c"></canvas></div>
+    <div id="hud">starting...</div>
+    <div id="kinds"></div>
+    <div id="keys"></div>
+    <script>
+/* ==== SIM CORE (DOM-free) ==== */
+// verdure-4
+//
+// Two things, put together.
+//
+// From verdure-1/2, the world: light seeps in along the top edge, water along
+// the bottom, both spreading by nothing but averaging with their neighbours.
+// Living tissue holds both at zero, so it drinks whatever reaches its surface
+// and casts a halo of shortage around itself. There is no bank, no toll and no
+// maintenance charge. A plant grows when the fields let it and dies when they
+// stop.
+//
+// From spring-fall-sand-garden, the plant: a bud is not a place in a plan, it
+// is a walker. It lays a cell of stem where it stands and steps forward. Every
+// so often it leaves a pair of dormant buds behind at the sides. A dormant bud
+// does nothing at all until the local supply is good enough to wake it.
+//
+// That last rule is the join. What a plant is made of comes from its genome;
+// how much of it ever happens comes from where it is standing. A crowded plant
+// keeps one axis. The same genome in the open wakes its side buds and bushes
+// out. Nothing is told to do either.
+
+function createSim(cfg) {
+  const COLS = cfg.cols | 0, ROWS = cfg.rows | 0, N = COLS * ROWS;
+
+  const P = {
+    RELAX: 3, SAPRELAX: 2,
+    SHADOW: 0.25,     // what a cell of tissue leaves of the daylight it stood in
+    TAKE: 0.35,
+    NEED: 0.02,       // sap a bud needs to lay one cell
+    GROW: 0.03,
+    RESPIRE: 0.004,   // so that tissue which has stopped growing can die
+    WITHER: 0.005, STARVE: 0.002,
+    SENESCE: 0.0010,  // tissue ages, so a plant that has stopped growing goes
+    SPEND: 0.25,      // chance a flower is spent by setting one seed
+    TURN: 0.30,       // a turn is this much less likely than carrying straight on
+    TITHE: 0.10, SEED_COST: 3,
+    FALL: 0.7,        // a propagule's bias downward
+    PROP_LIFE: 900,
+    SOIL: 3,          // rows at the bottom a propagule may germinate in
+    SEEDS: 60,
+    EVENTS: 1,
+    MUT: 0.5,
+    SHADE: 1,         // 0 = PIN control: tissue no longer draws the fields down
+    WAKE_ON: 1,       // 0 = control: side buds wake regardless of supply
+  };
+  if (cfg.params) for (const k in cfg.params) P[k] = cfg.params[k];
+
+  let s0 = (cfg.seed | 0) || 1;
+  const rand = () => { s0 ^= s0 << 13; s0 ^= s0 >>> 17; s0 ^= s0 << 5; return ((s0 >>> 0) % 1e6) / 1e6; };
+  const ri = (n) => (rand() * n) | 0;
+  const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
+
+  const DX = [0, 1, 1, 1, 0, -1, -1, -1];
+  const DY = [-1, -1, 0, 1, 1, 1, 0, -1];
+  const UP = 0;
+
+  const EMPTY = 0, STEM = 1, LEAF = 2, BUD = 3, DBUD = 4, FLOWER = 5;
+  const cell = new Uint8Array(N);
+  const gid = new Int32Array(N);
+  const head = new Uint8Array(N);
+  const left = new Uint8Array(N);    // internodes this bud still has to run
+  const pid = new Int32Array(N);     // which individual this cell belongs to
+  const ord = new Uint8Array(N);     // 0 = the leading shoot, 1 = a side shoot
+  const lit = new Float32Array(N), wet = new Float32Array(N);
+  const sap = new Float32Array(N), juice = new Float32Array(N);
+  const bank = new Float32Array(N);
+  const t1 = new Float32Array(N), t2 = new Float32Array(N);
+
+  const FLOOR = ROWS - 1;
+  const X = (i) => i % COLS, Y = (i) => (i / COLS) | 0;
+  const wrapX = (x) => (x + COLS) % COLS;
+  function nb(i, d) {
+    const y = Y(i) + DY[d];
+    if (y < 0 || y >= FLOOR) return -1;
+    return y * COLS + wrapX(X(i) + DX[d]);
+  }
+
+  const genomes = [];
+  const spores = [];
+  let tick = 0, liveN = 0, nextPid = 1;
+  const stats = { laid: 0, hubs: 0, woke: 0, flowered: 0, withered: 0, seeds: 0, germs: 0 };
+
+  // ---- the genome: six small numbers, each one a visible part of the plant --
+  //   height : internodes the first bud runs before it flowers
+  //   every  : internodes between one pair of side buds and the next (0 = none)
+  //   angle  : how far a side bud turns off the axis, in eighths of a turn
+  //   sub    : internodes a side bud runs once it wakes
+  //   leaf   : cells of leaf laid out sideways at each node
+  //   wake   : supply a dormant side bud needs before it will break
+  const ancestor = () => ({ height: 24, every: 4, angle: 2, sub: 6, leaf: 1, wake: 3 });
+  const label = (g) => `h${g.height} e${g.every} a${g.angle} s${g.sub} l${g.leaf} w${g.wake}`;
+  function hashG(g) {
+    let h = 2166136261 >>> 0;
+    for (const v of [g.height, g.every, g.angle, g.sub, g.leaf, g.wake]) {
+      h ^= v | 0; h = Math.imul(h, 16777619) >>> 0;
+    }
+    return h >>> 0;
+  }
+  function mutate(g) {
+    const c = { ...g };
+    if (rand() < P.MUT) {
+      const s = rand() < 0.5 ? -1 : 1;
+      switch (ri(6)) {
+        case 0: c.height = clamp(c.height + s, 2, 40); break;
+        case 1: c.every = clamp(c.every + s, 0, 10); break;
+        case 2: c.angle = clamp(c.angle + s, 1, 3); break;
+        case 3: c.sub = clamp(c.sub + s, 1, 20); break;
+        case 4: c.leaf = clamp(c.leaf + s, 0, 4); break;
+        case 5: c.wake = clamp(c.wake + s, 0, 12); break;
+      }
+    }
+    return c;
+  }
+  const byHash = new Map();
+  function intern(g) {
+    const h = hashG(g);
+    if (byHash.has(h)) return byHash.get(h);
+    genomes.push(g); byHash.set(h, genomes.length - 1);
+    return genomes.length - 1;
+  }
+
+  // ---- the two fields ------------------------------------------------------
+  const beam = new Float32Array(COLS), beam2 = new Float32Array(COLS);
+  function sunPass() {
+    beam.fill(1);
+    for (let y = 0; y < FLOOR; y++) {
+      // daylight spreads a little sideways as it comes down, so shadows are
+      // soft and a gap in a canopy is worth standing in
+      for (let x = 0; x < COLS; x++) {
+        const l = beam[wrapX(x - 1)], r = beam[wrapX(x + 1)];
+        beam2[x] = beam[x] * 0.5 + (l + r) * 0.25;
+      }
+      beam.set(beam2);
+      const row = y * COLS;
+      for (let x = 0; x < COLS; x++) {
+        const i = row + x;
+        if (cell[i] === EMPTY) { lit[i] = beam[x]; continue; }
+        lit[i] = 0;
+        sap[i] += beam[x] * P.TAKE;
+        if (P.SHADE) beam[x] *= P.SHADOW;
+      }
+    }
+  }
+  function relax() {
+    for (let p = 0; p < P.RELAX; p++) {
+      for (let y = 0; y < ROWS; y++) {
+        const up = y > 0 ? -COLS : 0, dn = y < ROWS - 1 ? COLS : 0;
+        for (let x = 0; x < COLS; x++) {
+          const i = y * COLS + x;
+          if (P.SHADE && cell[i] !== EMPTY) { t2[i] = 0; continue; }
+          if (y >= FLOOR) { t2[i] = 1; continue; }
+          if (y === 0) { t2[i] = wet[i + dn] * 0.9; continue; }
+          const l = i - 1 + (x === 0 ? COLS : 0), r = i + 1 - (x === COLS - 1 ? COLS : 0);
+          t2[i] = (wet[i + up] + wet[i + dn] + wet[l] + wet[r]) * 0.25;
+        }
+      }
+      wet.set(t2);
+    }
+  }
+
+  function drink() {
+    for (let i = 0; i < N; i++) {
+      if (cell[i] === EMPTY) continue;
+      let b = 0;
+      for (let d = 0; d < 8; d += 2) {
+        const j = nb(i, d);
+        if (j < 0 || cell[j] !== EMPTY) continue;
+        const tb = wet[j] * P.TAKE;
+        wet[j] -= tb; b += tb;
+      }
+      juice[i] += b;
+    }
+    for (let p = 0; p < P.SAPRELAX; p++) {
+      for (let i = 0; i < N; i++) {
+        if (cell[i] === EMPTY) continue;
+        let s = sap[i], w = juice[i], n = 1;
+        for (let d = 0; d < 8; d++) {
+          const j = nb(i, d);
+          if (j < 0 || cell[j] === EMPTY || pid[j] !== pid[i]) continue;
+          s += sap[j]; w += juice[j]; n++;
+        }
+        t1[i] = s / n; t2[i] = w / n;
+      }
+      const keep = 1 - P.RESPIRE;
+      for (let i = 0; i < N; i++) if (cell[i] !== EMPTY) { sap[i] = t1[i] * keep; juice[i] = t2[i] * keep; }
+    }
+  }
+
+  // ---- where a bud goes: forward, or a step off it, whichever the fields
+  //      favour, and it favours the one it is shorter of ---------------------
+  function pick(i, h) {
+    let n = 0, tot = 0;
+    const ds = [], js = [], ws = [];
+    for (let k = -1; k <= 1; k++) {
+      const d = (h + k + 8) & 7, j = nb(i, d);
+      if (j < 0 || !freeFor(j, pid[i])) continue;
+      let w = lit[j] + 1e-6;
+      if (k !== 0) w *= P.TURN;
+      ds.push(d); js.push(j); ws.push(w); tot += w; n++;
+    }
+    if (!n) return null;
+    let r = rand() * tot, k = 0;
+    while (k < n - 1 && (r -= ws[k]) > 0) k++;
+    return [js[k], ds[k]];
+  }
+
+  function freeFor(j, self) {
+    if (cell[j] !== EMPTY) return false;
+    for (let d = 0; d < 8; d++) {                 // a one cell margin between
+      const v = nb(j, d);                          // neighbours, so that every
+      if (v >= 0 && cell[v] !== EMPTY && pid[v] !== self) return false;
+    }
+    return true;
+  }
+  function put(i, j, kind, d, lf) {
+    cell[j] = kind; gid[j] = gid[i]; pid[j] = pid[i]; head[j] = d; left[j] = lf; bank[j] = 0;
+    ord[j] = ord[i];
+    sap[j] = sap[i] * 0.5; juice[j] = juice[i] * 0.5;
+    sap[i] *= 0.5; juice[i] *= 0.5;
+    liveN++;
+  }
+
+  function budEvent(i) {
+    if (Math.min(sap[i], juice[i]) < P.NEED) return;
+    const g = genomes[gid[i]];
+    if (left[i] === 0) { cell[i] = FLOWER; stats.flowered++; return; }
+
+    const go = pick(i, head[i]);
+    if (!go) { cell[i] = FLOWER; stats.flowered++; return; }
+    const [j, d] = go;
+
+    // the bud lays where it stands and steps forward
+    cell[i] = STEM;
+    put(i, j, BUD, d, left[i] - 1);
+    stats.laid++;
+
+    const node = ((ord[j] ? g.sub : g.height) - left[j]) | 0;
+
+    // a pair of dormant side buds, left behind at the node it just made
+    if (ord[j] === 0 && g.every > 0 && node > 0 && node % g.every === 0) {
+      for (const s of [-1, 1]) {
+        const bd = (d + s * g.angle + 8) & 7, b = nb(i, bd);
+        if (b >= 0 && freeFor(b, pid[i])) { put(i, b, DBUD, bd, g.sub); ord[b] = 1; stats.hubs++; }
+      }
+    }
+
+    // leaves, laid out sideways from the node and not growing afterwards
+    for (let s = -1; s <= 1; s += 2) {
+      let at = i, ld = (d + s * 2 + 8) & 7;
+      for (let k = 0; k < g.leaf; k++) {
+        const l = nb(at, ld);
+        if (l < 0 || !freeFor(l, pid[i])) break;
+        put(at, l, LEAF, ld, 0);
+        at = l;
+      }
+    }
+  }
+
+  function dbudEvent(i) {
+    const need = P.WAKE_ON ? P.NEED * (1 + genomes[gid[i]].wake) : P.NEED;
+    if (Math.min(sap[i], juice[i]) < need) return;
+    cell[i] = BUD; stats.woke++;
+  }
+
+  function flowerEvent(i) {
+    const have = Math.min(sap[i], juice[i]);
+    if (have <= 0) return;
+    const put_ = have * P.TITHE;
+    bank[i] += put_; sap[i] -= put_; juice[i] -= put_;
+    if (bank[i] < P.SEED_COST) return;
+    bank[i] -= P.SEED_COST;
+    spores.push({ x: X(i), y: Y(i), age: 0, g: intern(mutate(genomes[gid[i]])) });
+    stats.seeds++;
+    if (rand() < P.SPEND) { cell[i] = EMPTY; sap[i] = 0; juice[i] = 0; bank[i] = 0; liveN--; }
+  }
+
+  function wither(i) {
+    const c = cell[i];
+    if ((c === STEM || c === LEAF) && rand() < P.SENESCE) {
+      cell[i] = EMPTY; sap[i] = 0; juice[i] = 0; liveN--; stats.withered++; return;
+    }
+    if (Math.min(sap[i], juice[i]) > P.STARVE) return;
+    if (rand() >= P.WITHER) return;
+    cell[i] = EMPTY; sap[i] = 0; juice[i] = 0; bank[i] = 0; liveN--;
+    stats.withered++;
+  }
+
+  function sporeFall() {
+    for (let k = spores.length - 1; k >= 0; k--) {
+      const s = spores[k];
+      s.x = wrapX(s.x + ri(3) - 1);
+      s.y += rand() < P.FALL ? 1 : (rand() < 0.5 ? -1 : 0);
+      if (++s.age > P.PROP_LIFE) { spores.splice(k, 1); continue; }
+      if (s.y >= FLOOR) s.y = FLOOR - 1;
+      if (s.y < FLOOR - P.SOIL) continue;              // still on its way down
+      const j = s.y * COLS + s.x;
+      let ok = cell[j] === EMPTY;
+      if (ok) for (let dy = -2; dy <= 2 && ok; dy++)
+        for (let dx = -2; dx <= 2; dx++) {
+          const yy = s.y + dy; if (yy < 0 || yy >= FLOOR) continue;
+          if (cell[yy * COLS + wrapX(s.x + dx)] !== EMPTY) { ok = false; break; }
+        }
+      if (!ok) continue;
+      cell[j] = BUD; gid[j] = s.g; pid[j] = nextPid++; head[j] = UP;
+      left[j] = genomes[s.g].height; bank[j] = 0;
+      sap[j] = 1.2; juice[j] = 1.2;
+      liveN++; stats.germs++; spores.splice(k, 1);
+    }
+  }
+
+  function reset() {
+    cell.fill(0); gid.fill(0); pid.fill(0); ord.fill(0); head.fill(0); left.fill(0); nextPid = 1;
+    lit.fill(0); wet.fill(0); sap.fill(0); juice.fill(0); bank.fill(0);
+    genomes.length = 0; byHash.clear(); spores.length = 0; tick = 0; liveN = 0;
+    const a = intern(ancestor());
+    for (let k = 0; k < P.SEEDS; k++) {
+      const i = (FLOOR - 1 - ri(P.SOIL)) * COLS + ri(COLS);
+      if (cell[i] !== EMPTY) continue;
+      cell[i] = BUD; gid[i] = a; pid[i] = nextPid++; head[i] = UP; left[i] = genomes[a].height;
+      sap[i] = 1.2; juice[i] = 1.2; liveN++;
+    }
+    for (let p = 0; p < 80; p++) relax();
+    sunPass();
+  }
+
+  function step() {
+    sunPass(); relax(); drink();
+    const ev = (N * P.EVENTS) | 0;
+    for (let k = 0; k < ev; k++) {
+      const i = ri(N);
+      if (cell[i] === EMPTY) continue;
+      wither(i);
+      switch (cell[i]) {
+        case BUD: budEvent(i); break;
+        case DBUD: dbudEvent(i); break;
+        case FLOWER: flowerEvent(i); break;
+      }
+    }
+    sporeFall();
+    tick++;
+  }
+
+  function bodies() {
+    const seen = new Uint8Array(N), out = [];
+    for (let i = 0; i < N; i++) {
+      if (cell[i] === EMPTY || seen[i]) continue;
+      const st = [i]; seen[i] = 1;
+      let n = 0, tips = 0, forks = 0, leaves = 0, fl = 0, buds = 0, dorm = 0;
+      let minx = 1e9, maxx = -1e9, miny = 1e9, maxy = -1e9;
+      const x0 = X(i);
+      while (st.length) {
+        const v = st.pop(); n++;
+        let x = X(v) - x0;
+        if (x > COLS / 2) x -= COLS; else if (x < -COLS / 2) x += COLS;
+        const y = Y(v);
+        if (x < minx) minx = x; if (x > maxx) maxx = x;
+        if (y < miny) miny = y; if (y > maxy) maxy = y;
+        if (cell[v] === LEAF) leaves++;
+        if (cell[v] === FLOWER) fl++;
+        if (cell[v] === BUD) buds++;
+        if (cell[v] === DBUD) dorm++;
+        let d0 = 0;
+        for (let d = 0; d < 8; d++) {
+          const j = nb(v, d);
+          if (j < 0 || cell[j] === EMPTY || pid[j] !== pid[v]) continue;
+          d0++;
+          if (!seen[j]) { seen[j] = 1; st.push(j); }
+        }
+        if (d0 <= 1) tips++;
+        if (d0 >= 3) forks++;
+      }
+      out.push({ n, gid: gid[i], leaves, fl, buds, dorm, tips, forks,
+        w: maxx - minx + 1, h: maxy - miny + 1 });
+    }
+    return out;
+  }
+
+  function snapshot() {
+    const bs = bodies(), n = bs.length || 1;
+    const sum = (f) => bs.reduce((a, b) => a + f(b), 0);
+    const strains = new Map();
+    for (const b of bs) {
+      const key = label(genomes[b.gid]);
+      const e = strains.get(key) || { key, n: 0, cells: 0 };
+      e.n++; e.cells += b.n; strains.set(key, e);
+    }
+    return {
+      tick, plants: bs.length, live: liveN,
+      cells: sum((b) => b.n) / n,
+      biggest: bs.reduce((a, b) => Math.max(a, b.n), 0),
+      tall: sum((b) => b.h) / n, wide: sum((b) => b.w) / n,
+      fill: sum((b) => b.n) / Math.max(1, sum((b) => b.w * b.h)),
+      leaves: sum((b) => b.leaves) / n, flowers: sum((b) => b.fl) / n,
+      buds: sum((b) => b.buds) / n, dorm: sum((b) => b.dorm) / n,
+      forks: sum((b) => b.forks) / n, tips: sum((b) => b.tips) / n,
+      strains: strains.size,
+      top: [...strains.values()].sort((a, b) => b.n - a.n).slice(0, 6),
+      stats: { ...stats },
+    };
+  }
+
+  reset();
+  return { P, COLS, ROWS, N, FLOOR, EMPTY, STEM, LEAF, BUD, DBUD, FLOWER,
+    cell, gid, pid, ord, head, left, lit, wet, sap, juice, genomes, spores, label,
+    step, reset, snapshot, get tick() { return tick; } };
+}
+
+      /* ==== RENDERER ==== */
+      (function () {
+        if (typeof document === "undefined") return;
+        var COLS = 260, ROWS = 130, seed = (Math.random() * 1e9) | 0;
+        var opt = { SHADE: 1, WAKE_ON: 1, SENESCE: 0.00002, show: 1 };
+        var sim;
+        function build(fresh) {
+          if (fresh) seed = (Math.random() * 1e9) | 0;
+          sim = createSim({ cols: COLS, rows: ROWS, seed: seed, params: {
+            SHADE: opt.SHADE, WAKE_ON: opt.WAKE_ON, SENESCE: opt.SENESCE, SEEDS: 22 } });
+        }
+        build(false);
+        var cv = document.getElementById("c"), ctx = cv.getContext("2d", { alpha: false });
+        cv.width = COLS; cv.height = ROWS;
+        var img = ctx.createImageData(COLS, ROWS);
+        var bar = document.getElementById("bar"), hud = document.getElementById("hud");
+        var kindsEl = document.getElementById("kinds");
+        var running = true, warp = 1;
+        function button(l, f) { var b = document.createElement("button"); b.textContent = l;
+          b.addEventListener("click", f); bar.appendChild(b); return b; }
+        var pb = button("pause", function () { running = !running; pb.textContent = running ? "pause" : "run"; });
+        [1, 4, 16, 64].forEach(function (w) { button(w + "x", function () { warp = w; }); });
+        button("new world", function () { build(true); });
+        var wakeBtn = button("", function () { opt.WAKE_ON = opt.WAKE_ON ? 0 : 1; build(false); lab(); });
+        var shadeBtn = button("", function () { opt.SHADE = opt.SHADE ? 0 : 1; build(false); lab(); });
+        var ageBtn = button("", function () {
+          var st = [0.000005, 0.00002, 0.00008, 0.0002];
+          opt.SENESCE = st[(st.indexOf(opt.SENESCE) + 1) % st.length]; build(false); lab();
+        });
+        var showBtn = button("", function () { opt.show = opt.show ? 0 : 1; lab(); });
+        function lab() {
+          wakeBtn.textContent = opt.WAKE_ON ? "side buds wait for light" : "side buds always wake";
+          shadeBtn.textContent = opt.SHADE ? "plants cast shade" : "no shade (control)";
+          ageBtn.textContent = "ageing " + opt.SENESCE;
+          showBtn.textContent = opt.show ? "daylight shown" : "daylight hidden";
+        }
+        lab();
+        function draw() {
+          var d = img.data, cell = sim.cell;
+          for (var i = 0; i < sim.N; i++) {
+            var c = cell[i], r, g, b;
+            if (c === sim.EMPTY) {
+              var L = opt.show ? sim.lit[i] : 0, W = opt.show ? sim.wet[i] : 0;
+              r = 7 + L * 34; g = 10 + L * 32 + W * 10; b = 14 + W * 56 + L * 12;
+            } else if (c === sim.STEM) { r = 66; g = 108; b = 58; }
+            else if (c === sim.LEAF) { r = 118; g = 200; b = 88; }
+            else if (c === sim.BUD) { r = 218; g = 248; b = 150; }
+            else if (c === sim.DBUD) { r = 92; g = 122; b = 78; }
+            else { r = 252; g = 214; b = 142; }
+            var o = i * 4;
+            d[o] = r > 255 ? 255 : r; d[o + 1] = g > 255 ? 255 : g; d[o + 2] = b > 255 ? 255 : b; d[o + 3] = 255;
+          }
+          for (var k = 0; k < sim.spores.length; k++) {
+            var s = sim.spores[k], p = (s.y * COLS + s.x) * 4;
+            if (p >= 0 && p < d.length) { d[p] = 250; d[p + 1] = 238; d[p + 2] = 178; }
+          }
+          ctx.putImageData(img, 0, 0);
+        }
+        function paint() {
+          var q = sim.snapshot();
+          hud.innerHTML = "tick <b>" + q.tick + "</b>  plants <b>" + q.plants +
+            "</b>  cells <b>" + q.live + "</b>  body <b>" + q.cells.toFixed(1) +
+            "</b>  largest <b>" + q.biggest + "</b>  h&times;w <b>" + q.tall.toFixed(1) + "&times;" + q.wide.toFixed(1) +
+            "</b>  fill <b>" + q.fill.toFixed(2) + "</b>  leaves <b>" + q.leaves.toFixed(1) +
+            "</b>  side buds waiting <b>" + q.dorm.toFixed(1) + "</b>  woke <b>" + q.stats.woke +
+            "</b>  kinds <b>" + q.strains + "</b>  seeds <b>" + q.stats.seeds +
+            "</b>  took <b>" + q.stats.germs + "</b>";
+          var out = "";
+          for (var i = 0; i < q.top.length; i++)
+            out += "<span style='color:#e3ece5'>" + q.top[i].key + "</span> &times;" + q.top[i].n + "&nbsp;&nbsp; ";
+          kindsEl.innerHTML = out;
+        }
+        document.getElementById("keys").innerHTML =
+          "<b>a bud is a walker.</b> It lays a cell of stem where it stands and steps forward, and " +
+          "every few nodes it leaves a pair of side buds behind it, dormant. That much is taken from " +
+          "spring-fall-sand-garden, where a bud sprouts by making a Stem at its own position and then " +
+          "moving. It is a better idea than anything I had: the number of growing points multiplies " +
+          "with the body instead of staying at one.<br />" +
+          "a genome is six small numbers and each one is a part you can see: <b>h</b> nodes on the " +
+          "leading shoot, <b>e</b> nodes between one pair of side buds and the next, <b>a</b> how far " +
+          "a side bud turns off the axis, <b>s</b> nodes a side shoot runs, <b>l</b> cells of leaf at " +
+          "each node, <b>w</b> how much light a dormant side bud needs before it will break.<br />" +
+          "<b>daylight comes down in a sheet</b>, spreads a little sideways as it falls, and whatever " +
+          "it strikes takes some and shades what is under it. Water seeps up from the soil and " +
+          "diffuses. There is no bank and no toll: a bud lays a cell when the two have reached it. " +
+          "That is why <b>w</b> matters — a crowded plant keeps one axis because its side buds never " +
+          "get the light to break, and the same genome in an open gap wakes them and bushes out. " +
+          "<b>side buds always wake</b> is the control for that, and <b>no shade</b> is the control " +
+          "for whether light is doing any work at all.<br />" +
+          "measured at 9,000 ticks on two seeds: 44&ndash;46 plants, bodies of 41 and 55 cells, " +
+          "largest 164 and 168, 8.5&ndash;12.5 tall, fill 0.30&ndash;0.33, 23&ndash;30 leaves each, " +
+          "5&ndash;7 kinds. It reads as a scruffy meadow of separate tussocks. It does not yet read " +
+          "as a millefleur border: the leading shoots reach 9&ndash;13 rows rather than the 24 their " +
+          "genome allows, because a climbing bud is usually blocked by a neighbour's margin and " +
+          "flowers early. Turnover is also thin &mdash; 669 seeds set, 10 of them took.";
+        var last = 0;
+        function frame(t) {
+          if (running) { var b0 = performance.now();
+            for (var k = 0; k < warp; k++) { sim.step(); if (performance.now() - b0 > 14) break; } }
+          draw();
+          if (t - last > 400) { paint(); last = t; }
+          requestAnimationFrame(frame);
+        }
+        requestAnimationFrame(frame);
+      })();
+    </script>
+  </body>
+</html>
