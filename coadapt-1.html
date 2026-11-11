@@ -42,6 +42,8 @@ const C1 = (() => {
 function defaults(){ return {
   worldSeed: 1, W: 96, H: 96,
   keep: 1, emit: 1,          // per-cell production split; emit 0 (keep 2) = exchange-off control
+  absorbCap: Infinity,       // max byproduct one cell may absorb per tick; finite cap makes
+                             // body SIZE matter (a point saturates; more cells = more intake)
   w: 0.25, kernelMode: 'anti',
   cellCost: 8, seedCost: 64, lifespan: 256, gracePeriod: 16, minExpression: 0.5,
   D: 6,                      // seed dispersal radius (Chebyshev) from the root
@@ -202,8 +204,12 @@ class Sim {
   }
   step(){
     const t=++this.tick,cfg=this.cfg,W=this.W,H=this.H,occ=this.occ,N=W*H;
-    // phase 1: production + byproduct exchange (all reads from start-of-tick state; sums only)
+    // phase 1: production + byproduct exchange (all reads from start-of-tick state).
+    // absorbCap is per receiving cell per tick; canonical ascending emitter order keeps the
+    // cap's first-come allocation deterministic.
     const led={influx:0,kept:0,emitted:0,absorbed:0,dissipated:0};
+    const capOn=isFinite(cfg.absorbCap);
+    const taken=capOn?(this._taken&&this._taken.length===N?this._taken.fill(0):(this._taken=new Float64Array(N))):null;
     for(let idx=0;idx<N;idx++){
       const o=occ[idx]; if(!o||o.bornTick>=t) continue;
       led.influx+=cfg.keep+cfg.emit;
@@ -218,7 +224,8 @@ class Sim {
       const share=cfg.emit/F;
       for(const j of nb){
         const n=occ[j]; if(!n||n===o||n.bornTick>=t) continue;
-        const gain=share*matchK(n.hue,o.hue,cfg);
+        let gain=share*matchK(n.hue,o.hue,cfg);
+        if(capOn){ const room=cfg.absorbCap-taken[j]; if(gain>room) gain=room>0?room:0; taken[j]+=gain; }
         n.pool+=gain; led.absorbed+=gain; led.dissipated+=share-gain;
       }
     }
