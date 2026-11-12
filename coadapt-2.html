@@ -81,6 +81,10 @@ function defaults(){ return {
                              // with pool = dockReserve × min(1, Σmatch with adjacent foreign
                              // tissue / 2). Paid from seedCost economics, wasted if undocked —
                              // U22's glom-on made lawful (no energy minted)
+  germBase: 1,               // probability an undocked seed germinates at all (1 = no gate).
+  germDock: 0,               // + germDock × min(1, Σmatch/2): the nursery law — birth happens
+                             // at complementary seams; most random landings are thrown out,
+                             // so reproduction is rare and arrangement is selected directly
   seedFrom: 'root',          // 'root' | 'tip': tips launch seeds, so reach disperses further
   D: 6,                      // seed dispersal radius (Chebyshev) from the launch cell
   muTree: 0.25, muHue: 0.25, sigma: 0.05,
@@ -343,7 +347,7 @@ class Sim {
       const idx=((ly+dy+H)%H)*W+((lx+dx+W)%W);
       const facing=Math.floor(prng()*4);
       const rec=this.records.get(o.id); if(rec) rec.birthsAttempted++;
-      seeds.push({o,id,tree,hue,facing,idx});
+      seeds.push({o,id,tree,hue,facing,idx,gRoll:prng()}); // germination die, drawn at launch
     }
     const bySeed=new Map();
     for(const s of seeds){ let l=bySeed.get(s.idx); if(!l){l=[];bySeed.set(s.idx,l);} l.push(s); }
@@ -355,15 +359,15 @@ class Sim {
         const rng=this.dice('root|'+t+'|'+idx);
         win=list[Math.floor(rng()*list.length)];
       }
-      const child=this.makeOrg(win.id,win.tree,win.hue,win.facing,idx%W,(idx-idx%W)/W,t,win.o.id);
-      if(cfg.dockReserve>0){ // dowry unlocked by docking beside complementary tissue
-        const x=idx%W,y=(idx-idx%W)/W;
-        let sum=0;
-        for(const j of [y*W+((x+1)%W),y*W+((x+W-1)%W),((y+1)%H)*W+x,((y+H-1)%H)*W+x]){
-          const n=occ[j]; if(n&&n!==child) sum+=matchK(child.hue,n.hue,cfg);
-        }
-        child.pool+=cfg.dockReserve*Math.min(1,sum/2);
+      const x=idx%W,y=(idx-idx%W)/W;
+      let dockSum=0;
+      for(const j of [y*W+((x+1)%W),y*W+((x+W-1)%W),((y+1)%H)*W+x,((y+H-1)%H)*W+x]){
+        const n=occ[j]; if(n) dockSum+=matchK(win.hue,n.hue,cfg);
       }
+      // nursery gate: germination needs the dock die to clear base + dock-weighted bonus
+      if(cfg.germBase<1&&win.gRoll>=cfg.germBase+cfg.germDock*Math.min(1,dockSum/2)) continue;
+      const child=this.makeOrg(win.id,win.tree,win.hue,win.facing,x,y,t,win.o.id);
+      if(cfg.dockReserve>0) child.pool+=cfg.dockReserve*Math.min(1,dockSum/2);
       const pr=this.records.get(win.o.id); if(pr) pr.birthsSucceeded++;
     }
     // phase 4: lifecycle

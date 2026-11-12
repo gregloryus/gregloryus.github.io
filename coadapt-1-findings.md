@@ -124,6 +124,30 @@ gate rolls "copy" again), and a divergent variant that dies young can leave zero
 timelines can lawfully RECONVERGE (no litter in this world). If reconvergence should be rare,
 add a litter/memory channel (godsroll has one; port it in a later pass).
 
+## Addendum 3 (2026-11-11): nursery gate results, R2-drift clarification
+
+**R2 under emit=0 is population-size-dependent** (user observation confirmed): default dials
+(pop ~3,600) hold neutral R2 at 0.04–0.08 through 150k ticks; sparse regimes (pop 200–500)
+drift to R2 0.2–0.45 with no selection at all. Read R1 beside R2 always (drift: R1≈R2;
+selection: R1≪R2); flux is the direct selection meter.
+
+**Nursery gate (`germBase`/`germDock`: germination requires docking beside complementary
+tissue) — two new failure modes, both kept as dials (default off):**
+1. Strong gate (base ≤ 0.15): bootstrap collapse — gated births bottleneck the population,
+   drift destroys the diversity the gate needs, monoculture locks (R1 0.93), extinction or
+   stasis. Third instance of the session's deepest pattern: **obligate partnership cannot
+   precede sorted diversity; mutualism must start facultative** (cf. handoff R15 — the
+   establishment problem).
+2. Mild gate (base 0.3–0.4): **sibling crowding** — offspring of the same parent compete for
+   the same attractive dock sites and pile up around good partners, generating masses of
+   kin-kin contact edges: cA went NEGATIVE (−0.05 to −0.155). Propagule crowding, emergent.
+   Diagnosis: the missing ingredient for spatial partner-assortment is sibling DISPERSION
+   (scatter same-parent seeds apart), not stronger docking attraction. Untested; top of the
+   next-session queue. Also consider a partnered-fraction metric (share of organisms with ≥1
+   strong-match contact) — cA punishes sibling adjacency and may understate partner-choice.
+
+The shipped default regime remains matched-face + vine dials (flux ~13%, R1 low, stable).
+
 ## Suggested immediate next steps
 
 1. Partner-choice mechanism: seeds launch from tips (shape → dispersal pattern) and/or a
