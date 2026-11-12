@@ -5,8 +5,11 @@
 'use strict';
 (function(){
   const SNAP=500,MAXSNAPS=240;
+  // grip regime: stereotyped body plans (low muTree) + multi-face transfer efficiency —
+  // shape conformity drives reward magnitude, hue the sign. Best spatial assortment found.
   const VINE={keep:0.75,emit:1.5,absorbCap:1.5,seedCost:96,lifespan:192,lifespanPerCell:12,
-    exposurePow:1,upkeep:0.05,dieback:1,dockReserve:48,seedFrom:'tip',initN:150};
+    exposurePow:1,upkeep:0.05,dieback:1,dockReserve:48,seedFrom:'tip',initN:150,
+    gripN:3,muTree:0.05};
   const cfg=Object.assign(C2.defaults(),VINE);
   const q=new URLSearchParams(location.search).get('cfg');
   if(q) Object.assign(cfg,JSON.parse(q));
@@ -96,7 +99,7 @@
     if(o) selectOrg(o.id);
   };
   // dials + paste (same pattern as coadapt-1)
-  const DIALS=['keep','emit','absorbCap','exposurePow','upkeep','dieback','dockReserve',
+  const DIALS=['keep','emit','absorbCap','exposurePow','upkeep','dieback','dockReserve','gripN',
     'cellCost','seedCost','lifespan','lifespanPerCell','seedFrom','D','muTree','muHue',
     'sigma','bodyMode','W','H','initN'];
   const dialsEl=document.getElementById('dials'),dialIn={};
@@ -189,7 +192,7 @@
     if(force||sim.tick%60===0||!lastM) lastM=C2.metricsOf(sim);
     const m=lastM;
     hud.textContent='t '+sim.tick+'  orgs '+m.orgs+'  cells '+m.cells+'  mean '+m.meanCells.toFixed(1)
-      +'  cA '+m.cA.toFixed(3)+'  flux '+(100*m.fluxShare).toFixed(1)+'%'
+      +'  cA '+m.cA.toFixed(3)+'  flux '+(100*m.fluxShare).toFixed(1)+'%  paired '+(100*(m.pairedFrac||0)).toFixed(0)+'%'
       +'  R2 '+m.R2.toFixed(2)+'  R1 '+m.R1.toFixed(2)+'  axis '+m.phi.toFixed(3)
       +'  rerolls '+Object.keys(rerolls).length;
     cctx.fillStyle='#0a0a0c'; cctx.fillRect(0,0,140,140);

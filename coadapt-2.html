@@ -85,6 +85,10 @@ function defaults(){ return {
   germDock: 0,               // + germDock × min(1, Σmatch/2): the nursery law — birth happens
                              // at complementary seams; most random landings are thrown out,
                              // so reproduction is rare and arrangement is selected directly
+  gripN: 0,                  // SHAPE law (0 = off): transfer efficiency between two organisms
+                             // = min(1, sharedFaces/gripN). One touch leaks; a body that
+                             // conforms to its partner's outline earns full flux. Shape is the
+                             // magnitude of reward, hue the sign (kin still worth zero)
   seedFrom: 'root',          // 'root' | 'tip': tips launch seeds, so reach disperses further
   D: 6,                      // seed dispersal radius (Chebyshev) from the launch cell
   muTree: 0.25, muHue: 0.25, sigma: 0.05,
@@ -250,6 +254,16 @@ class Sim {
     const led={influx:0,kept:0,emitted:0,absorbed:0,dissipated:0};
     const capOn=isFinite(cfg.absorbCap);
     const taken=capOn?(this._taken&&this._taken.length===N?this._taken.fill(0):(this._taken=new Float64Array(N))):null;
+    let grip=null;
+    if(cfg.gripN>0){ // shared-face counts per unordered organism pair (shape = conformity)
+      grip=new Map();
+      for(let y=0;y<H;y++) for(let x=0;x<W;x++){
+        const a=occ[y*W+x]; if(!a) continue;
+        const r=occ[y*W+((x+1)%W)],d=occ[((y+1)%H)*W+x];
+        if(r&&r!==a){ const k=a.id<r.id?a.id+'|'+r.id:r.id+'|'+a.id; grip.set(k,(grip.get(k)||0)+1); }
+        if(d&&d!==a){ const k=a.id<d.id?a.id+'|'+d.id:d.id+'|'+a.id; grip.set(k,(grip.get(k)||0)+1); }
+      }
+    }
     for(let idx=0;idx<N;idx++){
       const o=occ[idx]; if(!o||o.bornTick>=t) continue;
       const x=idx%W,y=(idx-idx%W)/W;
@@ -279,6 +293,8 @@ class Sim {
       for(const j of nb){
         const n=occ[j]; if(!n||n===o||n.bornTick>=t) continue;
         let gain=share*matchK(n.hue,o.hue,cfg);
+        if(grip){ const k=o.id<n.id?o.id+'|'+n.id:n.id+'|'+o.id;
+          const eff=Math.min(1,(grip.get(k)||0)/cfg.gripN); gain*=eff; }
         if(capOn){ const room=cfg.absorbCap-taken[j]; if(gain>room) gain=room>0?room:0; taken[j]+=gain; }
         n.pool+=gain; led.absorbed+=gain; led.dissipated+=share-gain;
       }
@@ -486,22 +502,40 @@ function resultant1(hues){
   for(const h of hues){ c+=Math.cos(2*Math.PI*h); s+=Math.sin(2*Math.PI*h); }
   return Math.sqrt(c*c+s*s)/hues.length;
 }
+function pairGrips(sim){ // per unordered org pair: shared faces + match
+  const by=new Map();
+  for(const [a,b] of contactEdges(sim)){
+    const k=a.id<b.id?a.id+'|'+b.id:b.id+'|'+a.id;
+    let e=by.get(k); if(!e){e={a,b,n:0};by.set(k,e);} e.n++;
+  }
+  return by;
+}
 function metricsOf(sim){
   const hues=sim.orgs.map(o=>o.hue);
   const {cA,mContact,edges}=contactAssort(sim);
   const {R2,phi}=nematic(hues);
   const cells=sim.cellCount();
   const led=sim.ledger;
+  // partnered = organism holds >=1 matched (m>0.5) multi-face (>=2, or gripN) embrace
+  const need=Math.max(2,sim.cfg.gripN||0);
+  const partnered=new Set(); let gripSum=0,gripCnt=0;
+  for(const e of pairGrips(sim).values()){
+    const m=matchK(e.a.hue,e.b.hue,sim.cfg);
+    if(m>0.5){ gripSum+=e.n; gripCnt++;
+      if(e.n>=need){ partnered.add(e.a.id); partnered.add(e.b.id); } }
+  }
   return {tick:sim.tick,orgs:sim.orgs.length,cells,
     meanCells:sim.orgs.length?cells/sim.orgs.length:0,
     cA,mContact,edges,R2,phi,R1:resultant1(hues),
-    fluxShare:led.influx?led.absorbed/led.influx:0};
+    fluxShare:led.influx?led.absorbed/led.influx:0,
+    pairedFrac:sim.orgs.length?partnered.size/sim.orgs.length:0,
+    meanGrip:gripCnt?gripSum/gripCnt:0};
 }
 
 return {defaults,cyrb128,sfc32,dice,circDist,matchK,
   newNode,cloneTree,countNodes,encodeBits,decodeBits,layoutTree,eligibleSites,
   growAt,mutateTree,worldXY,SLOT_FACING,Sim,
-  contactEdges,contactAssort,nematic,resultant1,metricsOf};
+  contactEdges,contactAssort,pairGrips,nematic,resultant1,metricsOf};
 })();
 if(typeof module!=='undefined') module.exports=C2;
 // ==== COADAPT2 CORE END ====
